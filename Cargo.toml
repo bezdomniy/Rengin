@@ -1,0 +1,19 @@
+[package]
+name = "rengin"
+version = "0.1.0"
+authors = ["Ilia <ilia.shibaev@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["std"]
+
+std = ["glam/std"]
+libm = ["glam/libm"]
+
+[dependencies]
+glam = { version = "0.15.2", default-features = false }
+winit = "0.25.0"
+vulkano = "0.24"
+vulkano-win = "0.24"
