@@ -1,4 +1,4 @@
-use glam::{const_vec4, Mat4, Vec4};
+use glam::{const_vec3, const_vec4, Mat4, Vec3, Vec4};
 
 pub struct Material {
     pub colour: Vec4,
@@ -8,11 +8,13 @@ pub struct Material {
     pub shininess: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct NodeTLAS {
     pub first: Vec4,
     pub second: Vec4,
 }
 
+#[derive(Clone, Copy)]
 pub struct NodeBLAS {
     pub point1: Vec4,
     pub point2: Vec4,
@@ -28,6 +30,7 @@ pub struct Shape {
     type_enum: u32,
 }
 
+#[derive(Clone, Copy)]
 pub struct Camera {
     pub inverse_transform: Mat4,
     pub pixel_size: f32,
@@ -35,6 +38,56 @@ pub struct Camera {
     pub half_height: f32,
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Clone, Copy)]
+pub struct UBO {
+    // Compute shader uniform block object
+    light_pos: Vec4,
+    camera: Camera,
+}
+
+impl UBO {
+    pub fn new(light_pos: [f32; 4], camera: Camera) -> UBO {
+        UBO {
+            light_pos: const_vec4!(light_pos),
+            camera: camera,
+        }
+    }
+}
+
+impl Camera {
+    pub fn new(
+        position: [f32; 3],
+        centre: [f32; 3],
+        up: [f32; 3],
+        hsize: u32,
+        vsize: u32,
+        fov: f32,
+    ) -> Camera {
+        let inverse_transform =
+            Mat4::look_at_rh(const_vec3!(position), const_vec3!(centre), const_vec3!(up)).inverse();
+        let half_view = (fov / 2f32).tan();
+        let aspect = hsize as f32 / vsize as f32;
+
+        let mut half_width = half_view;
+        let mut half_height = half_view / aspect;
+
+        if aspect < 1f32 {
+            let half_height = half_view;
+            let half_width = half_view / aspect;
+        }
+        let pixel_size = (half_width * 2f32) / hsize as f32;
+
+        Camera {
+            inverse_transform,
+            half_width: half_width,
+            half_height: half_height,
+            width: hsize,
+            height: vsize,
+            pixel_size: pixel_size,
+        }
+    }
 }
 
 impl NodeBLAS {

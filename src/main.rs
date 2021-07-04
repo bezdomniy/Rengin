@@ -32,18 +32,41 @@ use vulkano::pipeline::ComputePipelineAbstract;
 
 use engine::asset_importer::import_obj;
 use renderer::vulkan_utils::RenginVulkan;
-use shaders::mandelbrot;
+// use shaders::mandelbrot;
+use shaders::raytracer;
+
+use engine::rt_primitives::{Camera, UBO};
+
+static WIDTH: u32 = 2400;
+static HEIGHT: u32 = 1800;
+static WORKGROUP_SIZE: u32 = 32;
 
 fn main() {
-    let objects = import_obj("assets/models/dragon.obj");
-    let extensions = vulkano_win::required_extensions();
+    let objects = import_obj("assets/models/cube.obj");
+    let (dragon_tlas, dragon_blas) = &objects[0];
+
+    let camera = Camera::new(
+        [1f32, 3f32, -5f32],
+        [0f32, 1f32, 0f32],
+        [0f32, 1f32, 0f32],
+        WIDTH,
+        HEIGHT,
+        1.0472f32,
+    );
+
+    let ubo = UBO::new([10f32, 10f32, -10f32, 1f32], camera);
+
+    let extensions = vulkano::instance::InstanceExtensions {
+        ext_debug_report: true,
+        ..vulkano_win::required_extensions()
+    };
     let vulkan = RenginVulkan::new(&extensions);
 
     let image = StorageImage::new(
         vulkan.device.clone(),
         ImageDimensions::Dim2d {
-            width: 1024,
-            height: 1024,
+            width: WIDTH,
+            height: HEIGHT,
             array_layers: 1,
         },
         Format::R8G8B8A8Unorm,
@@ -51,13 +74,48 @@ fn main() {
     )
     .unwrap();
 
-    let shader = mandelbrot::cs::Shader::load(vulkan.device.clone())
-        .expect("failed to create shader module");
+    let shader =
+        raytracer::cs::Shader::load(vulkan.device.clone()).expect("failed to create shader module");
 
     let compute_pipeline = Arc::new(
         ComputePipeline::new(vulkan.device.clone(), &shader.main_entry_point(), &(), None)
             .expect("failed to create compute pipeline"),
     );
+
+    // println!("{:?}", dragon_tlas);
+
+    let buf_ubo = CpuAccessibleBuffer::from_data(
+        vulkan.device.clone(),
+        BufferUsage {
+            uniform_buffer: true,
+            ..BufferUsage::none()
+        },
+        false,
+        ubo,
+    )
+    .expect("failed to create ubo buffer");
+
+    let buf_tlas = CpuAccessibleBuffer::from_iter(
+        vulkan.device.clone(),
+        BufferUsage {
+            storage_buffer: true,
+            ..BufferUsage::none()
+        },
+        false,
+        dragon_tlas.iter().cloned(),
+    )
+    .expect("failed to create tlas buffer");
+
+    let buf_blas = CpuAccessibleBuffer::from_iter(
+        vulkan.device.clone(),
+        BufferUsage {
+            storage_buffer: true,
+            ..BufferUsage::none()
+        },
+        false,
+        dragon_blas.iter().cloned(),
+    )
+    .expect("failed to create blas buffer");
 
     let set = Arc::new(
         PersistentDescriptorSet::start(
@@ -69,6 +127,12 @@ fn main() {
         )
         .add_image(ImageView::new(image.clone()).unwrap())
         .unwrap()
+        .add_buffer(buf_ubo.clone())
+        .unwrap()
+        .add_buffer(buf_tlas.clone())
+        .unwrap()
+        .add_buffer(buf_blas.clone())
+        .unwrap()
         .build()
         .unwrap(),
     );
@@ -77,9 +141,9 @@ fn main() {
         vulkan.device.clone(),
         BufferUsage::all(),
         false,
-        (0..1024 * 1024 * 4).map(|_| 0u8),
+        (0..WIDTH * HEIGHT * 4).map(|_| 0u8),
     )
-    .expect("failed to create buffer");
+    .expect("failed to create output buffer");
 
     let mut builder = AutoCommandBufferBuilder::primary(
         vulkan.device.clone(),
@@ -90,7 +154,7 @@ fn main() {
 
     builder
         .dispatch(
-            [1024 / 8, 1024 / 8, 1],
+            [WIDTH / WORKGROUP_SIZE, HEIGHT / WORKGROUP_SIZE, 1],
             compute_pipeline.clone(),
             set.clone(),
             (),
@@ -110,7 +174,7 @@ fn main() {
     future.wait(None).unwrap();
 
     let buffer_content = buf.read().unwrap();
-    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(1024, 1024, &buffer_content[..]).unwrap();
+    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(WIDTH, HEIGHT, &buffer_content[..]).unwrap();
     image.save("image.png").unwrap();
 
     // let event_loop = EventLoop::new();

@@ -14,6 +14,8 @@ use vulkano::device::Queue;
 use vulkano::buffer::BufferUsage;
 use vulkano::buffer::CpuAccessibleBuffer;
 
+use vulkano::instance::debug::{self, DebugCallback};
+
 use std::sync::Arc;
 
 pub struct RenginVulkan {
@@ -26,7 +28,38 @@ pub struct RenginVulkan {
 
 impl RenginVulkan {
     pub fn new(instance_extensions: &InstanceExtensions) -> RenginVulkan {
-        let instance = Instance::new(None, Version::V1_2, instance_extensions, None).unwrap();
+        let instance = Instance::new(
+            None,
+            Version::V1_2,
+            instance_extensions,
+            ["VK_LAYER_KHRONOS_validation"],
+        )
+        .unwrap();
+
+        // // Display warnings and errors reported by the vulkan implementation
+        // let debug_callback = DebugCallback::new(
+        //     &instance,
+        //     debug::MessageSeverity {
+        //         error: true,
+        //         warning: true,
+        //         // performance_warning: true,
+        //         information: false,
+        //         // debug: false,
+        //         verbose: false,
+        //     },
+        //     move |msg| {
+        //         let level = if msg.ty.error {
+        //             "ERROR"
+        //         } else if msg.ty.warning || msg.ty.performance_warning {
+        //             "WARNING"
+        //         } else {
+        //             unreachable!();
+        //         };
+        //         println!("{}: {}: {}", level, msg.layer_prefix, msg.description);
+        //     },
+        //     (),
+        // )
+        // .expect("failed to create debug callback");
 
         let physical = PhysicalDevice::enumerate(&instance)
             .next()

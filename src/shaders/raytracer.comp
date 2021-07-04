@@ -1,5 +1,5 @@
 #version 450
-#extension GL_ARB_separate_shader_objects : enable
+// #extension GL_ARB_separate_shader_objects : enable
 // #extension GL_EXT_debug_printf : enable
 
 // #define WIDTH 800
@@ -76,25 +76,25 @@ layout (binding = 1) uniform UBO
   Camera camera;
 } ubo;
 
-layout (std140, binding = 2) buffer Shapes
-{
-  Shape shapes[ ];
-};
+// layout (std140, binding = 2) buffer Shapes
+// {
+//   Shape shapes[ ];
+// };
 
-layout (std140, binding = 3) buffer Mesh
-{
-  mat4 inverseTransform;
-  Material material;
-  NodeBLAS nodes[];
-} mesh;
+// layout (std140, binding = 3) buffer Mesh
+// {
+//   mat4 inverseTransform;
+//   Material material;
+//   NodeBLAS nodes[];
+// } mesh;
 
-layout (std140, binding = 4) buffer TLAS {
+layout (std140, binding = 2) buffer TLAS {
     mat4 inverseTransform;
     Material material;
     NodeTLAS TLAS[];
 } tlas;
 
-layout (std140, binding = 5) buffer BLAS {
+layout (std140, binding = 3) buffer BLAS {
     NodeBLAS BLAS[];
 } blas;
 
@@ -309,27 +309,27 @@ int intersect(in vec4 rayO, in vec4 rayD, inout float resT, out vec2 uv)
   vec4 nRayO, nRayD;
   float t = -1.0;
 
-  for (int i = 0; i < shapes.length(); i++)
-  {
-    // vec4 nRayO, nRayD;
-    transformRay(shapes[i].inverseTransform, rayO, rayD, nRayO, nRayD);
+  // for (int i = 0; i < shapes.length(); i++)
+  // {
+  //   // vec4 nRayO, nRayD;
+  //   transformRay(shapes[i].inverseTransform, rayO, rayD, nRayO, nRayD);
     
-    if (shapes[i].typeEnum == 0) {
-      t = sphereIntersect(nRayO, nRayD);
-    }
-    else if (shapes[i].typeEnum == 1) {
-      t = planeIntersect(nRayO, nRayD);
-    }
-    // else if (shapes[i].typeEnum == 2) {
-    //   t = triangleIntersect(nRayO, nRayD, shapes[i].data[0], shapes[i].data[1], shapes[i].data[2], uv);
-    // }
+  //   if (shapes[i].typeEnum == 0) {
+  //     t = sphereIntersect(nRayO, nRayD);
+  //   }
+  //   else if (shapes[i].typeEnum == 1) {
+  //     t = planeIntersect(nRayO, nRayD);
+  //   }
+  //   // else if (shapes[i].typeEnum == 2) {
+  //   //   t = triangleIntersect(nRayO, nRayD, shapes[i].data[0], shapes[i].data[1], shapes[i].data[2], uv);
+  //   // }
     
-    if ((t > EPSILON) && (t < resT))
-    {
-      id = i;
-      resT = t;
-    }
-  } 
+  //   if ((t > EPSILON) && (t < resT))
+  //   {
+  //     id = i;
+  //     resT = t;
+  //   }
+  // } 
   
   // transformRay(mesh.inverseTransform, rayO, rayD, nRayO, nRayD);
   // for (int i = 0; i < mesh.nodes.length(); i++) {
@@ -518,18 +518,18 @@ vec4 renderScene(in vec4 rayO, in vec4 rayD)
   // vec3 normal;
 
   if (objectID >= 0) {
-    for (int i = 0; i < shapes.length(); i++)
-    {
-      if (objectID == i)
-      {
-        HitParams hitParams = getHitParams(rayO, rayD, t, shapes[i].inverseTransform, shapes[i].typeEnum, shapes[i].data[3], shapes[i].data[4], shapes[i].data[5], uv);
+  //   for (int i = 0; i < shapes.length(); i++)
+  //   {
+  //     if (objectID == i)
+  //     {
+  //       HitParams hitParams = getHitParams(rayO, rayD, t, shapes[i].inverseTransform, shapes[i].typeEnum, shapes[i].data[3], shapes[i].data[4], shapes[i].data[5], uv);
 
-        bool shadowed = isShadowed(hitParams.overPoint, ubo.lightPos);
-        color = lighting(shapes[i].material, ubo.lightPos,
-                                hitParams, shadowed);
-        // color = vec4(1.0,0.0,0.0,1.0);
-      }
-    }
+  //       bool shadowed = isShadowed(hitParams.overPoint, ubo.lightPos);
+  //       color = lighting(shapes[i].material, ubo.lightPos,
+  //                               hitParams, shadowed);
+  //       // color = vec4(1.0,0.0,0.0,1.0);
+  //     }
+  //   }
   }
 
   else {
