@@ -1,6 +1,6 @@
 #version 450
 // #extension GL_ARB_separate_shader_objects : enable
-// #extension GL_EXT_debug_printf : enable
+#extension GL_EXT_debug_printf : enable
 
 // #define WIDTH 800
 // #define HEIGHT 600
@@ -22,7 +22,7 @@ struct Pixel{
 //    Pixel imageData[];
 // };
 
-layout (binding = 0, rgba32f) uniform writeonly image2D imageData;
+layout (set = 0, binding = 0, rgba32f) uniform writeonly image2D imageData;
 
 struct Camera 
 {
@@ -70,7 +70,7 @@ struct NodeBLAS {
 };
 
 
-layout (binding = 1) uniform UBO 
+layout (set = 1, binding = 0) uniform UBO 
 {
   vec4 lightPos;
   Camera camera;
@@ -88,13 +88,13 @@ layout (binding = 1) uniform UBO
 //   NodeBLAS nodes[];
 // } mesh;
 
-layout (std140, binding = 2) buffer TLAS {
-    mat4 inverseTransform;
-    Material material;
+layout (std140, set = 2, binding = 0) buffer TLAS {
+    // mat4 inverseTransform;
+    // Material material;
     NodeTLAS TLAS[];
 } tlas;
 
-layout (std140, binding = 3) buffer BLAS {
+layout (std140, set = 2, binding = 1) buffer BLAS {
     NodeBLAS BLAS[];
 } blas;
 
@@ -342,7 +342,10 @@ int intersect(in vec4 rayO, in vec4 rayD, inout float resT, out vec2 uv)
   //   }
   // }
 
-  transformRay(tlas.inverseTransform, rayO, rayD, nRayO, nRayD);
+  mat4 inverseTransform = mat4(1.0);
+
+  transformRay(inverseTransform, rayO, rayD, nRayO, nRayD);
+  // transformRay(tlas.inverseTransform, rayO, rayD, nRayO, nRayD);
   intersectTLAS(nRayO, nRayD, uv, resT, id);
   
   // for (int i = 0; i < tlas.TLAS.length(); i++) {
@@ -533,12 +536,12 @@ vec4 renderScene(in vec4 rayO, in vec4 rayD)
   }
 
   else {
-      HitParams hitParams = getHitParams(rayO, rayD, t, tlas.inverseTransform, 2, blas.BLAS[-(objectID+2)].normal1, blas.BLAS[-(objectID+2)].normal2, blas.BLAS[-(objectID+2)].normal3, uv);
+      // HitParams hitParams = getHitParams(rayO, rayD, t, tlas.inverseTransform, 2, blas.BLAS[-(objectID+2)].normal1, blas.BLAS[-(objectID+2)].normal2, blas.BLAS[-(objectID+2)].normal3, uv);
 
-      bool shadowed = isShadowed(hitParams.overPoint, ubo.lightPos);
-      color = lighting(tlas.material, ubo.lightPos,
-                              hitParams, shadowed);
-      // color = vec4(0.0,1.0,0.0,1.0);
+      // bool shadowed = isShadowed(hitParams.overPoint, ubo.lightPos);
+      // color = lighting(tlas.material, ubo.lightPos,
+      //                         hitParams, shadowed);
+      color = vec4(0.0,1.0,0.0,1.0);
   }
 
 
@@ -588,10 +591,11 @@ void main() {
     
   // Basic color path
   
+  // debugPrintfEXT("%d %d",blas.BLAS.length(),tlas.TLAS.length());
   vec4 color = renderScene(rayO, rayD);
 
-
-  // vec4 color = vec4(0.0,1.0,0.0,1.0);
+  // int test = int(blas.BLAS.length() < 12768);
+  // vec4 color = vec4(0.0,test,0.0,1.0); //check if these arrays are empty.
 
           
   // store the rendered mandelbrot set into a storage buffer:

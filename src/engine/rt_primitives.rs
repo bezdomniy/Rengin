@@ -1,5 +1,6 @@
 use glam::{const_vec3, const_vec4, Mat4, Vec3, Vec4};
 
+#[repr(C)]
 pub struct Material {
     pub colour: Vec4,
     pub ambient: f32,
@@ -8,12 +9,14 @@ pub struct Material {
     pub shininess: f32,
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct NodeTLAS {
     pub first: Vec4,
     pub second: Vec4,
 }
 
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct NodeBLAS {
     pub point1: Vec4,
@@ -24,12 +27,14 @@ pub struct NodeBLAS {
     pub normal3: Vec4,
 }
 
+#[repr(C)]
 pub struct Shape {
     tlas_offset: u32,
     blas_offset: u32,
     type_enum: u32,
 }
 
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Camera {
     pub inverse_transform: Mat4,
@@ -40,6 +45,7 @@ pub struct Camera {
     pub height: u32,
 }
 
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct UBO {
     // Compute shader uniform block object
