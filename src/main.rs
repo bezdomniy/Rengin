@@ -2,39 +2,27 @@ mod engine;
 mod renderer;
 mod shaders;
 
-// use winit::{
-//     event::{Event, WindowEvent},
-//     event_loop::{ControlFlow, EventLoop},
-//     window::WindowBuilder,
-// };
+use wgpu::util::DeviceExt;
+use winit::event_loop::EventLoop;
 
 // use vulkano_win::VkSurfaceBuild;
-
-use vulkano::format::Format;
-use vulkano::image::view::ImageView;
-use vulkano::image::ImageDimensions;
-use vulkano::image::StorageImage;
 
 use image::ImageBuffer;
 use image::Rgba;
 
-use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
-use vulkano::sync::{self, GpuFuture};
-
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, DeviceLocalBuffer};
-
-use std::mem;
 use std::sync::Arc;
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
-use vulkano::pipeline::ComputePipeline;
-use vulkano::pipeline::ComputePipelineAbstract;
+use std::{future, mem};
+
+// use wgpu::BufferUsage;
 
 use engine::asset_importer::import_obj;
-use renderer::vulkan_utils::RenginVulkan;
-// use shaders::mandelbrot;
-use shaders::raytracer;
+use std::slice;
 
 use engine::rt_primitives::{Camera, NodeBLAS, NodeTLAS, UBO};
+
+use crate::renderer::wgpu_utils::RenginWgpu;
+
+use bincode;
 
 static WIDTH: u32 = 2400;
 static HEIGHT: u32 = 1800;
@@ -62,235 +50,114 @@ fn main() {
 
     let ubo = UBO::new([10f32, 10f32, -10f32, 1f32], camera);
 
-    let extensions = vulkano::instance::InstanceExtensions {
-        ext_debug_report: true,
-        ..vulkano_win::required_extensions()
-    };
-    let vulkan = RenginVulkan::new(&extensions);
+    // let buffer_content = buf_image.read().unwrap();
+    // let image = ImageBuffer::<Rgba<u8>, _>::from_raw(WIDTH, HEIGHT, &buffer_content[..]).unwrap();
+    // image.save("image.png").unwrap();
 
-    let image = StorageImage::new(
-        vulkan.device.clone(),
-        ImageDimensions::Dim2d {
-            width: WIDTH,
-            height: HEIGHT,
-            array_layers: 1,
-        },
-        Format::R8G8B8A8Unorm,
-        Some(vulkan.compute_queue.family()),
-    )
-    .unwrap();
+    let event_loop = EventLoop::new();
 
-    let shader =
-        raytracer::cs::Shader::load(vulkan.device.clone()).expect("failed to create shader module");
+    let wgpu = futures::executor::block_on(RenginWgpu::new(&event_loop));
 
-    let compute_pipeline = Arc::new(
-        ComputePipeline::new(vulkan.device.clone(), &shader.main_entry_point(), &(), None)
-            .expect("failed to create compute pipeline"),
-    );
+    let cs_module = wgpu
+        .device
+        .create_shader_module(&wgpu::include_spirv!("shaders/raytracer.spv"));
 
-    // println!("{:?}", dragon_tlas);
+    let output_buffer = wgpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (WIDTH * mem::size_of::<f32>() as u32 * HEIGHT) as u64,
+        usage: wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::COPY_DST,
+        mapped_at_creation: false,
+    });
 
-    let buf_image = CpuAccessibleBuffer::from_iter(
-        vulkan.device.clone(),
-        BufferUsage::all(),
-        false,
-        (0..WIDTH * HEIGHT * 4).map(|_| 0u8),
-    )
-    .expect("failed to create output buffer");
-
-    let buf_ubo = CpuAccessibleBuffer::from_data(
-        vulkan.device.clone(),
-        BufferUsage {
-            uniform_buffer: true,
-            ..BufferUsage::none()
-        },
-        false,
-        ubo,
-    )
-    .expect("failed to create ubo buffer");
-
-    let (buf_tlas, buf_blas) = {
-        let buf_tlas_staging = CpuAccessibleBuffer::from_iter(
-            vulkan.device.clone(),
-            BufferUsage {
-                transfer_source: true,
-                ..BufferUsage::none()
-            },
-            false,
-            dragon_tlas.iter().cloned(),
-        )
-        .expect("failed to create tlas buffer");
-
-        let buf_blas_staging = CpuAccessibleBuffer::from_iter(
-            vulkan.device.clone(),
-            BufferUsage {
-                transfer_source: true,
-                ..BufferUsage::none()
-            },
-            false,
-            dragon_blas.iter().cloned(),
-        )
-        .expect("failed to create blas buffer");
-
-        let buf_tlas = unsafe {
-            DeviceLocalBuffer::<[NodeTLAS]>::raw(
-                vulkan.device.clone(),
-                dragon_tlas.len() * mem::size_of::<NodeTLAS>(),
-                BufferUsage {
-                    storage_buffer: true,
-                    transfer_destination: true,
-                    ..BufferUsage::none()
-                },
-                vec![vulkan.transfer_queue.family()],
-            )
-            .unwrap()
-        };
-
-        let buf_blas = unsafe {
-            DeviceLocalBuffer::<[NodeBLAS]>::raw(
-                vulkan.device.clone(),
-                dragon_blas.len() * mem::size_of::<NodeBLAS>(),
-                BufferUsage {
-                    storage_buffer: true,
-                    transfer_destination: true,
-                    ..BufferUsage::none()
-                },
-                vec![vulkan.transfer_queue.family()],
-            )
-            .unwrap()
-        };
-
-        // Build command buffer which initialize our buffer.
-        let mut builder = AutoCommandBufferBuilder::primary(
-            vulkan.device.clone(),
-            vulkan.transfer_queue.family(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-        .unwrap();
-
-        println!(
-            "## {:?} {:?}",
-            buf_tlas_staging.read().unwrap().len() * mem::size_of::<NodeTLAS>(),
-            buf_blas_staging.read().unwrap().len() * mem::size_of::<NodeBLAS>(),
-        );
-
-        builder
-            .copy_buffer(buf_blas_staging, buf_blas.clone())
-            .unwrap()
-            .copy_buffer(buf_tlas_staging, buf_tlas.clone())
-            .unwrap();
-
-        let command_buffer = builder.build().unwrap();
-
-        let future = sync::now(vulkan.device.clone())
-            .then_execute(vulkan.transfer_queue.clone(), command_buffer)
-            .unwrap()
-            .then_signal_fence_and_flush()
-            .unwrap();
-
-        future.wait(None).unwrap();
-
-        (buf_blas, buf_tlas)
+    let texture_extent = wgpu::Extent3d {
+        width: WIDTH,
+        height: HEIGHT,
+        depth_or_array_layers: 1,
     };
 
-    let set_image = Arc::new(
-        PersistentDescriptorSet::start(
-            compute_pipeline
-                .layout()
-                .descriptor_set_layout(0)
-                .unwrap()
-                .clone(),
-        )
-        .add_image(ImageView::new(image.clone()).unwrap())
-        .unwrap()
-        .build()
-        .unwrap(),
-    );
+    // The render pipeline renders data into this texture
+    let texture = wgpu.device.create_texture(&wgpu::TextureDescriptor {
+        size: texture_extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba32Float,
+        usage: wgpu::TextureUsage::RENDER_ATTACHMENT | wgpu::TextureUsage::COPY_SRC,
+        label: None,
+    });
 
-    let set_uniform = Arc::new(
-        PersistentDescriptorSet::start(
-            compute_pipeline
-                .layout()
-                .descriptor_set_layout(1)
-                .unwrap()
-                .clone(),
-        )
-        .add_buffer(buf_ubo.clone())
-        .unwrap()
-        .build()
-        .unwrap(),
-    );
+    // let p_ubo: *const UBO = &ubo; // the same operator is used as with references
+    // let p_ubo: *const u8 = p_ubo as *const u8;
 
-    let set_data = Arc::new(
-        PersistentDescriptorSet::start(
-            compute_pipeline
-                .layout()
-                .descriptor_set_layout(2)
-                .unwrap()
-                .clone(),
-        )
-        .add_buffer(buf_blas.clone())
-        .unwrap()
-        .add_buffer(buf_tlas.clone())
-        .unwrap()
-        .build()
-        .unwrap(),
-    );
+    let buf_ubo = wgpu
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("UBO Buffer"),
+            // contents: unsafe { slice::from_raw_parts(p_ubo, mem::size_of::<UBO>()) },
+            contents: &bincode::serialize(&ubo).unwrap(),
+            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+        });
 
-    // let mut pool = FixedSizeDescriptorSetsPool::new(
-    //     compute_pipeline
-    //         .layout()
-    //         .descriptor_set_layout(2)
-    //         .unwrap()
-    //         .clone(),
-    // );
+    //TODO tlas and blas buffers
 
-    // let set_data = Arc::new(
-    //     pool.next()
-    //         .add_buffer(buf_tlas.clone())
-    //         .unwrap()
-    //         .add_buffer(buf_blas.clone())
-    //         .unwrap()
-    //         .build()
-    //         .unwrap(),
-    // );
-
-    let mut builder = AutoCommandBufferBuilder::primary(
-        vulkan.device.clone(),
-        vulkan.compute_queue.family(),
-        CommandBufferUsage::OneTimeSubmit,
-    )
-    .unwrap();
-
-    builder
-        .dispatch(
-            [WIDTH / WORKGROUP_SIZE, HEIGHT / WORKGROUP_SIZE, 1],
-            compute_pipeline.clone(),
-            (set_image.clone(), set_uniform.clone(), set_data.clone()),
-            (),
-            vec![],
-        )
-        .unwrap()
-        .copy_image_to_buffer(image.clone(), buf_image.clone())
-        .unwrap();
-    let command_buffer = builder.build().unwrap();
-
-    let future = sync::now(vulkan.device.clone())
-        .then_execute(vulkan.compute_queue.clone(), command_buffer)
-        .unwrap()
-        .then_signal_fence_and_flush()
-        .unwrap();
-
-    future.wait(None).unwrap();
-
-    let buffer_content = buf_image.read().unwrap();
-    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(WIDTH, HEIGHT, &buffer_content[..]).unwrap();
-    image.save("image.png").unwrap();
-
-    // let event_loop = EventLoop::new();
-    // let surface = WindowBuilder::new()
-    //     .build_vk_surface(&event_loop, vulkan.instance.clone())
-    //     .unwrap();
+    let compute_bind_group_layout =
+        wgpu.device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStage::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: wgpu::TextureFormat::Rgba32Float,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStage::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStage::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (dragon_tlas.len() * mem::size_of::<NodeTLAS>()) as _,
+                            ),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStage::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (dragon_blas.len() * mem::size_of::<NodeBLAS>()) as _,
+                            ),
+                        },
+                        count: None,
+                    },
+                ],
+                label: None,
+            });
+    let compute_pipeline_layout =
+        wgpu.device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("compute"),
+                bind_group_layouts: &[&compute_bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
     // event_loop.run(move |event, _, control_flow| {
     //     *control_flow = ControlFlow::Wait;

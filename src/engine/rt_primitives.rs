@@ -1,4 +1,5 @@
 use glam::{const_vec3, const_vec4, Mat4, Vec3, Vec4};
+use serde::{Deserialize, Serialize};
 
 #[repr(C)]
 pub struct Material {
@@ -35,7 +36,7 @@ pub struct Shape {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct Camera {
     pub inverse_transform: Mat4,
     pub pixel_size: f32,
@@ -46,7 +47,7 @@ pub struct Camera {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct UBO {
     // Compute shader uniform block object
     light_pos: Vec4,

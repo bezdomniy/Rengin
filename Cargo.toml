@@ -13,13 +13,15 @@ std = ["glam/std"]
 libm = ["glam/libm"]
 
 [dependencies]
-glam = { version = "0.17.1", default-features = false }
+glam = { version = "0.17.1", default-features = false, features = ["serde"] }
 winit = "0.25.0"
-vulkano = "0.24"
-vulkano-win = "0.24"
-vulkano-shaders = "0.24"
+#wgpu = {version = "0.9",features=["vulkan-portability"]}
+wgpu = "0.9"
 image = "0.23"
 tobj = "3.0.1"
+futures = { version = "0.3.15"}
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3.3"
 
 [profile.release] 
 debug = true

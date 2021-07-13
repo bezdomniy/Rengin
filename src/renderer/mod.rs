@@ -1,1 +1,1 @@
-pub mod vulkan_utils;
+pub mod wgpu_utils;
