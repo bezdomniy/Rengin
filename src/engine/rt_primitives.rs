@@ -11,14 +11,14 @@ pub struct Material {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct NodeTLAS {
     pub first: Vec4,
     pub second: Vec4,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct NodeBLAS {
     pub point1: Vec4,
     pub point2: Vec4,
@@ -52,6 +52,8 @@ pub struct UBO {
     // Compute shader uniform block object
     light_pos: Vec4,
     camera: Camera,
+    //TODO: fix this
+    padding: [bool; 12],
 }
 
 impl UBO {
@@ -59,6 +61,10 @@ impl UBO {
         UBO {
             light_pos: const_vec4!(light_pos),
             camera: camera,
+            //TODO: fix this
+            padding: [
+                true, true, true, true, true, true, true, true, true, true, true, true,
+            ],
         }
     }
 }
