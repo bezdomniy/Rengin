@@ -1,7 +1,10 @@
 use glam::{const_vec3, const_vec4, Mat4, Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 
+// use bytemuck::{Pod, TransparentWrapper, Zeroable};
+
 #[repr(C)]
+#[derive(Debug, Serialize)]
 pub struct Material {
     pub colour: Vec4,
     pub ambient: f32,
@@ -11,14 +14,21 @@ pub struct Material {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
+pub struct ObjectParams {
+    pub inverse_transform: Mat4,
+    pub material: Material,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[repr(C)]
 pub struct NodeTLAS {
     pub first: Vec4,
     pub second: Vec4,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct NodeBLAS {
     pub point1: Vec4,
     pub point2: Vec4,
@@ -35,6 +45,7 @@ pub struct Shape {
     type_enum: u32,
 }
 
+// TODO: fix the padding issue with this struct
 #[repr(C)]
 #[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct Camera {
@@ -43,7 +54,7 @@ pub struct Camera {
     pub half_width: f32,
     pub half_height: f32,
     pub width: u32,
-    pub height: u32,
+    // pub height: u32,
 }
 
 #[repr(C)]
@@ -53,7 +64,7 @@ pub struct UBO {
     light_pos: Vec4,
     camera: Camera,
     //TODO: fix this
-    padding: [bool; 12],
+    // padding: [bool; 12],
 }
 
 impl UBO {
@@ -62,9 +73,9 @@ impl UBO {
             light_pos: const_vec4!(light_pos),
             camera: camera,
             //TODO: fix this
-            padding: [
-                true, true, true, true, true, true, true, true, true, true, true, true,
-            ],
+            // padding: [
+            //     true, true, true, true, true, true, true, true, true, true, true, true,
+            // ],
         }
     }
 }
@@ -87,8 +98,8 @@ impl Camera {
         let mut half_height = half_view / aspect;
 
         if aspect < 1f32 {
-            let half_height = half_view;
-            let half_width = half_view / aspect;
+            half_height = half_view;
+            half_width = half_view / aspect;
         }
         let pixel_size = (half_width * 2f32) / hsize as f32;
 
@@ -97,7 +108,7 @@ impl Camera {
             half_width: half_width,
             half_height: half_height,
             width: hsize,
-            height: vsize,
+            // height: vsize,
             pixel_size: pixel_size,
         }
     }

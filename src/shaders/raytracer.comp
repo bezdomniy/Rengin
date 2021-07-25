@@ -1,6 +1,6 @@
 #version 450
 // #extension GL_ARB_separate_shader_objects : enable
-#extension GL_EXT_debug_printf : enable
+// #extension GL_EXT_debug_printf : enable
 
 // #define WIDTH 800
 // #define HEIGHT 600
@@ -22,7 +22,7 @@ struct Pixel{
 //    Pixel imageData[];
 // };
 
-layout (set = 0, binding = 0, rgba32f) uniform writeonly image2D imageData;
+layout (set = 0, binding = 0, rgba8) uniform writeonly image2D imageData;
 
 struct Camera 
 {
@@ -31,7 +31,7 @@ struct Camera
   float halfWidth;
   float halfHeight;
   int width;
-  int height;
+  // int height;
 };
 
 struct Material {
@@ -97,6 +97,11 @@ layout (std140, set = 0, binding = 2) buffer TLAS {
 layout (std140, set = 0, binding = 3) buffer BLAS {
     NodeBLAS BLAS[];
 } blas;
+
+layout (std140, set = 0, binding = 4) buffer ObjectParams {
+    mat4 inverseTransform;
+    Material material;
+} objectParams;
 
 void rayForPixel(in vec2 p, out vec4 rayO, out vec4 rayD) {
   float xOffset = (p.x + 0.5) * ubo.camera.pixelSize;
@@ -225,6 +230,8 @@ void intersectTLAS(in vec4 rayO, in vec4 rayD, out vec2 uv, inout float resT, in
   // int level = 0;
   // int branch = 0;
   // int nodeIdx = 0;
+  
+
 
   // int primitiveIndices[100];
   Node stack[MAX_STACK_SIZE];
@@ -235,6 +242,7 @@ void intersectTLAS(in vec4 rayO, in vec4 rayD, out vec2 uv, inout float resT, in
 
   while (topStack > -1) 
   {
+
     nextNode = pop_stack(stack, topStack);
     // nodeIdx = int(pow(2, nextNode.level))  - 1 + nextNode.branch;
 
@@ -342,9 +350,9 @@ int intersect(in vec4 rayO, in vec4 rayD, inout float resT, out vec2 uv)
   //   }
   // }
 
-  mat4 inverseTransform = mat4(1.0);
+  // mat4 inverseTransform = mat4(1.0);
 
-  transformRay(inverseTransform, rayO, rayD, nRayO, nRayD);
+  transformRay(objectParams.inverseTransform, rayO, rayD, nRayO, nRayD);
   // transformRay(tlas.inverseTransform, rayO, rayD, nRayO, nRayD);
   intersectTLAS(nRayO, nRayD, uv, resT, id);
   
@@ -533,15 +541,16 @@ vec4 renderScene(in vec4 rayO, in vec4 rayD)
   //       // color = vec4(1.0,0.0,0.0,1.0);
   //     }
   //   }
+      color = vec4(1.0,0.0,0.0,1.0);
   }
 
   else {
-      // HitParams hitParams = getHitParams(rayO, rayD, t, tlas.inverseTransform, 2, blas.BLAS[-(objectID+2)].normal1, blas.BLAS[-(objectID+2)].normal2, blas.BLAS[-(objectID+2)].normal3, uv);
+      HitParams hitParams = getHitParams(rayO, rayD, t, objectParams.inverseTransform, 2, blas.BLAS[-(objectID+2)].normal1, blas.BLAS[-(objectID+2)].normal2, blas.BLAS[-(objectID+2)].normal3, uv);
 
-      // bool shadowed = isShadowed(hitParams.overPoint, ubo.lightPos);
-      // color = lighting(tlas.material, ubo.lightPos,
-      //                         hitParams, shadowed);
-      color = vec4(0.0,1.0,0.0,1.0);
+      bool shadowed = isShadowed(hitParams.overPoint, ubo.lightPos);
+      color = lighting(objectParams.material, ubo.lightPos,
+                              hitParams, shadowed);
+      // color = vec4(0.0,1.0,0.0,1.0);
   }
 
 
@@ -573,7 +582,7 @@ void main() {
   In order to fit the work into workgroups, some unnecessary threads are launched.
   We terminate those threads here. 
   */
-  if(gl_GlobalInvocationID.x >= ubo.camera.width || gl_GlobalInvocationID.y >= ubo.camera.height)
+  if(gl_GlobalInvocationID.x >= ubo.camera.width || gl_GlobalInvocationID.y >= 360)
     return;
 
   // if (shapes.length() < 1) {
@@ -594,7 +603,10 @@ void main() {
   // debugPrintfEXT("%d %d",blas.BLAS.length(),tlas.TLAS.length());
   vec4 color = renderScene(rayO, rayD);
 
-  // int test = int(blas.BLAS.length() < 12768);
+  
+
+  // int test = int(tlas.TLAS[0].first.x < 0);
+  // // int test = int(ubo.camera.width == 240);
   // vec4 color = vec4(0.0,test,0.0,1.0); //check if these arrays are empty.
 
           

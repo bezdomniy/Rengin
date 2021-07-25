@@ -20,7 +20,7 @@ impl RenginWgpu {
         let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
 
         let window = WindowBuilder::new()
-            .with_title("Blub")
+            .with_title("Rengin")
             .with_resizable(true)
             .with_inner_size(winit::dpi::LogicalSize::new(1980, 1080))
             .build(&event_loop)

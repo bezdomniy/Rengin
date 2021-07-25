@@ -7,31 +7,83 @@ use winit::event_loop::EventLoop;
 
 // use vulkano_win::VkSurfaceBuild;
 
+// TODO: set $env:RUST_LOG = 'WARN' when running
+
 use image::ImageBuffer;
 use image::Rgba;
 
+use std::fs::File;
+use std::io::Write;
 use std::sync::Arc;
 use std::{future, mem};
 
 // use wgpu::BufferUsage;
+use glam::{Mat4, Vec4};
 
 use engine::asset_importer::import_obj;
 use std::slice;
 
-use engine::rt_primitives::{Camera, NodeBLAS, NodeTLAS, UBO};
+use engine::rt_primitives::{Camera, Material, NodeBLAS, NodeTLAS, ObjectParams, UBO};
 
 use crate::renderer::wgpu_utils::RenginWgpu;
 
 use bincode;
 
-static WIDTH: u32 = 2400;
-static HEIGHT: u32 = 1800;
+static WIDTH: usize = 480;
+static HEIGHT: usize = 360;
 static WORKGROUP_SIZE: u32 = 32;
+
+struct BufferDimensions {
+    width: usize,
+    height: usize,
+    unpadded_bytes_per_row: usize,
+    padded_bytes_per_row: usize,
+}
+
+impl BufferDimensions {
+    fn new(width: usize, height: usize) -> Self {
+        // let bytes_per_pixel = mem::size_of::<f32>();
+        let bytes_per_pixel = mem::size_of::<u32>();
+        let unpadded_bytes_per_row = width * bytes_per_pixel;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+        let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
+        let padded_bytes_per_row = unpadded_bytes_per_row + padded_bytes_per_row_padding;
+        println!("{:?}", padded_bytes_per_row);
+        Self {
+            width,
+            height,
+            unpadded_bytes_per_row,
+            padded_bytes_per_row,
+        }
+    }
+}
 
 fn main() {
     env_logger::init();
     let objects = import_obj("assets/models/cube.obj");
     let (dragon_tlas, dragon_blas) = &objects[0];
+
+    let objectParams = ObjectParams {
+        inverse_transform: Mat4::IDENTITY,
+        material: Material {
+            colour: Vec4::new(0.5, 0.0, 0.5, 1.0),
+            ambient: 0.1,
+            diffuse: 0.6,
+            specular: 0.6,
+            shininess: 200.0,
+        },
+    };
+
+    // println!("tlas:{:?},", dragon_tlas);
+
+    // let v = bincode::serialize(&dragon_tlas).unwrap();
+    // // println!("tlas:{:?},", v);
+
+    // let (head, body, _tail) = unsafe { v[32..64].align_to::<NodeTLAS>() };
+    // assert!(head.is_empty(), "Data was not aligned");
+    // let my_struct = &body[0];
+
+    // println!("{:?}", my_struct);
 
     println!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
     println!(
@@ -40,12 +92,14 @@ fn main() {
         mem::size_of::<NodeBLAS>()
     );
 
+    let buffer_dimensions = BufferDimensions::new(WIDTH, HEIGHT);
+
     let camera = Camera::new(
         [1f32, 3f32, -5f32],
         [0f32, 1f32, 0f32],
         [0f32, 1f32, 0f32],
-        WIDTH,
-        HEIGHT,
+        WIDTH as u32,
+        HEIGHT as u32,
         1.0472f32,
     );
 
@@ -65,14 +119,14 @@ fn main() {
 
     let output_buffer = wgpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
-        size: (WIDTH * 4 * mem::size_of::<f32>() as u32 * HEIGHT) as u64,
+        size: (buffer_dimensions.padded_bytes_per_row * buffer_dimensions.height) as u64,
         usage: wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::COPY_DST,
         mapped_at_creation: false,
     });
 
     let texture_extent = wgpu::Extent3d {
-        width: WIDTH,
-        height: HEIGHT,
+        width: buffer_dimensions.width as u32,
+        height: buffer_dimensions.height as u32,
         depth_or_array_layers: 1,
     };
 
@@ -82,7 +136,8 @@ fn main() {
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba32Float,
+        // format: wgpu::TextureFormat::Rgba32Float,
+        format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsage::STORAGE | wgpu::TextureUsage::COPY_SRC,
         label: None,
     });
@@ -111,7 +166,8 @@ fn main() {
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("TLAS storage Buffer"),
-            contents: &bincode::serialize(&dragon_tlas).unwrap(),
+            contents: &bincode::serialize(&dragon_tlas).unwrap()[8..],
+            // contents: bytemuck::bytes_of(&dragon_tlas),
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
@@ -119,7 +175,15 @@ fn main() {
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("BLAS storage Buffer"),
-            contents: &bincode::serialize(&dragon_blas).unwrap(),
+            contents: &bincode::serialize(&dragon_blas).unwrap()[8..],
+            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
+        });
+
+    let buf_op = wgpu
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Material storage Buffer"),
+            contents: &bincode::serialize(&objectParams).unwrap(),
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
@@ -132,7 +196,7 @@ fn main() {
                         visibility: wgpu::ShaderStage::COMPUTE,
                         ty: wgpu::BindingType::StorageTexture {
                             access: wgpu::StorageTextureAccess::WriteOnly,
-                            format: wgpu::TextureFormat::Rgba32Float,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
                             view_dimension: wgpu::TextureViewDimension::D2,
                         },
                         count: None,
@@ -144,8 +208,9 @@ fn main() {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
                             //TODO: fix this
-                            min_binding_size: wgpu::BufferSize::new(112 as _),
-                            // min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                            // min_binding_size: wgpu::BufferSize::new(100 as _),
+                            // min_binding_size: None,
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
                         },
                         count: None,
                     },
@@ -158,6 +223,7 @@ fn main() {
                             min_binding_size: wgpu::BufferSize::new(
                                 (dragon_tlas.len() * mem::size_of::<NodeTLAS>()) as _,
                             ),
+                            // min_binding_size: None,
                         },
                         count: None,
                     },
@@ -167,8 +233,22 @@ fn main() {
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
+                            // min_binding_size: None,
                             min_binding_size: wgpu::BufferSize::new(
                                 (dragon_blas.len() * mem::size_of::<NodeBLAS>()) as _,
+                            ),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStage::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            // min_binding_size: None,
+                            min_binding_size: wgpu::BufferSize::new(
+                                mem::size_of::<ObjectParams>() as _
                             ),
                         },
                         count: None,
@@ -213,6 +293,10 @@ fn main() {
                 binding: 3,
                 resource: buf_blas.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: buf_op.as_entire_binding(),
+            },
         ],
     });
 
@@ -243,10 +327,13 @@ fn main() {
                     layout: wgpu::ImageDataLayout {
                         offset: 0,
                         bytes_per_row: Some(
-                            std::num::NonZeroU32::new(WIDTH * 4 * mem::size_of::<f32>() as u32)
-                                .unwrap(),
+                            std::num::NonZeroU32::new(
+                                buffer_dimensions.padded_bytes_per_row as u32,
+                            )
+                            .unwrap(),
                         ),
-                        rows_per_image: std::num::NonZeroU32::new(HEIGHT as u32),
+                        rows_per_image: None,
+                        // rows_per_image: std::num::NonZeroU32::new(HEIGHT as u32),
                     },
                 },
                 texture_extent,
@@ -256,6 +343,13 @@ fn main() {
     command_encoder.pop_debug_group();
 
     wgpu.queue.submit(Some(command_encoder.finish()));
+
+    futures::executor::block_on(create_png(
+        "./image.png",
+        wgpu.device,
+        output_buffer,
+        &buffer_dimensions,
+    ));
 
     // event_loop.run(move |event, _, control_flow| {
     //     *control_flow = ControlFlow::Wait;
@@ -272,53 +366,53 @@ fn main() {
     // });
 }
 
-// async fn create_png(
-//     png_output_path: &str,
-//     device: wgpu::Device,
-//     output_buffer: wgpu::Buffer,
-//     buffer_dimensions: &BufferDimensions,
-// ) {
-//     // Note that we're not calling `.await` here.
-//     let buffer_slice = output_buffer.slice(..);
-//     let buffer_future = buffer_slice.map_async(wgpu::MapMode::Read);
+async fn create_png(
+    png_output_path: &str,
+    device: wgpu::Device,
+    output_buffer: wgpu::Buffer,
+    buffer_dimensions: &BufferDimensions,
+) {
+    // Note that we're not calling `.await` here.
+    let buffer_slice = output_buffer.slice(..);
+    let buffer_future = buffer_slice.map_async(wgpu::MapMode::Read);
 
-//     // Poll the device in a blocking manner so that our future resolves.
-//     // In an actual application, `device.poll(...)` should
-//     // be called in an event loop or on another thread.
-//     device.poll(wgpu::Maintain::Wait);
-//     // If a file system is available, write the buffer as a PNG
-//     let has_file_system_available = cfg!(not(target_arch = "wasm32"));
-//     if !has_file_system_available {
-//         return;
-//     }
+    // Poll the device in a blocking manner so that our future resolves.
+    // In an actual application, `device.poll(...)` should
+    // be called in an event loop or on another thread.
+    device.poll(wgpu::Maintain::Wait);
+    // If a file system is available, write the buffer as a PNG
+    let has_file_system_available = cfg!(not(target_arch = "wasm32"));
+    if !has_file_system_available {
+        return;
+    }
 
-//     if let Ok(()) = buffer_future.await {
-//         let padded_buffer = buffer_slice.get_mapped_range();
+    if let Ok(()) = buffer_future.await {
+        let padded_buffer = buffer_slice.get_mapped_range();
 
-//         let mut png_encoder = png::Encoder::new(
-//             File::create(png_output_path).unwrap(),
-//             buffer_dimensions.width as u32,
-//             buffer_dimensions.height as u32,
-//         );
-//         png_encoder.set_depth(png::BitDepth::Eight);
-//         png_encoder.set_color(png::ColorType::RGBA);
-//         let mut png_writer = png_encoder
-//             .write_header()
-//             .unwrap()
-//             .into_stream_writer_with_size(buffer_dimensions.unpadded_bytes_per_row);
+        let mut png_encoder = png::Encoder::new(
+            File::create(png_output_path).unwrap(),
+            buffer_dimensions.width as u32,
+            buffer_dimensions.height as u32,
+        );
+        png_encoder.set_depth(png::BitDepth::Eight);
+        png_encoder.set_color(png::ColorType::RGBA);
+        let mut png_writer = png_encoder
+            .write_header()
+            .unwrap()
+            .into_stream_writer_with_size(buffer_dimensions.unpadded_bytes_per_row);
 
-//         // from the padded_buffer we write just the unpadded bytes into the image
-//         for chunk in padded_buffer.chunks(buffer_dimensions.padded_bytes_per_row) {
-//             png_writer
-//                 .write_all(&chunk[..buffer_dimensions.unpadded_bytes_per_row])
-//                 .unwrap();
-//         }
-//         png_writer.finish().unwrap();
+        // from the padded_buffer we write just the unpadded bytes into the image
+        for chunk in padded_buffer.chunks(buffer_dimensions.padded_bytes_per_row) {
+            png_writer
+                .write_all(&chunk[..buffer_dimensions.unpadded_bytes_per_row])
+                .unwrap();
+        }
+        png_writer.finish().unwrap();
 
-//         // With the current interface, we have to make sure all mapped views are
-//         // dropped before we unmap the buffer.
-//         drop(padded_buffer);
+        // With the current interface, we have to make sure all mapped views are
+        // dropped before we unmap the buffer.
+        drop(padded_buffer);
 
-//         output_buffer.unmap();
-//     }
-// }
+        output_buffer.unmap();
+    }
+}
