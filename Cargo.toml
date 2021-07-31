@@ -25,7 +25,7 @@ env_logger = "0.8"
 log = "0.4"
 png = "0.16"
 bytemuck = { version = "1.7.2", features = [ "derive" ] }
-
+renderdoc = "0.10.1"
 
 [profile.release] 
 debug = true

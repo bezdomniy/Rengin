@@ -2,6 +2,7 @@ mod engine;
 mod renderer;
 mod shaders;
 
+use renderdoc::RenderDoc;
 use wgpu::util::DeviceExt;
 use winit::event_loop::EventLoop;
 
@@ -121,6 +122,9 @@ fn main() {
     let event_loop = EventLoop::new();
 
     let wgpu = futures::executor::block_on(RenginWgpu::new(&event_loop));
+
+    let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();
+    renderdoc_api.start_frame_capture(std::ptr::null(), std::ptr::null());
 
     let cs_module = wgpu
         .device
@@ -304,41 +308,35 @@ fn main() {
 
     command_encoder.push_debug_group("compute ray trace");
     {
-        {
-            // compute pass
-            let mut cpass =
-                command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
-            cpass.set_pipeline(&compute_pipeline);
-            cpass.set_bind_group(0, &compute_bind_group, &[]);
-            cpass.dispatch(WORKGROUP_SIZE, WORKGROUP_SIZE, 1);
-        }
-
-        {
-            command_encoder.copy_texture_to_buffer(
-                wgpu::ImageCopyTexture {
-                    texture: &texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                },
-                wgpu::ImageCopyBuffer {
-                    buffer: &output_buffer,
-                    layout: wgpu::ImageDataLayout {
-                        offset: 0,
-                        bytes_per_row: Some(
-                            std::num::NonZeroU32::new(
-                                buffer_dimensions.padded_bytes_per_row as u32,
-                            )
-                            .unwrap(),
-                        ),
-                        rows_per_image: None,
-                        // rows_per_image: std::num::NonZeroU32::new(HEIGHT as u32),
-                    },
-                },
-                texture_extent,
-            );
-        }
+        // compute pass
+        let mut cpass =
+            command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+        cpass.set_pipeline(&compute_pipeline);
+        cpass.set_bind_group(0, &compute_bind_group, &[]);
+        cpass.dispatch(WORKGROUP_SIZE, WORKGROUP_SIZE, 1);
     }
     command_encoder.pop_debug_group();
+
+    command_encoder.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+        },
+        wgpu::ImageCopyBuffer {
+            buffer: &output_buffer,
+            layout: wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(
+                    std::num::NonZeroU32::new(buffer_dimensions.padded_bytes_per_row as u32)
+                        .unwrap(),
+                ),
+                rows_per_image: None,
+                // rows_per_image: std::num::NonZeroU32::new(HEIGHT as u32),
+            },
+        },
+        texture_extent,
+    );
 
     wgpu.queue.submit(Some(command_encoder.finish()));
 
@@ -348,6 +346,8 @@ fn main() {
         output_buffer,
         &buffer_dimensions,
     ));
+
+    renderdoc_api.end_frame_capture(std::ptr::null(), std::ptr::null());
 
     // futures::executor::block_on(create_ppm(
     //     "./image.ppm",
