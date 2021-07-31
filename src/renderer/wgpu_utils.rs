@@ -38,13 +38,14 @@ impl RenginWgpu {
 
         let adapter_info = adapter.get_info();
         println!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
+        println!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
 
         let trace_dir = std::env::var("WGPU_TRACE");
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    features: adapter.features() | wgpu::Features::default(),
+                    features: wgpu::Features::empty(),
                     limits: wgpu::Limits::default(),
                 },
                 trace_dir.ok().as_ref().map(std::path::Path::new),

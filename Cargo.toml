@@ -13,19 +13,19 @@ std = ["glam/std"]
 libm = ["glam/libm"]
 
 [dependencies]
-glam = { version = "0.17.1", default-features = false, features = ["serde"] }
+glam = { version = "0.17.1", default-features = false, features = ["bytemuck"] }
 winit = "0.25.0"
 #wgpu = {version = "0.9",features=["vulkan-portability"]}
 wgpu = "0.9"
 image = "0.23"
-tobj = "3.0.1"
+tobj = "3.1.0"
 futures = { version = "0.3.15"}
-serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3.3"
 env_logger = "0.8"
 log = "0.4"
 png = "0.16"
-#bytemuck = "1.7.2"
+bytemuck = { version = "1.7.2", features = [ "derive" ] }
+
 
 [profile.release] 
 debug = true

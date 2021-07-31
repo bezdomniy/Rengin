@@ -339,21 +339,18 @@ int intersect(in vec4 rayO, in vec4 rayD, inout float resT, out vec2 uv)
   //   }
   // } 
   
-  // transformRay(mesh.inverseTransform, rayO, rayD, nRayO, nRayD);
-  // for (int i = 0; i < mesh.nodes.length(); i++) {
+  // transformRay(objectParams.inverseTransform, rayO, rayD, nRayO, nRayD);
+  // for (int i = 0; i < blas.BLAS.length(); i++) {
   //   // float t = -1.0;
-  //   t = triangleIntersect(nRayO, nRayD, mesh.nodes[i], uv);
+  //   t = triangleIntersect(nRayO, nRayD, blas.BLAS[i], uv);
   //   if ((t > EPSILON) && (t < resT))
   //   {
-  //     id = -i; //TODO fix this hack, which is to differentiate with shapes. will fail at -1
+  //     id = -(i+2); //TODO fix this hack, which is to differentiate with shapes. will fail at -1
   //     resT = t;
   //   }
   // }
 
-  // mat4 inverseTransform = mat4(1.0);
-
   transformRay(objectParams.inverseTransform, rayO, rayD, nRayO, nRayD);
-  // transformRay(tlas.inverseTransform, rayO, rayD, nRayO, nRayD);
   intersectTLAS(nRayO, nRayD, uv, resT, id);
   
   // for (int i = 0; i < tlas.TLAS.length(); i++) {
@@ -548,8 +545,10 @@ vec4 renderScene(in vec4 rayO, in vec4 rayD)
       HitParams hitParams = getHitParams(rayO, rayD, t, objectParams.inverseTransform, 2, blas.BLAS[-(objectID+2)].normal1, blas.BLAS[-(objectID+2)].normal2, blas.BLAS[-(objectID+2)].normal3, uv);
 
       bool shadowed = isShadowed(hitParams.overPoint, ubo.lightPos);
+      // bool shadowed = false;
       color = lighting(objectParams.material, ubo.lightPos,
                               hitParams, shadowed);
+      color.w = 1.0;
       // color = vec4(0.0,1.0,0.0,1.0);
   }
 
@@ -607,7 +606,7 @@ void main() {
 
   // int test = int(tlas.TLAS[0].first.x < 0);
   // // int test = int(ubo.camera.width == 240);
-  // vec4 color = vec4(0.0,test,0.0,1.0); //check if these arrays are empty.
+  // vec4 color = vec4(0.2,0.0,0.0,0.3); //check if these arrays are empty.
 
           
   // store the rendered mandelbrot set into a storage buffer:

@@ -5,29 +5,22 @@ mod shaders;
 use wgpu::util::DeviceExt;
 use winit::event_loop::EventLoop;
 
-// use vulkano_win::VkSurfaceBuild;
-
 // TODO: set $env:RUST_LOG = 'WARN' when running
 
-use image::ImageBuffer;
-use image::Rgba;
+// use image::codecs::pnm;
 
 use std::fs::File;
 use std::io::Write;
-use std::sync::Arc;
-use std::{future, mem};
+use std::mem;
 
 // use wgpu::BufferUsage;
 use glam::{Mat4, Vec4};
 
 use engine::asset_importer::import_obj;
-use std::slice;
 
 use engine::rt_primitives::{Camera, Material, NodeBLAS, NodeTLAS, ObjectParams, UBO};
 
 use crate::renderer::wgpu_utils::RenginWgpu;
-
-use bincode;
 
 static WIDTH: usize = 480;
 static HEIGHT: usize = 360;
@@ -60,23 +53,28 @@ impl BufferDimensions {
 
 fn main() {
     env_logger::init();
-    let objects = import_obj("assets/models/cube.obj");
+    let objects = import_obj("assets/models/suzanne.obj");
     let (dragon_tlas, dragon_blas) = &objects[0];
 
-    let objectParams = ObjectParams {
+    let object_params = ObjectParams {
         inverse_transform: Mat4::IDENTITY,
         material: Material {
-            colour: Vec4::new(0.5, 0.0, 0.5, 1.0),
+            colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
             ambient: 0.1,
-            diffuse: 0.6,
-            specular: 0.6,
+            diffuse: 0.7,
+            specular: 0.3,
             shininess: 200.0,
         },
     };
 
-    // println!("tlas:{:?},", dragon_tlas);
+    // for t in dragon_blas.iter() {
+    //     println!(
+    //         "point1: {:?}, point2: {:?}, point3: {:?}",
+    //         t.point1, t.point2, t.point3
+    //     );
+    // }
 
-    // let v = bincode::serialize(&dragon_tlas).unwrap();
+    // let v = bytemuck::cast_slice(&dragon_tlas);
     // // println!("tlas:{:?},", v);
 
     // let (head, body, _tail) = unsafe { v[32..64].align_to::<NodeTLAS>() };
@@ -95,7 +93,7 @@ fn main() {
     let buffer_dimensions = BufferDimensions::new(WIDTH, HEIGHT);
 
     let camera = Camera::new(
-        [1f32, 3f32, -5f32],
+        [-4f32, 2f32, -3f32],
         [0f32, 1f32, 0f32],
         [0f32, 1f32, 0f32],
         WIDTH as u32,
@@ -103,7 +101,18 @@ fn main() {
         1.0472f32,
     );
 
-    let ubo = UBO::new([10f32, 10f32, -10f32, 1f32], camera);
+    let ubo = UBO::new([-4f32, 2f32, -3f32, 1f32], camera);
+
+    println!("ubo:{:?},", ubo);
+
+    // let v = bytemuck::bytes_of(&ubo);
+    // // println!("tlas:{:?},", v);
+
+    // let (head, body, _tail) = unsafe { v.align_to::<UBO>() };
+    // assert!(head.is_empty(), "Data was not aligned");
+    // let my_struct = &body[0];
+
+    // println!("{:?}", my_struct);
 
     // let buffer_content = buf_image.read().unwrap();
     // let image = ImageBuffer::<Rgba<u8>, _>::from_raw(WIDTH, HEIGHT, &buffer_content[..]).unwrap();
@@ -144,12 +153,6 @@ fn main() {
 
     let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    println!(
-        "############# {:?} {:?}",
-        bincode::serialize(&ubo).unwrap().len(),
-        mem::size_of::<UBO>()
-    );
-
     // let p_ubo: *const UBO = &ubo; // the same operator is used as with references
     // let p_ubo: *const u8 = p_ubo as *const u8;
 
@@ -157,8 +160,7 @@ fn main() {
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("UBO Buffer"),
-            // contents: unsafe { slice::from_raw_parts(p_ubo, mem::size_of::<UBO>()) },
-            contents: &bincode::serialize(&ubo).unwrap(),
+            contents: bytemuck::bytes_of(&ubo),
             usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
         });
 
@@ -166,8 +168,7 @@ fn main() {
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("TLAS storage Buffer"),
-            contents: &bincode::serialize(&dragon_tlas).unwrap()[8..],
-            // contents: bytemuck::bytes_of(&dragon_tlas),
+            contents: bytemuck::cast_slice(&dragon_tlas),
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
@@ -175,7 +176,7 @@ fn main() {
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("BLAS storage Buffer"),
-            contents: &bincode::serialize(&dragon_blas).unwrap()[8..],
+            contents: bytemuck::cast_slice(&dragon_blas),
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
@@ -183,7 +184,7 @@ fn main() {
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Material storage Buffer"),
-            contents: &bincode::serialize(&objectParams).unwrap(),
+            contents: bytemuck::bytes_of(&object_params),
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
@@ -207,9 +208,6 @@ fn main() {
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
-                            //TODO: fix this
-                            // min_binding_size: wgpu::BufferSize::new(100 as _),
-                            // min_binding_size: None,
                             min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
                         },
                         count: None,
@@ -351,6 +349,13 @@ fn main() {
         &buffer_dimensions,
     ));
 
+    // futures::executor::block_on(create_ppm(
+    //     "./image.ppm",
+    //     wgpu.device,
+    //     output_buffer,
+    //     &buffer_dimensions,
+    // ));
+
     // event_loop.run(move |event, _, control_flow| {
     //     *control_flow = ControlFlow::Wait;
 
@@ -416,3 +421,37 @@ async fn create_png(
         output_buffer.unmap();
     }
 }
+
+// async fn create_ppm(
+//     ppm_output_path: &str,
+//     device: wgpu::Device,
+//     output_buffer: wgpu::Buffer,
+//     buffer_dimensions: &BufferDimensions,
+// ) {
+//     // Note that we're not calling `.await` here.
+//     let buffer_slice = output_buffer.slice(..);
+//     let buffer_future = buffer_slice.map_async(wgpu::MapMode::Read);
+
+//     // Poll the device in a blocking manner so that our future resolves.
+//     // In an actual application, `device.poll(...)` should
+//     // be called in an event loop or on another thread.
+//     device.poll(wgpu::Maintain::Wait);
+//     // If a file system is available, write the buffer as a PNG
+//     let has_file_system_available = cfg!(not(target_arch = "wasm32"));
+//     if !has_file_system_available {
+//         return;
+//     }
+
+//     if let Ok(()) = buffer_future.await {
+//         let padded_buffer = buffer_slice.get_mapped_range();
+
+//         let mut pnm_encoder = pnm::PnmEncoder::new(File::create(ppm_output_path).unwrap());
+//         pnm_encoder.encode(
+//             buffer_slice,
+//             buffer_dimensions.padded_bytes_per_row as u32,
+//             480,
+//             image::ColorType::Rgb8,
+//         );
+//         output_buffer.unmap();
+//     }
+// }

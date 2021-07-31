@@ -1,10 +1,7 @@
-use glam::{const_vec3, const_vec4, Mat4, Vec3, Vec4};
-use serde::{Deserialize, Serialize};
-
-// use bytemuck::{Pod, TransparentWrapper, Zeroable};
+use glam::{const_vec3, const_vec4, Mat4, Vec4};
 
 #[repr(C)]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Material {
     pub colour: Vec4,
     pub ambient: f32,
@@ -14,13 +11,13 @@ pub struct Material {
 }
 
 #[repr(C)]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ObjectParams {
     pub inverse_transform: Mat4,
     pub material: Material,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct NodeTLAS {
     pub first: Vec4,
@@ -28,7 +25,7 @@ pub struct NodeTLAS {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct NodeBLAS {
     pub point1: Vec4,
     pub point2: Vec4,
@@ -45,9 +42,8 @@ pub struct Shape {
     type_enum: u32,
 }
 
-// TODO: fix the padding issue with this struct
 #[repr(C)]
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Camera {
     pub inverse_transform: Mat4,
     pub pixel_size: f32,
@@ -58,13 +54,11 @@ pub struct Camera {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct UBO {
     // Compute shader uniform block object
     light_pos: Vec4,
     camera: Camera,
-    //TODO: fix this
-    // padding: [bool; 12],
 }
 
 impl UBO {
@@ -72,10 +66,6 @@ impl UBO {
         UBO {
             light_pos: const_vec4!(light_pos),
             camera: camera,
-            //TODO: fix this
-            // padding: [
-            //     true, true, true, true, true, true, true, true, true, true, true, true,
-            // ],
         }
     }
 }

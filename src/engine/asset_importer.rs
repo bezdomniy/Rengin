@@ -1,17 +1,45 @@
-use std::convert::TryInto;
-
 use crate::engine::rt_primitives::{NodeBLAS, NodeTLAS};
-use glam::{const_vec4, Vec4};
+use glam::const_vec4;
 use tobj;
 
 fn empty_node() -> NodeBLAS {
     NodeBLAS {
-        point1: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
-        point2: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
-        point3: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
-        normal1: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
-        normal2: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
-        normal3: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
+        point1: const_vec4!([
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY
+        ]),
+        point2: const_vec4!([
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY
+        ]),
+        point3: const_vec4!([
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY
+        ]),
+        normal1: const_vec4!([
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY
+        ]),
+        normal2: const_vec4!([
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY
+        ]),
+        normal3: const_vec4!([
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY
+        ]),
     }
 }
 
@@ -30,8 +58,15 @@ fn total_bounds() -> NodeTLAS {
 }
 
 pub fn import_obj(path: &str) -> Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)> {
-    let (models, materials) =
-        tobj::load_obj(path, &tobj::LoadOptions::default()).expect("Failed to OBJ load file");
+    let (models, materials) = tobj::load_obj(
+        path,
+        &tobj::LoadOptions {
+            // triangulate: true,
+            single_index: true,
+            ..Default::default()
+        },
+    )
+    .expect("Failed to OBJ load file");
 
     let mut ret: Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)> = vec![];
 
@@ -41,47 +76,103 @@ pub fn import_obj(path: &str) -> Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)> {
             .indices
             .chunks_exact(3)
             .into_iter()
-            .map(|triangle_indices| NodeBLAS {
-                point1: const_vec4!([
-                    model.mesh.positions[triangle_indices[0] as usize],
-                    model.mesh.positions[(triangle_indices[0] + 1) as usize],
-                    model.mesh.positions[(triangle_indices[0] + 2) as usize],
-                    1.0
-                ]),
-                point2: const_vec4!([
-                    model.mesh.positions[triangle_indices[1] as usize],
-                    model.mesh.positions[(triangle_indices[1] + 1) as usize],
-                    model.mesh.positions[(triangle_indices[1] + 2) as usize],
-                    1.0
-                ]),
-                point3: const_vec4!([
-                    model.mesh.positions[triangle_indices[2] as usize],
-                    model.mesh.positions[(triangle_indices[2] + 1) as usize],
-                    model.mesh.positions[(triangle_indices[2] + 2) as usize],
-                    1.0
-                ]),
-                normal1: const_vec4!([
-                    model.mesh.normals[triangle_indices[0] as usize],
-                    model.mesh.normals[(triangle_indices[0] + 1) as usize],
-                    model.mesh.normals[(triangle_indices[0] + 2) as usize],
-                    1.0
-                ]),
-                normal2: const_vec4!([
-                    model.mesh.normals[triangle_indices[1] as usize],
-                    model.mesh.normals[(triangle_indices[1] + 1) as usize],
-                    model.mesh.normals[(triangle_indices[1] + 2) as usize],
-                    1.0
-                ]),
-                normal3: const_vec4!([
-                    model.mesh.normals[triangle_indices[2] as usize],
-                    model.mesh.normals[(triangle_indices[2] + 1) as usize],
-                    model.mesh.normals[(triangle_indices[2] + 2) as usize],
-                    1.0
-                ]),
+            .map(|triangle_indices| {
+                // println!("{:?}", triangle_indices);
+                NodeBLAS {
+                    point1: const_vec4!([
+                        model.mesh.positions[3 * triangle_indices[0] as usize],
+                        model.mesh.positions[(3 * triangle_indices[0] + 1) as usize],
+                        model.mesh.positions[(3 * triangle_indices[0] + 2) as usize],
+                        1.0
+                    ]),
+                    point2: const_vec4!([
+                        model.mesh.positions[3 * triangle_indices[1] as usize],
+                        model.mesh.positions[(3 * triangle_indices[1] + 1) as usize],
+                        model.mesh.positions[(3 * triangle_indices[1] + 2) as usize],
+                        1.0
+                    ]),
+                    point3: const_vec4!([
+                        model.mesh.positions[3 * triangle_indices[2] as usize],
+                        model.mesh.positions[(3 * triangle_indices[2] + 1) as usize],
+                        model.mesh.positions[(3 * triangle_indices[2] + 2) as usize],
+                        1.0
+                    ]),
+                    normal1: const_vec4!([
+                        model.mesh.normals[3 * triangle_indices[0] as usize],
+                        model.mesh.normals[(3 * triangle_indices[0] + 1) as usize],
+                        model.mesh.normals[(3 * triangle_indices[0] + 2) as usize],
+                        0.0
+                    ]),
+                    normal2: const_vec4!([
+                        model.mesh.normals[3 * triangle_indices[1] as usize],
+                        model.mesh.normals[(3 * triangle_indices[1] + 1) as usize],
+                        model.mesh.normals[(3 * triangle_indices[1] + 2) as usize],
+                        0.0
+                    ]),
+                    normal3: const_vec4!([
+                        model.mesh.normals[3 * triangle_indices[2] as usize],
+                        model.mesh.normals[(3 * triangle_indices[2] + 1) as usize],
+                        model.mesh.normals[(3 * triangle_indices[2] + 2) as usize],
+                        0.0
+                    ]),
+                }
             })
             .collect();
 
+        // for model in models.iter() {
+        //     let mut triangles: Vec<NodeBLAS> = model
+        //         .mesh
+        //         .indices
+        //         .chunks_exact(3)
+        //         .into_iter()
+        //         .map(|triangle_indices| NodeBLAS {
+        //             point1: const_vec4!([
+        //                 model.mesh.positions[triangle_indices[0] as usize],
+        //                 model.mesh.positions[(triangle_indices[0] + 1) as usize],
+        //                 model.mesh.positions[(triangle_indices[0] + 2) as usize],
+        //                 1.0
+        //             ]),
+        //             point2: const_vec4!([
+        //                 model.mesh.positions[triangle_indices[1] as usize],
+        //                 model.mesh.positions[(triangle_indices[1] + 1) as usize],
+        //                 model.mesh.positions[(triangle_indices[1] + 2) as usize],
+        //                 1.0
+        //             ]),
+        //             point3: const_vec4!([
+        //                 model.mesh.positions[triangle_indices[2] as usize],
+        //                 model.mesh.positions[(triangle_indices[2] + 1) as usize],
+        //                 model.mesh.positions[(triangle_indices[2] + 2) as usize],
+        //                 1.0
+        //             ]),
+        //             normal1: const_vec4!([
+        //                 model.mesh.normals[triangle_indices[0] as usize],
+        //                 model.mesh.normals[(triangle_indices[0] + 1) as usize],
+        //                 model.mesh.normals[(triangle_indices[0] + 2) as usize],
+        //                 1.0
+        //             ]),
+        //             normal2: const_vec4!([
+        //                 model.mesh.normals[triangle_indices[1] as usize],
+        //                 model.mesh.normals[(triangle_indices[1] + 1) as usize],
+        //                 model.mesh.normals[(triangle_indices[1] + 2) as usize],
+        //                 1.0
+        //             ]),
+        //             normal3: const_vec4!([
+        //                 model.mesh.normals[triangle_indices[2] as usize],
+        //                 model.mesh.normals[(triangle_indices[2] + 1) as usize],
+        //                 model.mesh.normals[(triangle_indices[2] + 2) as usize],
+        //                 1.0
+        //             ]),
+        //         })
+        //         .collect();
+
         // TODO: probably wont be triangles vec directly, but the sorted version resulting from build_tlas
+
+        // for t in triangles.iter() {
+        //     println!(
+        //         "point1: {:?}, point2: {:?}, point3: {:?}",
+        //         t.point1, t.point2, t.point3
+        //     );
+        // }
 
         let (tlas, blas) = build(&mut triangles);
         ret.push((tlas, blas));
@@ -154,8 +245,8 @@ fn recursive_build(
         let mid = (start + end) / 2;
 
         triangle_params_unsorted.select_nth_unstable_by(mid, |a, b| {
-            a.bounds_centroid()[split_dimension]
-                .partial_cmp(&b.bounds_centroid()[split_dimension])
+            b.bounds_centroid()[split_dimension]
+                .partial_cmp(&a.bounds_centroid()[split_dimension])
                 .unwrap()
         });
 
@@ -197,8 +288,9 @@ fn recursive_build(
                 // println!("level {}, tlas_height {}", level, tlas_height);
                 let dummy_node = 2usize.pow((level + 1) as u32) + (branch * 2) - 1;
 
-                tlas[dummy_node] = total_bounds();
-                tlas.swap(dummy_node, node);
+                // tlas[dummy_node] = total_bounds();
+                // tlas.swap(dummy_node, node);
+                tlas[dummy_node] = centroid_bounds;
                 tlas[dummy_node + 1] = empty_bounds();
 
                 blas.push(empty_node());
