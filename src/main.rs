@@ -10,9 +10,13 @@ use winit::event_loop::EventLoop;
 
 // use image::codecs::pnm;
 
+use std::borrow::Cow;
+use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::mem;
+
+use core::num;
 
 // use wgpu::BufferUsage;
 use glam::{Mat4, Vec4};
@@ -23,8 +27,8 @@ use engine::rt_primitives::{Camera, Material, NodeBLAS, NodeTLAS, ObjectParams, 
 
 use crate::renderer::wgpu_utils::RenginWgpu;
 
-static WIDTH: usize = 480;
-static HEIGHT: usize = 360;
+static WIDTH: u32 = 800;
+static HEIGHT: u32 = 600;
 static WORKGROUP_SIZE: u32 = 32;
 
 struct BufferDimensions {
@@ -52,9 +56,33 @@ impl BufferDimensions {
     }
 }
 
+fn build_spv_shader(
+    src: &str,
+    path: &str,
+    device: &wgpu::Device,
+    kind: shaderc::ShaderKind,
+    compiler: &mut shaderc::Compiler,
+) -> wgpu::ShaderModule {
+    let spirv = compiler
+        .compile_into_spirv(src, kind, path, "main", None)
+        .unwrap();
+
+    let data = wgpu::util::make_spirv(spirv.as_binary_u8());
+
+    device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        label: Some("Compute Shader"),
+        source: data,
+        // flags: wgpu::ShaderFlags::default(),
+    })
+}
+
 fn main() {
     env_logger::init();
-    let objects = import_obj("assets/models/suzanne.obj");
+    let args: Vec<String> = env::args().collect();
+
+    let model_path = &args[1];
+
+    let objects = import_obj(model_path);
     let (dragon_tlas, dragon_blas) = &objects[0];
 
     let object_params = ObjectParams {
@@ -91,7 +119,7 @@ fn main() {
         mem::size_of::<NodeBLAS>()
     );
 
-    let buffer_dimensions = BufferDimensions::new(WIDTH, HEIGHT);
+    // let buffer_dimensions = BufferDimensions::new(WIDTH as usize, HEIGHT as usize);
 
     let camera = Camera::new(
         [-4f32, 2f32, -3f32],
@@ -121,37 +149,75 @@ fn main() {
 
     let event_loop = EventLoop::new();
 
-    let wgpu = futures::executor::block_on(RenginWgpu::new(&event_loop));
+    let renderer = futures::executor::block_on(RenginWgpu::new(&event_loop, WIDTH, HEIGHT));
 
     let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();
     renderdoc_api.start_frame_capture(std::ptr::null(), std::ptr::null());
 
-    let cs_module = wgpu
-        .device
-        .create_shader_module(&wgpu::include_spirv!("shaders/raytracer.spv"));
+    let mut compiler = shaderc::Compiler::new().unwrap();
+    let cs_src = include_str!("shaders/raytracer.comp");
+    let cs_module = build_spv_shader(
+        cs_src,
+        "raytracer.comp",
+        &renderer.device,
+        shaderc::ShaderKind::Compute,
+        &mut compiler,
+    );
 
-    let output_buffer = wgpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: (buffer_dimensions.padded_bytes_per_row * buffer_dimensions.height) as u64,
-        usage: wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let vt_src = include_str!("shaders/raytracer.vert");
+    let vt_module = build_spv_shader(
+        vt_src,
+        "raytracer.vert",
+        &renderer.device,
+        shaderc::ShaderKind::Vertex,
+        &mut compiler,
+    );
+
+    let fg_src = include_str!("shaders/raytracer.frag");
+    let fg_module = build_spv_shader(
+        fg_src,
+        "raytracer.frag",
+        &renderer.device,
+        shaderc::ShaderKind::Fragment,
+        &mut compiler,
+    );
+
+    // let cs_module = wgpu
+    //     .device
+    //     .create_shader_module(&wgpu::ShaderModuleDescriptor {
+    //         label: Some("Compute Shader"),
+    //         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/raytracer.wgsl"))),
+    //         flags: wgpu::ShaderFlags::default(),
+    //     });
+
+    // let cs_module = wgpu
+    //     .device
+    //     .create_shader_module(&wgpu::include_spirv!("shaders/raytracer.spv"));
+
+    // let output_buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
+    //     label: None,
+    //     size: (buffer_dimensions.padded_bytes_per_row * buffer_dimensions.height) as u64,
+    //     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+    //     mapped_at_creation: false,
+    // });
 
     let texture_extent = wgpu::Extent3d {
-        width: buffer_dimensions.width as u32,
-        height: buffer_dimensions.height as u32,
+        width: WIDTH,
+        height: HEIGHT,
         depth_or_array_layers: 1,
     };
 
     // The render pipeline renders data into this texture
-    let texture = wgpu.device.create_texture(&wgpu::TextureDescriptor {
+    let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {
         size: texture_extent,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         // format: wgpu::TextureFormat::Rgba32Float,
         format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsage::STORAGE | wgpu::TextureUsage::COPY_SRC,
+        usage: wgpu::TextureUsages::STORAGE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::TEXTURE_BINDING,
         label: None,
     });
 
@@ -160,45 +226,46 @@ fn main() {
     // let p_ubo: *const UBO = &ubo; // the same operator is used as with references
     // let p_ubo: *const u8 = p_ubo as *const u8;
 
-    let buf_ubo = wgpu
+    let buf_ubo = renderer
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("UBO Buffer"),
             contents: bytemuck::bytes_of(&ubo),
-            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsages::UNIFORM,
         });
 
-    let buf_tlas = wgpu
+    let buf_tlas = renderer
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("TLAS storage Buffer"),
             contents: bytemuck::cast_slice(&dragon_tlas),
-            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE,
         });
 
-    let buf_blas = wgpu
+    let buf_blas = renderer
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("BLAS storage Buffer"),
             contents: bytemuck::cast_slice(&dragon_blas),
-            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE,
         });
 
-    let buf_op = wgpu
+    let buf_op = renderer
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Material storage Buffer"),
             contents: bytemuck::bytes_of(&object_params),
-            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE,
         });
 
     let compute_bind_group_layout =
-        wgpu.device
+        renderer
+            .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStage::COMPUTE,
+                        visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::StorageTexture {
                             access: wgpu::StorageTextureAccess::WriteOnly,
                             format: wgpu::TextureFormat::Rgba8Unorm,
@@ -208,7 +275,7 @@ fn main() {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
-                        visibility: wgpu::ShaderStage::COMPUTE,
+                        visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -218,7 +285,7 @@ fn main() {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
-                        visibility: wgpu::ShaderStage::COMPUTE,
+                        visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
@@ -231,7 +298,7 @@ fn main() {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 3,
-                        visibility: wgpu::ShaderStage::COMPUTE,
+                        visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
@@ -244,7 +311,7 @@ fn main() {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 4,
-                        visibility: wgpu::ShaderStage::COMPUTE,
+                        visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
@@ -259,50 +326,181 @@ fn main() {
                 label: None,
             });
     let compute_pipeline_layout =
-        wgpu.device
+        renderer
+            .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("compute"),
                 bind_group_layouts: &[&compute_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
-    let compute_pipeline = wgpu
+    // create render pipeline
+
+    let sampler = renderer
         .device
-        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Compute pipeline"),
-            layout: Some(&compute_pipeline_layout),
-            module: &cs_module,
-            entry_point: "main",
+        .create_sampler(&wgpu::SamplerDescriptor::default());
+
+    let bind_group_layout =
+        renderer
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: core::num::NonZeroU32::new(1),
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler {
+                            comparison: false,
+                            filtering: true,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+    let bind_group = renderer
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+            layout: &bind_group_layout,
+            label: Some("bind group"),
         });
 
-    let compute_bind_group = wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &compute_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&texture_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: buf_ubo.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: buf_tlas.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: buf_blas.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: buf_op.as_entire_binding(),
-            },
-        ],
-    });
+    let render_pipeline_layout =
+        renderer
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("render"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
-    let mut command_encoder = wgpu
+    let render_pipeline = renderer
+        .device
+        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None,
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &vt_module,
+                entry_point: "main",
+                buffers: &[
+                    // wgpu::VertexBufferLayout {
+                    //     array_stride: 4 * 4,
+                    //     step_mode: wgpu::VertexStepMode::Instance,
+                    //     attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2],
+                    // },
+                    // wgpu::VertexBufferLayout {
+                    //     array_stride: 2 * 4,
+                    //     step_mode: wgpu::VertexStepMode::Vertex,
+                    //     attributes: &wgpu::vertex_attr_array![2 => Float32x2],
+                    // },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &fg_module,
+                entry_point: "main",
+                targets: &[renderer
+                    .window_surface
+                    .get_preferred_format(&renderer.adapter)
+                    .unwrap()
+                    .into()],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+        });
+
+    let compute_pipeline =
+        renderer
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Compute pipeline"),
+                layout: Some(&compute_pipeline_layout),
+                module: &cs_module,
+                entry_point: "main",
+            });
+
+    let compute_bind_group = renderer
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &compute_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: buf_ubo.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: buf_tlas.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: buf_blas.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: buf_op.as_entire_binding(),
+                },
+            ],
+        });
+
+    let frame = match renderer.window_surface.get_current_frame() {
+        Ok(frame) => frame,
+        Err(_) => {
+            renderer
+                .window_surface
+                .configure(&renderer.device, &renderer.config);
+            renderer
+                .window_surface
+                .get_current_frame()
+                .expect("Failed to acquire next surface texture!")
+        }
+    };
+    let view = frame
+        .output
+        .texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
+
+    // create render pass descriptor and its color attachments
+    let color_attachments = [wgpu::RenderPassColorAttachment {
+        view: &view,
+        resolve_target: None,
+        ops: wgpu::Operations {
+            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+            store: true,
+        },
+    }];
+    let render_pass_descriptor = wgpu::RenderPassDescriptor {
+        label: None,
+        color_attachments: &color_attachments,
+        depth_stencil_attachment: None,
+    };
+
+    let mut command_encoder = renderer
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
@@ -317,41 +515,49 @@ fn main() {
     }
     command_encoder.pop_debug_group();
 
-    command_encoder.copy_texture_to_buffer(
-        wgpu::ImageCopyTexture {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-        },
-        wgpu::ImageCopyBuffer {
-            buffer: &output_buffer,
-            layout: wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(
-                    std::num::NonZeroU32::new(buffer_dimensions.padded_bytes_per_row as u32)
-                        .unwrap(),
-                ),
-                rows_per_image: None,
-                // rows_per_image: std::num::NonZeroU32::new(HEIGHT as u32),
-            },
-        },
-        texture_extent,
-    );
+    command_encoder.push_debug_group("render texture");
+    {
+        // render pass
+        let mut rpass = command_encoder.begin_render_pass(&render_pass_descriptor);
+        rpass.set_pipeline(&render_pipeline);
+        rpass.set_bind_group(0, &bind_group, &[]);
+        // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
+        // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
+        rpass.draw(0..3, 0..1);
+    }
+    command_encoder.pop_debug_group();
 
-    wgpu.queue.submit(Some(command_encoder.finish()));
+    renderer.queue.submit(Some(command_encoder.finish()));
 
-    futures::executor::block_on(create_png(
-        "./image.png",
-        wgpu.device,
-        output_buffer,
-        &buffer_dimensions,
-    ));
+    // command_encoder.copy_texture_to_buffer(
+    //     texture.as_image_copy(),
+    //     wgpu::ImageCopyBuffer {
+    //         buffer: &output_buffer,
+    //         layout: wgpu::ImageDataLayout {
+    //             offset: 0,
+    //             bytes_per_row: Some(
+    //                 std::num::NonZeroU32::new(buffer_dimensions.padded_bytes_per_row as u32)
+    //                     .unwrap(),
+    //             ),
+    //             rows_per_image: None,
+    //             // rows_per_image: std::num::NonZeroU32::new(HEIGHT as u32),
+    //         },
+    //     },
+    //     texture_extent,
+    // );
+
+    // futures::executor::block_on(create_png(
+    //     "./image.png",
+    //     renderer.device,
+    //     output_buffer,
+    //     &buffer_dimensions,
+    // ));
 
     renderdoc_api.end_frame_capture(std::ptr::null(), std::ptr::null());
 
     // futures::executor::block_on(create_ppm(
     //     "./image.ppm",
-    //     wgpu.device,
+    //     renderer.device,
     //     output_buffer,
     //     &buffer_dimensions,
     // ));

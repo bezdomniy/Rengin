@@ -88,17 +88,17 @@ layout (set = 0, binding = 1) uniform UBO
 //   NodeBLAS nodes[];
 // } mesh;
 
-layout (std140, set = 0, binding = 2) buffer TLAS {
+layout (std140, set = 0, binding = 2) readonly buffer TLAS {
     // mat4 inverseTransform;
     // Material material;
     NodeTLAS TLAS[];
 } tlas;
 
-layout (std140, set = 0, binding = 3) buffer BLAS {
+layout (std140, set = 0, binding = 3) readonly  buffer BLAS {
     NodeBLAS BLAS[];
 } blas;
 
-layout (std140, set = 0, binding = 4) buffer ObjectParams {
+layout (std140, set = 0, binding = 4) readonly buffer ObjectParams {
     mat4 inverseTransform;
     Material material;
 } objectParams;
