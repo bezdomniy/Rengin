@@ -581,8 +581,10 @@ void main() {
   In order to fit the work into workgroups, some unnecessary threads are launched.
   We terminate those threads here. 
   */
-  if(gl_GlobalInvocationID.x >= ubo.camera.width || gl_GlobalInvocationID.y >= 360)
+  // if(gl_GlobalInvocationID.x >= 200 || gl_GlobalInvocationID.y >= 100)
+  if(gl_GlobalInvocationID.x >= ubo.camera.width || gl_GlobalInvocationID.y >= 300)
     return;
+
 
   // if (shapes.length() < 1) {
   // // if (ubo.camera.halfHeight > 0.0) {
@@ -594,8 +596,13 @@ void main() {
   // return;
 
   vec4 rayO, rayD;
-
   rayForPixel(gl_GlobalInvocationID.xy, rayO, rayD);
+
+	// ivec2 dim = imageSize(imageData);
+	// vec2 uv = vec2(gl_GlobalInvocationID.xy) / dim;
+  // vec4 rayO = ubo.camera.inverseTransform * vec4(0.0, 0.0, 0.0, 1.0);
+  // float aspectRatio = 4.0/3.0;
+	// vec4 rayD = vec4(normalize(vec3((-1.0 + 2.0 * uv) * vec2(aspectRatio, 1.0), -1.0)),0.0);
     
   // Basic color path
   

@@ -12,6 +12,9 @@ use winit::event_loop::EventLoop;
 
 // use image::codecs::pnm;
 
+use std::thread;
+use std::time::{Duration, Instant};
+
 use std::collections::HashMap;
 // use std::borrow::Cow;
 // use std::collections::HashMap;
@@ -31,34 +34,9 @@ use engine::rt_primitives::{Camera, Material, NodeBLAS, NodeTLAS, ObjectParams, 
 
 use crate::renderer::wgpu_utils::RenginWgpu;
 
-static WIDTH: u32 = 800;
-static HEIGHT: u32 = 600;
+static WIDTH: u32 = 400;
+static HEIGHT: u32 = 300;
 static WORKGROUP_SIZE: u32 = 32;
-
-struct BufferDimensions {
-    width: usize,
-    height: usize,
-    unpadded_bytes_per_row: usize,
-    padded_bytes_per_row: usize,
-}
-
-impl BufferDimensions {
-    fn new(width: usize, height: usize) -> Self {
-        // let bytes_per_pixel = mem::size_of::<f32>();
-        let bytes_per_pixel = mem::size_of::<u32>();
-        let unpadded_bytes_per_row = width * bytes_per_pixel;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
-        let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
-        let padded_bytes_per_row = unpadded_bytes_per_row + padded_bytes_per_row_padding;
-        println!("{:?}", padded_bytes_per_row);
-        Self {
-            width,
-            height,
-            unpadded_bytes_per_row,
-            padded_bytes_per_row,
-        }
-    }
-}
 
 struct RenderApp {
     event_loop: EventLoop<()>,
@@ -91,8 +69,14 @@ impl RenderApp {
     }
 
     fn init(&mut self, model_path: &str) {
+        let mut now = Instant::now();
+        log::info!("Loading models...");
         self.objects = Some(import_obj(model_path));
         // let (dragon_tlas, dragon_blas) = &objects[0];
+        log::info!(
+            "Finished loading models in {} millis.",
+            now.elapsed().as_millis()
+        );
 
         self.object_params = Some(ObjectParams {
             inverse_transform: Mat4::IDENTITY,
@@ -105,8 +89,8 @@ impl RenderApp {
             },
         });
 
-        // println!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
-        // println!(
+        // log::info!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
+        // log::info!(
         //     "tlas:{:?}, blas{:?}",
         //     mem::size_of::<NodeTLAS>(),
         //     mem::size_of::<NodeBLAS>()
@@ -123,22 +107,40 @@ impl RenderApp {
 
         self.ubo = Some(UBO::new([-4f32, 2f32, -3f32, 1f32], camera));
 
-        // println!("ubo:{:?},", ubo);
+        // log::info!("ubo:{:?},", ubo);
+        now = Instant::now();
+        log::info!("Building shaders...");
         self.shaders = Some(self.create_shaders());
+        log::info!(
+            "Finshed building shaders in {} millis",
+            now.elapsed().as_millis()
+        );
     }
 
     fn create_shaders(&mut self) -> HashMap<&'static str, ShaderModule> {
         let cs_src = include_str!("shaders/raytracer.comp");
-        let cs_module =
-            self.build_spv_shader(cs_src, "raytracer.comp", shaderc::ShaderKind::Compute);
+        let cs_module = self.build_spv_shader(
+            cs_src,
+            "raytracer.comp",
+            shaderc::ShaderKind::Compute,
+            "compute shader",
+        );
 
         let vt_src = include_str!("shaders/raytracer.vert");
-        let vt_module =
-            self.build_spv_shader(vt_src, "raytracer.vert", shaderc::ShaderKind::Vertex);
+        let vt_module = self.build_spv_shader(
+            vt_src,
+            "raytracer.vert",
+            shaderc::ShaderKind::Vertex,
+            "vertex shader",
+        );
 
         let fg_src = include_str!("shaders/raytracer.frag");
-        let fg_module =
-            self.build_spv_shader(fg_src, "raytracer.frag", shaderc::ShaderKind::Fragment);
+        let fg_module = self.build_spv_shader(
+            fg_src,
+            "raytracer.frag",
+            shaderc::ShaderKind::Fragment,
+            "fragment shader",
+        );
 
         let mut shaders: HashMap<&'static str, ShaderModule> = HashMap::new();
         shaders.insert("comp", cs_module);
@@ -153,6 +155,7 @@ impl RenderApp {
         src: &str,
         path: &str,
         kind: shaderc::ShaderKind,
+        label: &str,
     ) -> wgpu::ShaderModule {
         let spirv = self
             .spv_compiler
@@ -164,7 +167,7 @@ impl RenderApp {
         self.renderer
             .device
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
-                label: Some("Compute Shader"),
+                label: Some(label),
                 source: data,
                 // flags: wgpu::ShaderFlags::default(),
             })
@@ -185,6 +188,9 @@ fn main() {
     let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();
     renderdoc_api.start_frame_capture(std::ptr::null(), std::ptr::null());
 
+    let mut now = Instant::now();
+    log::info!("Creating buffers...");
+
     let texture_extent = wgpu::Extent3d {
         width: WIDTH,
         height: HEIGHT,
@@ -203,8 +209,10 @@ fn main() {
             // format: wgpu::TextureFormat::Rgba32Float,
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::COPY_DST
+                // | wgpu::TextureUsages::COPY_DST
+                // | wgpu::TextureUsages::COPY_SRC
                 | wgpu::TextureUsages::TEXTURE_BINDING,
+            // | wgpu::TextureUsages::RENDER_ATTACHMENT,
             label: None,
         });
 
@@ -245,6 +253,11 @@ fn main() {
             contents: bytemuck::bytes_of(&app.object_params.unwrap()),
             usage: wgpu::BufferUsages::STORAGE,
         });
+
+    log::info!(
+        "Finshed loading buffers in {} millis",
+        now.elapsed().as_millis()
+    );
 
     let compute_bind_group_layout =
         app.renderer
@@ -494,7 +507,7 @@ fn main() {
             command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
         cpass.set_pipeline(&compute_pipeline);
         cpass.set_bind_group(0, &compute_bind_group, &[]);
-        cpass.dispatch(WORKGROUP_SIZE, WORKGROUP_SIZE, 1);
+        cpass.dispatch(WIDTH / WORKGROUP_SIZE, HEIGHT / WORKGROUP_SIZE, 1);
     }
     command_encoder.pop_debug_group();
 
@@ -511,6 +524,8 @@ fn main() {
     command_encoder.pop_debug_group();
 
     app.renderer.queue.submit(Some(command_encoder.finish()));
-
+    // log::info!("sleeping...");
+    // thread::sleep(Duration::from_millis(4000));
+    // log::info!("waking.");
     renderdoc_api.end_frame_capture(std::ptr::null(), std::ptr::null());
 }
