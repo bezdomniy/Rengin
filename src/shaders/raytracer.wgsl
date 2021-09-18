@@ -254,6 +254,139 @@ fn intersect(ray: Ray) -> Intersection {
     return intersectTLAS(nRay);
 }
 
+fn normalToWorld(normal: vec4<f32>) -> vec4<f32>
+{
+    var ret: vec4<f32> = transpose(objectParams.inverseTransform) * normal;
+    ret.w = 0.0;
+    ret = normalize(ret);
+
+    return ret;
+}
+
+fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4<f32> {
+    var n: vec4<f32> = vec4<f32>(0.0);
+    let objectPoint: vec4<f32> = objectParams.inverseTransform * point; // World to object
+
+    if (typeEnum == 0) {
+        n = objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    elseif (typeEnum == 1) {
+        n = vec4<f32>(0.0,1.0,0.0,0.0);
+    }
+    elseif (typeEnum == 2) {
+        let shape: NodeBLAS = blas.BLAS[-(intersection.id+2)];
+        n = shape.normal2 * intersection.uv.x + shape.normal3 * intersection.uv.y + shape.normal1 * (1.0 - intersection.uv.x - intersection.uv.y);
+        n.w = 0.0;
+    }
+    return normalToWorld(n);
+}
+
+struct HitParams {
+    point: vec4<f32>;
+    normalv: vec4<f32>;
+    eyev: vec4<f32>;
+    reflectv: vec4<f32>;
+    overPoint: vec4<f32>;
+    underPoint: vec4<f32>;
+};
+
+fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: i32) -> HitParams
+{
+    var hitParams: HitParams;
+    hitParams.point =
+        ray.rayO + normalize(ray.rayD) * intersection.closestT;
+    // TODO check that uv only null have using none-uv normalAt version
+    hitParams.normalv =
+        normalAt(hitParams.point, intersection, typeEnum);
+    hitParams.eyev = -ray.rayD;
+
+    if (dot(hitParams.normalv, hitParams.eyev) < 0.0)
+    {
+        // intersection.comps->inside = true;
+        hitParams.normalv = -hitParams.normalv;
+    }
+    // else
+    // {
+    //   intersection.comps->inside = false;
+    // }
+
+    hitParams.reflectv =
+        reflect(ray.rayD, hitParams.normalv);
+    hitParams.overPoint =
+        hitParams.point + hitParams.normalv * EPSILON;
+    hitParams.underPoint =
+        hitParams.point - hitParams.normalv * EPSILON;
+
+    return hitParams;
+}
+
+fn isShadowed(point: vec4<f32>, lightPos: vec4<f32>) -> bool
+{
+  let v: vec4<f32> = lightPos - point;
+  let distance: f32 = length(v);
+  let direction: vec4<f32> = normalize(v);
+
+  let intersection: Intersection = intersect(Ray(point,direction));
+
+  if (intersection.closestT > EPSILON && intersection.closestT < distance)
+  {
+    return true;
+  }
+
+  return false;
+}
+
+fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams, shadowed: bool) -> vec4<f32>
+{
+  // return material.colour;
+  var diffuse: vec4<f32>;
+  var specular: vec4<f32>;
+
+  let intensity: vec4<f32> = vec4<f32>(1.0,1.0,1.0,1.0); // TODO temp placeholder
+
+  let effectiveColour: vec4<f32> = intensity * material.colour; //* light->intensity;
+
+  let ambient: vec4<f32> = effectiveColour * material.ambient;
+  // vec4 ambient = vec4(0.3,0.0,0.0,1.0);
+  if (shadowed) {
+    return ambient;
+  }
+
+  let lightv: vec4<f32> = normalize(lightPos - hitParams.overPoint);
+
+  let lightDotNormal: f32 = dot(lightv, hitParams.normalv);
+  if (lightDotNormal < 0.0)
+  {
+    diffuse = vec4<f32>(0.0, 0.0, 0.0,1.0);
+    specular = vec4<f32>(0.0, 0.0, 0.0,1.0);
+  }
+  else
+  {
+    // compute the diffuse contribution​
+    diffuse = effectiveColour * material.diffuse * lightDotNormal;
+
+    // reflect_dot_eye represents the cosine of the angle between the
+    // reflection vector and the eye vector. A negative number means the
+    // light reflects away from the eye.​
+    let reflectv: vec4<f32> = reflect(-lightv, hitParams.normalv);
+    let reflectDotEye: f32 = dot(reflectv, hitParams.eyev);
+
+    if (reflectDotEye <= 0.0)
+    {
+      specular = vec4<f32>(0.0, 0.0, 0.0,1.0);
+    }
+    else
+    {
+      // compute the specular contribution​
+      let factor: f32 = pow(reflectDotEye, material.shininess);
+      specular = intensity * material.specular * factor;
+    }
+  }
+
+  return (ambient + diffuse + specular);
+}
+
+
 fn renderScene(ray: Ray) -> vec4<f32> {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
@@ -290,14 +423,14 @@ fn renderScene(ray: Ray) -> vec4<f32> {
     }
 
     else {
-        // HitParams hitParams = getHitParams(ray, t, objectParams.inverseTransform, 2, blas.BLAS[-(objectID+2)].normal1, blas.BLAS[-(objectID+2)].normal2, blas.BLAS[-(objectID+2)].normal3, uv);
+        let hitParams: HitParams = getHitParams(ray, intersection, 2);
 
-        // let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
-        // // bool shadowed = false;
-        // color = lighting(objectParams.material, ubo.lightPos,
-        //                         hitParams, shadowed);
-        // color.w = 1.0;
-        color = vec4<f32>(0.0,1.0,0.0,1.0);
+        let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
+        // bool shadowed = false;
+        color = lighting(objectParams.material, ubo.lightPos,
+                                hitParams, shadowed);
+        color.w = 1.0;
+        // color = vec4<f32>(0.0,1.0,0.0,1.0);
     }
     
     return color;
