@@ -12,6 +12,7 @@ use winit::event_loop::EventLoop;
 
 // use image::codecs::pnm;
 
+use std::borrow::Cow;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -34,8 +35,8 @@ use engine::rt_primitives::{Camera, Material, NodeBLAS, NodeTLAS, ObjectParams, 
 
 use crate::renderer::wgpu_utils::RenginWgpu;
 
-static WIDTH: u32 = 400;
-static HEIGHT: u32 = 300;
+static WIDTH: u32 = 800;
+static HEIGHT: u32 = 600;
 static WORKGROUP_SIZE: u32 = 32;
 
 struct RenderApp {
@@ -71,7 +72,7 @@ impl RenderApp {
     fn init(&mut self, model_path: &str) {
         let mut now = Instant::now();
         log::info!("Loading models...");
-        self.objects = Some(import_obj(model_path));
+        self.objects = import_obj(model_path);
         // let (dragon_tlas, dragon_blas) = &objects[0];
         log::info!(
             "Finished loading models in {} millis.",
@@ -105,7 +106,12 @@ impl RenderApp {
             1.0472f32,
         );
 
-        self.ubo = Some(UBO::new([-4f32, 2f32, -3f32, 1f32], camera));
+        self.ubo = Some(UBO::new(
+            [-4f32, 2f32, -3f32, 1f32],
+            self.objects.as_ref().unwrap().get(0).unwrap().0.len() as i32,
+            self.objects.as_ref().unwrap().get(0).unwrap().1.len() as i32,
+            camera,
+        ));
 
         // log::info!("ubo:{:?},", ubo);
         now = Instant::now();
@@ -118,13 +124,23 @@ impl RenderApp {
     }
 
     fn create_shaders(&mut self) -> HashMap<&'static str, ShaderModule> {
-        let cs_src = include_str!("shaders/raytracer.comp");
-        let cs_module = self.build_spv_shader(
-            cs_src,
-            "raytracer.comp",
-            shaderc::ShaderKind::Compute,
-            "compute shader",
-        );
+        // let cs_src = include_str!("shaders/raytracer.comp");
+        // let cs_module = self.build_spv_shader(
+        //     cs_src,
+        //     "raytracer.comp",
+        //     shaderc::ShaderKind::Compute,
+        //     "compute shader",
+        // );
+
+        let cs_module = self
+            .renderer
+            .device
+            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "shaders/raytracer.wgsl"
+                ))),
+            });
 
         let vt_src = include_str!("shaders/raytracer.vert");
         let vt_module = self.build_spv_shader(

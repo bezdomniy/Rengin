@@ -160,6 +160,8 @@ float triangleIntersect(in vec4 rayO, in vec4 rayD,in NodeBLAS triangle, out vec
 
     float f = 1.0 / det;
     vec3 p1ToOrigin = vec3(rayO - triangle.point1);
+
+    // TODO: should this uv value be overwriten if there is an early return??
     uv.x = f * dot(p1ToOrigin, dirCrossE2);
     if (uv.x < 0 || uv.x > 1) {
       return -1.0;

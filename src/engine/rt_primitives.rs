@@ -59,13 +59,19 @@ pub struct UBO {
     // Compute shader uniform block object
     light_pos: Vec4,
     camera: Camera,
+    len_tlas: i32,
+    len_blas: i32,
+    _padding: [u32; 2],
 }
 
 impl UBO {
-    pub fn new(light_pos: [f32; 4], camera: Camera) -> UBO {
+    pub fn new(light_pos: [f32; 4], len_tlas: i32, len_blas: i32, camera: Camera) -> UBO {
         UBO {
             light_pos: const_vec4!(light_pos),
             camera: camera,
+            len_tlas: len_tlas,
+            len_blas: len_blas,
+            _padding: [0, 0],
         }
     }
 }

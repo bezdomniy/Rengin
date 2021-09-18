@@ -57,7 +57,7 @@ fn total_bounds() -> NodeTLAS {
     }
 }
 
-pub fn import_obj(path: &str) -> Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)> {
+pub fn import_obj(path: &str) -> Option<Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)>> {
     let (models, materials) = tobj::load_obj(
         path,
         &tobj::LoadOptions {
@@ -178,7 +178,7 @@ pub fn import_obj(path: &str) -> Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)> {
         ret.push((tlas, blas));
     }
 
-    ret
+    Some(ret)
 }
 
 const fn num_bits<T>() -> usize {
