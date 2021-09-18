@@ -3,7 +3,7 @@ mod renderer;
 mod shaders;
 
 // use image::io::Reader;
-use renderdoc::RenderDoc;
+// use renderdoc::RenderDoc;
 use wgpu::util::DeviceExt;
 use wgpu::ShaderModule;
 use winit::event_loop::EventLoop;
@@ -142,21 +142,41 @@ impl RenderApp {
                 ))),
             });
 
-        let vt_src = include_str!("shaders/raytracer.vert");
-        let vt_module = self.build_spv_shader(
-            vt_src,
-            "raytracer.vert",
-            shaderc::ShaderKind::Vertex,
-            "vertex shader",
-        );
+        // let vt_src = include_str!("shaders/raytracer.vert");
+        // let vt_module = self.build_spv_shader(
+        //     vt_src,
+        //     "raytracer.vert",
+        //     shaderc::ShaderKind::Vertex,
+        //     "vertex shader",
+        // );
 
-        let fg_src = include_str!("shaders/raytracer.frag");
-        let fg_module = self.build_spv_shader(
-            fg_src,
-            "raytracer.frag",
-            shaderc::ShaderKind::Fragment,
-            "fragment shader",
-        );
+        let vt_module = self
+            .renderer
+            .device
+            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "shaders/raytracer.vert.wgsl"
+                ))),
+            });
+
+        // let fg_src = include_str!("shaders/raytracer.frag");
+        // let fg_module = self.build_spv_shader(
+        //     fg_src,
+        //     "raytracer.frag",
+        //     shaderc::ShaderKind::Fragment,
+        //     "fragment shader",
+        // );
+
+        let fg_module = self
+            .renderer
+            .device
+            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "shaders/raytracer.frag.wgsl"
+                ))),
+            });
 
         let mut shaders: HashMap<&'static str, ShaderModule> = HashMap::new();
         shaders.insert("comp", cs_module);
@@ -201,8 +221,8 @@ fn main() {
 
     let (dragon_tlas, dragon_blas) = &mut app.objects.unwrap()[0];
 
-    let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();
-    renderdoc_api.start_frame_capture(std::ptr::null(), std::ptr::null());
+    // let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();
+    // renderdoc_api.start_frame_capture(std::ptr::null(), std::ptr::null());
 
     let mut now = Instant::now();
     log::info!("Creating buffers...");
@@ -543,5 +563,5 @@ fn main() {
     // log::info!("sleeping...");
     // thread::sleep(Duration::from_millis(4000));
     // log::info!("waking.");
-    renderdoc_api.end_frame_capture(std::ptr::null(), std::ptr::null());
+    // renderdoc_api.end_frame_capture(std::ptr::null(), std::ptr::null());
 }
