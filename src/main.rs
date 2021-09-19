@@ -44,7 +44,6 @@ static WORKGROUP_SIZE: u32 = 32;
 struct RenderApp {
     event_loop: EventLoop<()>,
     renderer: RenginWgpu,
-    spv_compiler: shaderc::Compiler,
     shaders: Option<HashMap<&'static str, ShaderModule>>,
     compute_pipeline: Option<ComputePipeline>,
     compute_bind_group: Option<BindGroup>,
@@ -63,12 +62,9 @@ impl RenderApp {
 
         let renderer = futures::executor::block_on(RenginWgpu::new(&event_loop, WIDTH, HEIGHT));
 
-        let spv_compiler = shaderc::Compiler::new().unwrap();
-
         Self {
             event_loop,
             renderer,
-            spv_compiler,
             shaders: None,
             compute_pipeline: None,
             compute_bind_group: None,
@@ -169,14 +165,6 @@ impl RenderApp {
     }
 
     fn create_shaders(&mut self) -> HashMap<&'static str, ShaderModule> {
-        // let cs_src = include_str!("shaders/raytracer.comp");
-        // let cs_module = self.build_spv_shader(
-        //     cs_src,
-        //     "raytracer.comp",
-        //     shaderc::ShaderKind::Compute,
-        //     "compute shader",
-        // );
-
         let cs_module = self
             .renderer
             .device
@@ -187,14 +175,6 @@ impl RenderApp {
                 ))),
             });
 
-        // let vt_src = include_str!("shaders/raytracer.vert");
-        // let vt_module = self.build_spv_shader(
-        //     vt_src,
-        //     "raytracer.vert",
-        //     shaderc::ShaderKind::Vertex,
-        //     "vertex shader",
-        // );
-
         let vt_module = self
             .renderer
             .device
@@ -204,14 +184,6 @@ impl RenderApp {
                     "shaders/raytracer.vert.wgsl"
                 ))),
             });
-
-        // let fg_src = include_str!("shaders/raytracer.frag");
-        // let fg_module = self.build_spv_shader(
-        //     fg_src,
-        //     "raytracer.frag",
-        //     shaderc::ShaderKind::Fragment,
-        //     "fragment shader",
-        // );
 
         let fg_module = self
             .renderer
@@ -589,29 +561,6 @@ impl RenderApp {
         command_encoder.pop_debug_group();
 
         self.renderer.queue.submit(Some(command_encoder.finish()));
-    }
-
-    fn build_spv_shader(
-        &mut self,
-        src: &str,
-        path: &str,
-        kind: shaderc::ShaderKind,
-        label: &str,
-    ) -> wgpu::ShaderModule {
-        let spirv = self
-            .spv_compiler
-            .compile_into_spirv(src, kind, path, "main", None)
-            .unwrap();
-
-        let data = wgpu::util::make_spirv(spirv.as_binary_u8());
-
-        self.renderer
-            .device
-            .create_shader_module(&wgpu::ShaderModuleDescriptor {
-                label: Some(label),
-                source: data,
-                // flags: wgpu::ShaderFlags::default(),
-            })
     }
 }
 
