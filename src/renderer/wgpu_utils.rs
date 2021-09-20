@@ -65,8 +65,7 @@ impl RenginWgpu {
                 | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
                 | wgpu::Features::PUSH_CONSTANTS
         };
-        let required_features =
-            { wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::SPIRV_SHADER_PASSTHROUGH };
+        let required_features = { wgpu::Features::TEXTURE_BINDING_ARRAY };
         let required_limits = {
             wgpu::Limits {
                 max_push_constant_size: 4,

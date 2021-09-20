@@ -4,11 +4,11 @@ mod shaders;
 
 // use image::io::Reader;
 // use renderdoc::RenderDoc;
-use wgpu::util::DeviceExt;
+use wgpu::util::{DeviceExt, StagingBelt};
 use wgpu::{
     BindGroup, Buffer, ComputePipeline, RenderPipeline, ShaderModule, Texture, TextureView,
 };
-use winit::event::{Event, WindowEvent};
+use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
 // TODO: set $env:RUST_LOG = 'WARN' when running
@@ -54,6 +54,7 @@ struct RenderApp {
     texture: Option<Texture>,
     object_params: Option<ObjectParams>,
     ubo: Option<UBO>,
+    // staging_belt: Option<StagingBelt>,
 }
 
 impl RenderApp {
@@ -73,6 +74,7 @@ impl RenderApp {
             texture: None,
             object_params: None,
             ubo: None,
+            // staging_belt: None,
         }
         // RenderApp::init(&self, model_path)
     }
@@ -130,6 +132,7 @@ impl RenderApp {
             now.elapsed().as_millis()
         );
 
+        // TODO: update texture size on resize
         let texture_extent = wgpu::Extent3d {
             width: WIDTH,
             height: HEIGHT,
@@ -155,6 +158,8 @@ impl RenderApp {
                     label: None,
                 }),
         );
+
+        // self.staging_belt = Some(StagingBelt::new(0x100));
 
         // let texture_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
 
@@ -213,7 +218,7 @@ impl RenderApp {
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("UBO Buffer"),
                 contents: bytemuck::bytes_of(&self.ubo.unwrap()),
-                usage: wgpu::BufferUsages::UNIFORM,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
         let buf_tlas = self
@@ -497,21 +502,39 @@ impl RenderApp {
         );
     }
 
-    pub fn render(mut self, event_loop: EventLoop<()>) {
-        // let Self {
-        //     instance,
-        //     adapter,
-        //     device,
-        //     queue,
-        //     window,
-        //     window_surface,
-        //     mut event_loop,
-        //     mut config,
-        //     height,
-        //     width,
-        //     workgroup_size,
-        // } = self;
+    fn update(&mut self, event: WindowEvent) {
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                // println!("x:{}, y:{}", position.x, position.y);
+                let MODEL_CENTER_Y = 1.0;
+                let dist = 5.09902; //TODO
+                let norm_x = position.x as f32 / self.renderer.config.width as f32 - 0.5;
+                let norm_y = position.y as f32 / self.renderer.config.height as f32 - 0.5;
+                let angle_y = norm_x * 5.0;
+                let angle_xz = norm_y;
 
+                let new_position = [
+                    angle_xz.cos() * angle_y.sin() * dist,
+                    angle_xz.sin() * dist + MODEL_CENTER_Y,
+                    angle_xz.cos() * angle_y.cos() * dist,
+                ];
+
+                if let Some(ref mut ubo) = self.ubo {
+                    // no reference before Some
+                    ubo.camera.update_position(
+                        new_position,
+                        [0f32, MODEL_CENTER_Y, 0f32],
+                        [0f32, 1f32, 0f32],
+                    );
+                }
+
+                // println!("{}", self.ubo.unwrap().camera.inverse_transform);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn render(mut self, event_loop: EventLoop<()>) {
         event_loop.run(move |event, _, control_flow| {
             // Have the closure take ownership of the resources.
             // `event_loop.run` never returns, therefore we must do this to ensure
@@ -524,11 +547,43 @@ impl RenderApp {
                     event: WindowEvent::Resized(size),
                     ..
                 } => {
-                    // // Reconfigure the surface with the new size
-                    // config.width = size.width;
-                    // config.height = size.height;
-                    // surface.configure(&device, &config);
+                    // Reconfigure the surface with the new size
+                    self.renderer.config.width = size.width;
+                    self.renderer.config.height = size.height;
+                    self.renderer
+                        .window_surface
+                        .configure(&self.renderer.device, &self.renderer.config);
                 }
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::KeyboardInput {
+                        input:
+                            KeyboardInput {
+                                virtual_keycode: Some(VirtualKeyCode::Escape),
+                                state: ElementState::Pressed,
+                                ..
+                            },
+                        ..
+                    }
+                    | WindowEvent::CloseRequested => {
+                        *control_flow = ControlFlow::Exit;
+                    }
+                    // #[cfg(not(target_arch = "wasm32"))]
+                    WindowEvent::KeyboardInput {
+                        input:
+                            KeyboardInput {
+                                virtual_keycode: Some(VirtualKeyCode::R),
+                                state: ElementState::Pressed,
+                                ..
+                            },
+                        ..
+                    } => {
+                        println!("{:#?}", self.renderer.instance.generate_report());
+                    }
+                    _ => {
+                        self.update(event);
+                        self.renderer.window.request_redraw();
+                    }
+                },
                 Event::RedrawRequested(_) => {
                     let frame = match self.renderer.window_surface.get_current_frame() {
                         Ok(frame) => frame,
@@ -567,6 +622,23 @@ impl RenderApp {
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
+                    // wgpu::BufferSize::new(mem::size_of::<UBO>() as _)
+
+                    // println!("{}", self.ubo.unwrap().camera.inverse_transform);
+                    let mut staging_belt = StagingBelt::new(0x100);
+                    staging_belt
+                        .write_buffer(
+                            &mut command_encoder,
+                            self.buffers.as_ref().unwrap().get("ubo").unwrap(),
+                            0,
+                            wgpu::BufferSize::new(mem::size_of::<UBO>() as wgpu::BufferAddress)
+                                .unwrap(),
+                            &self.renderer.device,
+                        )
+                        .copy_from_slice(bytemuck::bytes_of(&self.ubo.unwrap()));
+
+                    staging_belt.finish();
+
                     command_encoder.push_debug_group("compute ray trace");
                     {
                         // compute pass
@@ -575,8 +647,8 @@ impl RenderApp {
                         cpass.set_pipeline(self.compute_pipeline.as_ref().unwrap());
                         cpass.set_bind_group(0, self.compute_bind_group.as_ref().unwrap(), &[]);
                         cpass.dispatch(
-                            WIDTH / WORKGROUP_SIZE[0],
-                            HEIGHT / WORKGROUP_SIZE[1],
+                            self.renderer.config.width / WORKGROUP_SIZE[0],
+                            self.renderer.config.height / WORKGROUP_SIZE[1],
                             WORKGROUP_SIZE[2],
                         );
                     }

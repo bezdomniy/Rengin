@@ -58,7 +58,7 @@ pub struct Camera {
 pub struct UBO {
     // Compute shader uniform block object
     light_pos: Vec4,
-    camera: Camera,
+    pub camera: Camera,
     len_tlas: i32,
     len_blas: i32,
     _padding: [u32; 2],
@@ -107,6 +107,16 @@ impl Camera {
             // height: vsize,
             pixel_size: pixel_size,
         }
+    }
+
+    pub fn update_position(&mut self, new_position: [f32; 3], centre: [f32; 3], up: [f32; 3]) {
+        self.inverse_transform = Mat4::look_at_rh(
+            const_vec3!(new_position),
+            const_vec3!(centre),
+            const_vec3!(up),
+        )
+        .inverse();
+        // println!("{}", self.inverse_transform);
     }
 }
 
