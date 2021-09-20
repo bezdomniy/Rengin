@@ -535,6 +535,7 @@ impl RenderApp {
     }
 
     pub fn render(mut self, event_loop: EventLoop<()>) {
+        let mut last_update_inst = Instant::now();
         event_loop.run(move |event, _, control_flow| {
             // Have the closure take ownership of the resources.
             // `event_loop.run` never returns, therefore we must do this to ensure
@@ -543,6 +544,18 @@ impl RenderApp {
 
             *control_flow = ControlFlow::Wait;
             match event {
+                Event::RedrawEventsCleared => {
+                    let target_frametime = Duration::from_secs_f64(1.0 / 30.0);
+                    let time_since_last_frame = last_update_inst.elapsed();
+                    if time_since_last_frame >= target_frametime {
+                        self.renderer.window.request_redraw();
+                        last_update_inst = Instant::now();
+                    } else {
+                        *control_flow = ControlFlow::WaitUntil(
+                            Instant::now() + target_frametime - time_since_last_frame,
+                        );
+                    }
+                }
                 Event::WindowEvent {
                     event: WindowEvent::Resized(size),
                     ..
@@ -581,7 +594,6 @@ impl RenderApp {
                     }
                     _ => {
                         self.update(event);
-                        self.renderer.window.request_redraw();
                     }
                 },
                 Event::RedrawRequested(_) => {
