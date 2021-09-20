@@ -8,7 +8,8 @@ use wgpu::util::DeviceExt;
 use wgpu::{
     BindGroup, Buffer, ComputePipeline, RenderPipeline, ShaderModule, Texture, TextureView,
 };
-use winit::event_loop::EventLoop;
+use winit::event::{Event, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
 
 // TODO: set $env:RUST_LOG = 'WARN' when running
 
@@ -39,10 +40,9 @@ use crate::renderer::wgpu_utils::RenginWgpu;
 
 static WIDTH: u32 = 800;
 static HEIGHT: u32 = 600;
-static WORKGROUP_SIZE: u32 = 32;
+static WORKGROUP_SIZE: [u32; 3] = [32, 32, 1];
 
 struct RenderApp {
-    event_loop: EventLoop<()>,
     renderer: RenginWgpu,
     shaders: Option<HashMap<&'static str, ShaderModule>>,
     compute_pipeline: Option<ComputePipeline>,
@@ -57,13 +57,11 @@ struct RenderApp {
 }
 
 impl RenderApp {
-    pub fn new() -> Self {
-        let event_loop = EventLoop::new();
-
-        let renderer = futures::executor::block_on(RenginWgpu::new(&event_loop, WIDTH, HEIGHT));
+    pub fn new(event_loop: &EventLoop<()>) -> Self {
+        let renderer =
+            futures::executor::block_on(RenginWgpu::new(WIDTH, HEIGHT, WORKGROUP_SIZE, event_loop));
 
         Self {
-            event_loop,
             renderer,
             shaders: None,
             compute_pipeline: None,
@@ -499,68 +497,112 @@ impl RenderApp {
         );
     }
 
-    fn render(&mut self) {
-        let frame = match self.renderer.window_surface.get_current_frame() {
-            Ok(frame) => frame,
-            Err(_) => {
-                self.renderer
-                    .window_surface
-                    .configure(&self.renderer.device, &self.renderer.config);
-                self.renderer
-                    .window_surface
-                    .get_current_frame()
-                    .expect("Failed to acquire next surface texture!")
+    pub fn render(mut self, event_loop: EventLoop<()>) {
+        // let Self {
+        //     instance,
+        //     adapter,
+        //     device,
+        //     queue,
+        //     window,
+        //     window_surface,
+        //     mut event_loop,
+        //     mut config,
+        //     height,
+        //     width,
+        //     workgroup_size,
+        // } = self;
+
+        event_loop.run(move |event, _, control_flow| {
+            // Have the closure take ownership of the resources.
+            // `event_loop.run` never returns, therefore we must do this to ensure
+            // the resources are properly cleaned up.
+            // let _ = (&self.renderer.instance, &self.adapter, &compute_pipeline); //, &self.device, &self.config);
+
+            *control_flow = ControlFlow::Wait;
+            match event {
+                Event::WindowEvent {
+                    event: WindowEvent::Resized(size),
+                    ..
+                } => {
+                    // // Reconfigure the surface with the new size
+                    // config.width = size.width;
+                    // config.height = size.height;
+                    // surface.configure(&device, &config);
+                }
+                Event::RedrawRequested(_) => {
+                    let frame = match self.renderer.window_surface.get_current_frame() {
+                        Ok(frame) => frame,
+                        Err(_) => {
+                            self.renderer
+                                .window_surface
+                                .configure(&self.renderer.device, &self.renderer.config);
+                            self.renderer
+                                .window_surface
+                                .get_current_frame()
+                                .expect("Failed to acquire next surface texture!")
+                        }
+                    };
+                    let view = frame
+                        .output
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
+
+                    // create render pass descriptor and its color attachments
+                    let color_attachments = [wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: true,
+                        },
+                    }];
+                    let render_pass_descriptor = wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &color_attachments,
+                        depth_stencil_attachment: None,
+                    };
+
+                    let mut command_encoder = self
+                        .renderer
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+                    command_encoder.push_debug_group("compute ray trace");
+                    {
+                        // compute pass
+                        let mut cpass = command_encoder
+                            .begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+                        cpass.set_pipeline(self.compute_pipeline.as_ref().unwrap());
+                        cpass.set_bind_group(0, self.compute_bind_group.as_ref().unwrap(), &[]);
+                        cpass.dispatch(
+                            WIDTH / WORKGROUP_SIZE[0],
+                            HEIGHT / WORKGROUP_SIZE[1],
+                            WORKGROUP_SIZE[2],
+                        );
+                    }
+                    command_encoder.pop_debug_group();
+
+                    command_encoder.push_debug_group("render texture");
+                    {
+                        // render pass
+                        let mut rpass = command_encoder.begin_render_pass(&render_pass_descriptor);
+                        rpass.set_pipeline(self.render_pipeline.as_ref().unwrap());
+                        rpass.set_bind_group(0, self.render_bind_group.as_ref().unwrap(), &[]);
+                        // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
+                        // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
+                        rpass.draw(0..3, 0..1);
+                    }
+                    command_encoder.pop_debug_group();
+
+                    self.renderer.queue.submit(Some(command_encoder.finish()));
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                } => *control_flow = ControlFlow::Exit,
+                _ => {}
             }
-        };
-        let view = frame
-            .output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        // create render pass descriptor and its color attachments
-        let color_attachments = [wgpu::RenderPassColorAttachment {
-            view: &view,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                store: true,
-            },
-        }];
-        let render_pass_descriptor = wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &color_attachments,
-            depth_stencil_attachment: None,
-        };
-
-        let mut command_encoder = self
-            .renderer
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        command_encoder.push_debug_group("compute ray trace");
-        {
-            // compute pass
-            let mut cpass =
-                command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
-            cpass.set_pipeline(self.compute_pipeline.as_ref().unwrap());
-            cpass.set_bind_group(0, self.compute_bind_group.as_ref().unwrap(), &[]);
-            cpass.dispatch(WIDTH / WORKGROUP_SIZE, HEIGHT / WORKGROUP_SIZE, 1);
-        }
-        command_encoder.pop_debug_group();
-
-        command_encoder.push_debug_group("render texture");
-        {
-            // render pass
-            let mut rpass = command_encoder.begin_render_pass(&render_pass_descriptor);
-            rpass.set_pipeline(self.render_pipeline.as_ref().unwrap());
-            rpass.set_bind_group(0, self.render_bind_group.as_ref().unwrap(), &[]);
-            // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
-            // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
-            rpass.draw(0..3, 0..1);
-        }
-        command_encoder.pop_debug_group();
-
-        self.renderer.queue.submit(Some(command_encoder.finish()));
+        });
     }
 }
 
@@ -570,12 +612,16 @@ fn main() {
 
     let model_path = &args[1];
 
-    let mut app = RenderApp::new();
+    let event_loop = EventLoop::new();
+    let mut app = RenderApp::new(&event_loop);
     app.init(&model_path);
 
     // let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();
     // renderdoc_api.start_frame_capture(std::ptr::null(), std::ptr::null());
-    app.render();
+    app.render(event_loop);
+
+    // drop(app);
+
     // log::info!("sleeping...");
     // thread::sleep(Duration::from_millis(4000));
     // log::info!("waking.");
