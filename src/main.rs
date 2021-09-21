@@ -6,9 +6,13 @@ mod shaders;
 // use renderdoc::RenderDoc;
 use wgpu::util::{DeviceExt, StagingBelt};
 use wgpu::{
-    BindGroup, Buffer, ComputePipeline, RenderPipeline, ShaderModule, Texture, TextureView,
+    BindGroup, BindGroupLayout, Buffer, ComputePipeline, RenderPipeline, Sampler, ShaderModule,
+    Texture, TextureView,
 };
-use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event::{
+    DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode,
+    WindowEvent,
+};
 use winit::event_loop::{ControlFlow, EventLoop};
 
 // TODO: set $env:RUST_LOG = 'WARN' when running
@@ -30,7 +34,7 @@ use std::mem;
 // use core::num;
 
 // use wgpu::BufferUsage;
-use glam::{Mat4, Vec4};
+use glam::{const_vec3, Mat4, Vec4};
 
 use engine::asset_importer::import_obj;
 
@@ -42,19 +46,30 @@ static WIDTH: u32 = 800;
 static HEIGHT: u32 = 600;
 static WORKGROUP_SIZE: [u32; 3] = [32, 32, 1];
 
+struct GameState {
+    pub camera_angle_y: f32,
+    pub camera_angle_xz: f32,
+    pub camera_dist: f32,
+    pub camera_centre: [f32; 3],
+    pub camera_up: [f32; 3],
+}
+
 struct RenderApp {
     renderer: RenginWgpu,
     shaders: Option<HashMap<&'static str, ShaderModule>>,
     compute_pipeline: Option<ComputePipeline>,
+    compute_bind_group_layout: Option<BindGroupLayout>,
     compute_bind_group: Option<BindGroup>,
     render_pipeline: Option<RenderPipeline>,
+    render_bind_group_layout: Option<BindGroupLayout>,
     render_bind_group: Option<BindGroup>,
+    sampler: Option<Sampler>,
     objects: Option<Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)>>,
     buffers: Option<HashMap<&'static str, Buffer>>,
     texture: Option<Texture>,
     object_params: Option<ObjectParams>,
     ubo: Option<UBO>,
-    // staging_belt: Option<StagingBelt>,
+    game_state: Option<GameState>,
 }
 
 impl RenderApp {
@@ -66,15 +81,18 @@ impl RenderApp {
             renderer,
             shaders: None,
             compute_pipeline: None,
+            compute_bind_group_layout: None,
             compute_bind_group: None,
             render_pipeline: None,
+            render_bind_group_layout: None,
             render_bind_group: None,
+            sampler: None,
             objects: None,
             buffers: None,
             texture: None,
             object_params: None,
             ubo: None,
-            // staging_belt: None,
+            game_state: None,
         }
         // RenderApp::init(&self, model_path)
     }
@@ -107,10 +125,35 @@ impl RenderApp {
         //     mem::size_of::<NodeBLAS>()
         // );
 
+        // let camera_position = [-4f32, 2f32, -3f32];
+        // let camera_centre = [0f32, 1f32, 0f32];
+
+        let camera_angle_y = 0.0;
+        let camera_angle_xz = 0.0;
+        let camera_dist = 6.0;
+        let camera_centre = [0.0, 1.0, 0.0];
+        let camera_up = [0.0, 1.0, 0.0];
+
+        self.game_state = Some(GameState {
+            camera_angle_xz,
+            camera_angle_y,
+            camera_dist,
+            camera_centre,
+            camera_up,
+        });
+
+        let camera_position = [
+            camera_angle_xz.cos() * camera_angle_y.sin() * camera_dist,
+            camera_angle_xz.sin() * camera_dist + camera_centre[1],
+            camera_angle_xz.cos() * camera_angle_y.cos() * camera_dist,
+        ];
+
+        println!("{} {}", camera_angle_y, camera_angle_xz);
+
         let camera = Camera::new(
-            [-4f32, 2f32, -3f32],
-            [0f32, 1f32, 0f32],
-            [0f32, 1f32, 0f32],
+            camera_position,
+            camera_centre,
+            camera_up,
             WIDTH as u32,
             HEIGHT as u32,
             1.0472f32,
@@ -148,13 +191,9 @@ impl RenderApp {
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    // format: wgpu::TextureFormat::Rgba32Float,
                     format: wgpu::TextureFormat::Rgba8Unorm,
                     usage: wgpu::TextureUsages::STORAGE_BINDING
-                    // | wgpu::TextureUsages::COPY_DST
-                    // | wgpu::TextureUsages::COPY_SRC
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                    // | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
                     label: None,
                 }),
         );
@@ -263,116 +302,115 @@ impl RenderApp {
     }
 
     fn create_pipelines(&mut self) {
-        let compute_bind_group_layout =
-            self.renderer
-                .device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::StorageTexture {
-                                access: wgpu::StorageTextureAccess::WriteOnly,
-                                format: wgpu::TextureFormat::Rgba8Unorm,
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                            },
-                            count: None,
+        self.compute_bind_group_layout = Some(self.renderer.device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            view_dimension: wgpu::TextureViewDimension::D2,
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
-                            },
-                            count: None,
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                // min_binding_size: wgpu::BufferSize::new(
-                                //     (dragon_tlas.len() * mem::size_of::<NodeTLAS>()) as _,
-                                // ),
-                                min_binding_size: None,
-                            },
-                            count: None,
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            // min_binding_size: wgpu::BufferSize::new(
+                            //     (dragon_tlas.len() * mem::size_of::<NodeTLAS>()) as _,
+                            // ),
+                            min_binding_size: None,
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                // min_binding_size: wgpu::BufferSize::new(
-                                //     (dragon_blas.len() * mem::size_of::<NodeBLAS>()) as _,
-                                // ),
-                                min_binding_size: None,
-                            },
-                            count: None,
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            // min_binding_size: wgpu::BufferSize::new(
+                            //     (dragon_blas.len() * mem::size_of::<NodeBLAS>()) as _,
+                            // ),
+                            min_binding_size: None,
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 4,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                // min_binding_size: None,
-                                min_binding_size: wgpu::BufferSize::new(
-                                    mem::size_of::<ObjectParams>() as _,
-                                ),
-                            },
-                            count: None,
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            // min_binding_size: None,
+                            min_binding_size: wgpu::BufferSize::new(
+                                mem::size_of::<ObjectParams>() as _
+                            ),
                         },
-                    ],
-                    label: None,
-                });
+                        count: None,
+                    },
+                ],
+                label: None,
+            },
+        ));
         let compute_pipeline_layout =
             self.renderer
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("compute"),
-                    bind_group_layouts: &[&compute_bind_group_layout],
+                    bind_group_layouts: &[&self.compute_bind_group_layout.as_ref().unwrap()],
                     push_constant_ranges: &[],
                 });
 
         // create render pipeline
 
-        let sampler = self
-            .renderer
-            .device
-            .create_sampler(&wgpu::SamplerDescriptor::default());
-
-        let render_bind_group_layout =
+        self.sampler = Some(
             self.renderer
                 .device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("bind group layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: core::num::NonZeroU32::new(1),
+                .create_sampler(&wgpu::SamplerDescriptor::default()),
+        );
+
+        self.render_bind_group_layout = Some(self.renderer.device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                label: Some("bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler {
-                                comparison: false,
-                                filtering: true,
-                            },
-                            count: None,
+                        count: core::num::NonZeroU32::new(1),
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler {
+                            comparison: false,
+                            filtering: true,
                         },
-                    ],
-                });
+                        count: None,
+                    },
+                ],
+            },
+        ));
 
         let texture_view = self
             .texture
@@ -389,10 +427,10 @@ impl RenderApp {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
+                        resource: wgpu::BindingResource::Sampler(&self.sampler.as_ref().unwrap()),
                     },
                 ],
-                layout: &render_bind_group_layout,
+                layout: &self.render_bind_group_layout.as_ref().unwrap(),
                 label: Some("bind group"),
             },
         ));
@@ -402,7 +440,7 @@ impl RenderApp {
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("render"),
-                    bind_group_layouts: &[&render_bind_group_layout],
+                    bind_group_layouts: &[&self.render_bind_group_layout.as_ref().unwrap()],
                     push_constant_ranges: &[],
                 });
 
@@ -447,7 +485,7 @@ impl RenderApp {
                 .device
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: None,
-                    layout: &compute_bind_group_layout,
+                    layout: &self.compute_bind_group_layout.as_ref().unwrap(),
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -502,40 +540,123 @@ impl RenderApp {
         );
     }
 
-    fn update(&mut self, event: WindowEvent) {
+    fn update_device_event(&mut self, event: DeviceEvent, left_mouse_down: &mut bool) {
         match event {
-            WindowEvent::CursorMoved { position, .. } => {
+            DeviceEvent::MouseMotion { delta } => {
                 // println!("x:{}, y:{}", position.x, position.y);
-                let MODEL_CENTER_Y = 1.0;
-                let dist = 5.09902; //TODO
-                let norm_x = position.x as f32 / self.renderer.config.width as f32 - 0.5;
-                let norm_y = position.y as f32 / self.renderer.config.height as f32 - 0.5;
-                let angle_y = norm_x * 5.0;
-                let angle_xz = norm_y;
+                if *left_mouse_down {
+                    let game_state: &mut GameState = self.game_state.as_mut().unwrap();
+                    // println!(
+                    //     "{} {}",
+                    //     game_state.camera_angle_y, game_state.camera_angle_xz
+                    // );
 
-                let new_position = [
-                    angle_xz.cos() * angle_y.sin() * dist,
-                    angle_xz.sin() * dist + MODEL_CENTER_Y,
-                    angle_xz.cos() * angle_y.cos() * dist,
-                ];
+                    game_state.camera_angle_y = game_state.camera_angle_y + (delta.0 as f32);
+                    game_state.camera_angle_xz = game_state.camera_angle_xz + (delta.1 as f32);
 
-                if let Some(ref mut ubo) = self.ubo {
-                    // no reference before Some
-                    ubo.camera.update_position(
-                        new_position,
-                        [0f32, MODEL_CENTER_Y, 0f32],
-                        [0f32, 1f32, 0f32],
-                    );
+                    let norm_x = game_state.camera_angle_y / self.renderer.config.width as f32;
+                    let norm_y = game_state.camera_angle_xz / self.renderer.config.height as f32;
+                    let angle_y = norm_x * 5.0;
+                    let angle_xz = -norm_y * 2.0;
+
+                    let new_position = [
+                        angle_xz.cos() * angle_y.sin() * game_state.camera_dist,
+                        angle_xz.sin() * game_state.camera_dist + game_state.camera_centre[1],
+                        angle_xz.cos() * angle_y.cos() * game_state.camera_dist,
+                    ];
+
+                    if let Some(ref mut ubo) = self.ubo {
+                        // no reference before Some
+                        ubo.camera.update_position(
+                            new_position,
+                            game_state.camera_centre,
+                            game_state.camera_up,
+                        );
+                    }
                 }
-
-                // println!("{}", self.ubo.unwrap().camera.inverse_transform);
             }
+            DeviceEvent::MouseWheel { delta } => match delta {
+                MouseScrollDelta::LineDelta(x, y) => {
+                    println!("{} {}", x, y);
+                    let game_state: &mut GameState = self.game_state.as_mut().unwrap();
+                    game_state.camera_dist = game_state.camera_dist - ((y as f32) / 3.0);
+
+                    let norm_x = game_state.camera_angle_y / self.renderer.config.width as f32;
+                    let norm_y = game_state.camera_angle_xz / self.renderer.config.height as f32;
+                    let angle_y = norm_x * 5.0;
+                    let angle_xz = -norm_y * 2.0;
+
+                    let new_position = [
+                        angle_xz.cos() * angle_y.sin() * game_state.camera_dist,
+                        angle_xz.sin() * game_state.camera_dist + game_state.camera_centre[1],
+                        angle_xz.cos() * angle_y.cos() * game_state.camera_dist,
+                    ];
+
+                    if let Some(ref mut ubo) = self.ubo {
+                        // no reference before Some
+                        ubo.camera.update_position(
+                            new_position,
+                            game_state.camera_centre,
+                            game_state.camera_up,
+                        );
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn update_window_event(&mut self, event: WindowEvent, left_mouse_down: &mut bool) {
+        match event {
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                *left_mouse_down = true;
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            } => {
+                *left_mouse_down = false;
+            }
+            // WindowEvent::CursorMoved { position, .. } => {
+            //     // println!("x:{}, y:{}", position.x, position.y);
+            //     if *left_mouse_down {
+            //         let MODEL_CENTER_Y = 1.0;
+            //         let dist = 5.09902; //TODO
+            //         let norm_x = position.x as f32 / self.renderer.config.width as f32 - 0.5;
+            //         let norm_y = position.y as f32 / self.renderer.config.height as f32 - 0.5;
+            //         let angle_y = norm_x * 5.0;
+            //         let angle_xz = -norm_y;
+
+            //         let new_position = [
+            //             angle_xz.cos() * angle_y.sin() * dist,
+            //             angle_xz.sin() * dist + MODEL_CENTER_Y,
+            //             angle_xz.cos() * angle_y.cos() * dist,
+            //         ];
+
+            //         if let Some(ref mut ubo) = self.ubo {
+            //             // no reference before Some
+            //             ubo.camera.update_position(
+            //                 new_position,
+            //                 [0f32, MODEL_CENTER_Y, 0f32],
+            //                 [0f32, 1f32, 0f32],
+            //             );
+            //         }
+            //     }
+            // }
             _ => {}
         }
     }
 
     pub fn render(mut self, event_loop: EventLoop<()>) {
         let mut last_update_inst = Instant::now();
+        let mut left_mouse_down = false;
+
         event_loop.run(move |event, _, control_flow| {
             // Have the closure take ownership of the resources.
             // `event_loop.run` never returns, therefore we must do this to ensure
@@ -560,6 +681,110 @@ impl RenderApp {
                     event: WindowEvent::Resized(size),
                     ..
                 } => {
+                    let texture_extent = wgpu::Extent3d {
+                        width: size.width,
+                        height: size.height,
+                        depth_or_array_layers: 1,
+                    };
+
+                    // The render pipeline renders data into this texture
+                    self.texture = Some(self.renderer.device.create_texture(
+                        &wgpu::TextureDescriptor {
+                            size: texture_extent,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            usage: wgpu::TextureUsages::STORAGE_BINDING
+                                | wgpu::TextureUsages::TEXTURE_BINDING,
+                            label: None,
+                        },
+                    ));
+
+                    let texture_view = self
+                        .texture
+                        .as_ref()
+                        .unwrap()
+                        .create_view(&wgpu::TextureViewDescriptor::default());
+
+                    self.compute_bind_group = Some(
+                        self.renderer
+                            .device
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: None,
+                                layout: &self.compute_bind_group_layout.as_ref().unwrap(),
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: self
+                                            .buffers
+                                            .as_ref()
+                                            .unwrap()
+                                            .get("ubo")
+                                            .as_ref()
+                                            .unwrap()
+                                            .as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: self
+                                            .buffers
+                                            .as_ref()
+                                            .unwrap()
+                                            .get("tlas")
+                                            .as_ref()
+                                            .unwrap()
+                                            .as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: self
+                                            .buffers
+                                            .as_ref()
+                                            .unwrap()
+                                            .get("blas")
+                                            .as_ref()
+                                            .unwrap()
+                                            .as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 4,
+                                        resource: self
+                                            .buffers
+                                            .as_ref()
+                                            .unwrap()
+                                            .get("object_params")
+                                            .as_ref()
+                                            .unwrap()
+                                            .as_entire_binding(),
+                                    },
+                                ],
+                            }),
+                    );
+
+                    self.render_bind_group = Some(self.renderer.device.create_bind_group(
+                        &wgpu::BindGroupDescriptor {
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(
+                                        &self.sampler.as_ref().unwrap(),
+                                    ),
+                                },
+                            ],
+                            layout: &self.render_bind_group_layout.as_ref().unwrap(),
+                            label: Some("bind group"),
+                        },
+                    ));
+
                     // Reconfigure the surface with the new size
                     self.renderer.config.width = size.width;
                     self.renderer.config.height = size.height;
@@ -567,6 +792,11 @@ impl RenderApp {
                         .window_surface
                         .configure(&self.renderer.device, &self.renderer.config);
                 }
+                Event::DeviceEvent { event, .. } => match event {
+                    _ => {
+                        self.update_device_event(event, &mut left_mouse_down);
+                    }
+                },
                 Event::WindowEvent { event, .. } => match event {
                     WindowEvent::KeyboardInput {
                         input:
@@ -593,7 +823,7 @@ impl RenderApp {
                         println!("{:#?}", self.renderer.instance.generate_report());
                     }
                     _ => {
-                        self.update(event);
+                        self.update_window_event(event, &mut left_mouse_down);
                     }
                 },
                 Event::RedrawRequested(_) => {
@@ -680,10 +910,6 @@ impl RenderApp {
 
                     self.renderer.queue.submit(Some(command_encoder.finish()));
                 }
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => *control_flow = ControlFlow::Exit,
                 _ => {}
             }
         });
