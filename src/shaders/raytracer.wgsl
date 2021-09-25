@@ -172,7 +172,7 @@ struct Node {
   level: i32;
   branch: i32;
 };
-let MAX_STACK_SIZE:i32 = 25;
+let MAX_STACK_SIZE:i32 = 30;
 var topStack: i32 = -1;
 var<private> stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
 
@@ -426,7 +426,7 @@ fn renderScene(ray: Ray) -> vec4<f32> {
         let hitParams: HitParams = getHitParams(ray, intersection, 2);
 
         let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
-        // bool shadowed = false;
+        // let shadowed = false;
         color = lighting(objectParams.material, ubo.lightPos,
                                 hitParams, shadowed);
         color.w = 1.0;

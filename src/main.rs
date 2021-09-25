@@ -130,7 +130,8 @@ impl RenderApp {
 
         let camera_angle_y = 0.0;
         let camera_angle_xz = 0.0;
-        let camera_dist = 6.0;
+        let camera_dist = 9.0;
+        // TODO: find out why models are appearing upside-down
         let camera_centre = [0.0, 1.0, 0.0];
         let camera_up = [0.0, 1.0, 0.0];
 
@@ -577,7 +578,7 @@ impl RenderApp {
             }
             DeviceEvent::MouseWheel { delta } => match delta {
                 MouseScrollDelta::LineDelta(x, y) => {
-                    println!("{} {}", x, y);
+                    // println!("{} {}", x, y);
                     let game_state: &mut GameState = self.game_state.as_mut().unwrap();
                     game_state.camera_dist = game_state.camera_dist - ((y as f32) / 3.0);
 
