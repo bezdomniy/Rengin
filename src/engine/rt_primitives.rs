@@ -27,12 +27,14 @@ pub struct NodeTLAS {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct NodeBLAS {
-    pub point1: Vec4,
-    pub point2: Vec4,
-    pub point3: Vec4,
-    pub normal1: Vec4,
-    pub normal2: Vec4,
-    pub normal3: Vec4,
+    pub points: [Vec4; 3],
+    pub normals: [Vec4; 3],
+    // pub point1: Vec4,
+    // pub point2: Vec4,
+    // pub point3: Vec4,
+    // pub normal1: Vec4,
+    // pub normal2: Vec4,
+    // pub normal3: Vec4,
 }
 
 #[repr(C)]
@@ -121,29 +123,82 @@ impl Camera {
 }
 
 impl NodeBLAS {
-    pub fn bounds(&self) -> NodeTLAS {
-        let x = [self.point1.x, self.point2.x, self.point3.x];
-        let y = [self.point1.y, self.point2.y, self.point3.y];
-        let z = [self.point1.z, self.point2.z, self.point3.z];
-
-        let min: Vec4 = const_vec4!([
-            x.iter().copied().fold(f32::INFINITY, f32::min),
-            y.iter().copied().fold(f32::INFINITY, f32::min),
-            z.iter().copied().fold(f32::INFINITY, f32::min),
-            1.
-        ]);
-
-        let max: Vec4 = const_vec4!([
-            x.iter().copied().fold(f32::NEG_INFINITY, f32::max),
-            y.iter().copied().fold(f32::NEG_INFINITY, f32::max),
-            z.iter().copied().fold(f32::NEG_INFINITY, f32::max),
-            1.
-        ]);
-
-        NodeTLAS {
-            first: min,
-            second: max,
+    pub fn empty() -> NodeBLAS {
+        NodeBLAS {
+            points: [
+                const_vec4!([
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY
+                ]),
+                const_vec4!([
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY
+                ]),
+                const_vec4!([
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY
+                ]),
+            ],
+            normals: [
+                const_vec4!([
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY
+                ]),
+                const_vec4!([
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY
+                ]),
+                const_vec4!([
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY
+                ]),
+            ],
         }
+    }
+    pub fn bounds(&self) -> NodeTLAS {
+        // let x = [self.point1.x, self.point2.x, self.point3.x];
+        // let y = [self.point1.y, self.point2.y, self.point3.y];
+        // let z = [self.point1.z, self.point2.z, self.point3.z];
+
+        // let min: Vec4 = const_vec4!([
+        //     x.iter().copied().fold(f32::INFINITY, f32::min),
+        //     y.iter().copied().fold(f32::INFINITY, f32::min),
+        //     z.iter().copied().fold(f32::INFINITY, f32::min),
+        //     1.
+        // ]);
+
+        // let max: Vec4 = const_vec4!([
+        //     x.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        //     y.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        //     z.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        //     1.
+        // ]);
+
+        // NodeTLAS {
+        //     first: min,
+        //     second: max,
+        // }
+
+        self.points
+            .iter()
+            .fold(NodeTLAS::empty(), |aabb, p| aabb.add_point(p))
+
+        // NodeTLAS {
+        //     first: self.point1.min(other),
+        //     second: max,
+        // }
     }
 
     pub fn bounds_centroid(&self) -> Vec4 {
@@ -153,6 +208,23 @@ impl NodeBLAS {
 }
 
 impl NodeTLAS {
+    pub fn empty() -> NodeTLAS {
+        NodeTLAS {
+            first: const_vec4!([
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY
+            ]),
+            second: const_vec4!([
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY
+            ]),
+        }
+    }
+
     pub fn merge(&self, other: &NodeTLAS) -> NodeTLAS {
         let min: Vec4 = const_vec4!([
             f32::min(self.first.x, other.first.x),
@@ -171,6 +243,13 @@ impl NodeTLAS {
         NodeTLAS {
             first: min,
             second: max,
+        }
+    }
+
+    pub fn add_point(&self, point: &Vec4) -> Self {
+        NodeTLAS {
+            first: self.first.min(*point),
+            second: self.second.max(*point),
         }
     }
 }
