@@ -20,6 +20,8 @@ use winit::event_loop::{ControlFlow, EventLoop};
 // use image::codecs::pnm;
 
 use std::borrow::Cow;
+// use std::pin::Pin;
+// use std::task::{Context, Poll};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -34,7 +36,7 @@ use std::mem;
 // use core::num;
 
 // use wgpu::BufferUsage;
-use glam::{const_vec3, Mat4, Vec4};
+use glam::{ Mat4, Vec4};
 
 use engine::asset_importer::import_obj;
 
@@ -46,6 +48,8 @@ static WIDTH: u32 = 800;
 static HEIGHT: u32 = 600;
 static WORKGROUP_SIZE: [u32; 3] = [32, 32, 1];
 
+static FRAMERATE: f64 = 10.0;
+
 struct GameState {
     pub camera_angle_y: f32,
     pub camera_angle_xz: f32,
@@ -53,6 +57,7 @@ struct GameState {
     pub camera_centre: [f32; 3],
     pub camera_up: [f32; 3],
 }
+
 
 struct RenderApp {
     renderer: RenginWgpu,
@@ -541,7 +546,7 @@ impl RenderApp {
         );
     }
 
-    fn update_device_event(&mut self, event: DeviceEvent, left_mouse_down: &mut bool) {
+    fn update_device_event(&mut self, event: DeviceEvent, left_mouse_down: &mut bool, something_changed: &mut bool) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
                 // println!("x:{}, y:{}", position.x, position.y);
@@ -573,6 +578,7 @@ impl RenderApp {
                             game_state.camera_centre,
                             game_state.camera_up,
                         );
+                        *something_changed = true;
                     }
                 }
             }
@@ -600,6 +606,7 @@ impl RenderApp {
                             game_state.camera_centre,
                             game_state.camera_up,
                         );
+                        *something_changed = true;
                     }
                 }
                 _ => {}
@@ -624,32 +631,6 @@ impl RenderApp {
             } => {
                 *left_mouse_down = false;
             }
-            // WindowEvent::CursorMoved { position, .. } => {
-            //     // println!("x:{}, y:{}", position.x, position.y);
-            //     if *left_mouse_down {
-            //         let MODEL_CENTER_Y = 1.0;
-            //         let dist = 5.09902; //TODO
-            //         let norm_x = position.x as f32 / self.renderer.config.width as f32 - 0.5;
-            //         let norm_y = position.y as f32 / self.renderer.config.height as f32 - 0.5;
-            //         let angle_y = norm_x * 5.0;
-            //         let angle_xz = -norm_y;
-
-            //         let new_position = [
-            //             angle_xz.cos() * angle_y.sin() * dist,
-            //             angle_xz.sin() * dist + MODEL_CENTER_Y,
-            //             angle_xz.cos() * angle_y.cos() * dist,
-            //         ];
-
-            //         if let Some(ref mut ubo) = self.ubo {
-            //             // no reference before Some
-            //             ubo.camera.update_position(
-            //                 new_position,
-            //                 [0f32, MODEL_CENTER_Y, 0f32],
-            //                 [0f32, 1f32, 0f32],
-            //             );
-            //         }
-            //     }
-            // }
             _ => {}
         }
     }
@@ -657,6 +638,7 @@ impl RenderApp {
     pub fn render(mut self, event_loop: EventLoop<()>) {
         let mut last_update_inst = Instant::now();
         let mut left_mouse_down = false;
+        let mut something_changed = false;
 
         event_loop.run(move |event, _, control_flow| {
             // Have the closure take ownership of the resources.
@@ -667,11 +649,13 @@ impl RenderApp {
             *control_flow = ControlFlow::Wait;
             match event {
                 Event::RedrawEventsCleared => {
-                    let target_frametime = Duration::from_secs_f64(1.0 / 30.0);
+                    let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                     let time_since_last_frame = last_update_inst.elapsed();
-                    if time_since_last_frame >= target_frametime {
+                    
+                    if something_changed && time_since_last_frame >= target_frametime {
                         self.renderer.window.request_redraw();
                         last_update_inst = Instant::now();
+                        something_changed = false;
                     } else {
                         *control_flow = ControlFlow::WaitUntil(
                             Instant::now() + target_frametime - time_since_last_frame,
@@ -792,10 +776,11 @@ impl RenderApp {
                     self.renderer
                         .window_surface
                         .configure(&self.renderer.device, &self.renderer.config);
+                    something_changed = true;
                 }
                 Event::DeviceEvent { event, .. } => match event {
                     _ => {
-                        self.update_device_event(event, &mut left_mouse_down);
+                        self.update_device_event(event, &mut left_mouse_down, &mut something_changed);
                     }
                 },
                 Event::WindowEvent { event, .. } => match event {
@@ -828,6 +813,10 @@ impl RenderApp {
                     }
                 },
                 Event::RedrawRequested(_) => {
+                    // println!("blocking");
+                    // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
+                    // println!("done");
+                    println!("redrawing");
                     let frame = match self.renderer.window_surface.get_current_frame() {
                         Ok(frame) => frame,
                         Err(_) => {
