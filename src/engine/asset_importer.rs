@@ -17,7 +17,7 @@ fn total_bounds() -> NodeTLAS {
 }
 
 pub fn import_obj(path: &str) -> Option<Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)>> {
-    let (models, materials) = tobj::load_obj(
+    let (models, _materials) = tobj::load_obj(
         path,
         &tobj::LoadOptions {
             // triangulate: true,
@@ -128,14 +128,13 @@ fn recursive_build(
     end: usize,
     tlas_height: usize,
 ) -> () {
-    let mut centroid_bounds: NodeTLAS = NodeTLAS {
-        first: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
-        second: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
-    };
-
-    centroid_bounds = triangle_params_unsorted
-        .iter()
-        .fold(centroid_bounds, |acc, new| acc.merge(&new.bounds()));
+    let centroid_bounds = triangle_params_unsorted[start..end].iter().fold(
+        NodeTLAS {
+            first: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
+            second: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
+        },
+        |acc, new| acc.merge(&new.bounds()),
+    );
 
     let diagonal = centroid_bounds.second - centroid_bounds.first;
 
@@ -152,7 +151,7 @@ fn recursive_build(
     } else {
         let mid = (start + end) / 2;
 
-        triangle_params_unsorted.select_nth_unstable_by(mid, |a, b| {
+        triangle_params_unsorted[start..end].select_nth_unstable_by(mid - start, |a, b| {
             b.bounds_centroid()[split_dimension]
                 .partial_cmp(&a.bounds_centroid()[split_dimension])
                 .unwrap()
