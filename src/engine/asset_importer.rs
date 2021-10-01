@@ -19,7 +19,7 @@ fn total_bounds() -> NodeTLAS {
 }
 
 pub fn import_obj(path: &str) -> Option<Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)>> {
-    let (models, materials) = tobj::load_obj(
+    let (models, _materials) = tobj::load_obj(
         path,
         &tobj::LoadOptions {
             // triangulate: true,
@@ -141,7 +141,7 @@ fn recursive_build(
         |acc, new| acc.merge(&new.bounds()),
     );
 
-    println!("cb: {:?}", centroid_bounds);
+    // println!("cb: {:?}", centroid_bounds);
 
     let diagonal = centroid_bounds.second - centroid_bounds.first;
 
