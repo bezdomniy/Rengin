@@ -2,9 +2,11 @@ struct NodeBLAS {
     point1: vec4<f32>;
     point2: vec4<f32>;
     point3: vec4<f32>;
+    blankp: vec4<f32>;
     normal1: vec4<f32>;
     normal2: vec4<f32>;
     normal3: vec4<f32>;
+    blankv: vec4<f32>;
 };
 
 struct NodeTLAS {
@@ -48,7 +50,7 @@ struct UBO {
     camera: Camera;
     len_tlas: i32;
     len_blas: i32;
-    _padding: array<u32,2>;
+    padding: array<u32,2>;
 };
 
 [[block]]
@@ -58,7 +60,7 @@ struct TLAS {
 
 [[block]]
 struct BLAS {
-    BLAS: [[stride(96)]] array<NodeBLAS>;
+    BLAS: [[stride(128)]] array<NodeBLAS>;
 };
 
 [[block]]
@@ -172,8 +174,8 @@ struct Node {
   level: i32;
   branch: i32;
 };
-let MAX_STACK_SIZE:i32 = 30;
-var topStack: i32 = -1;
+let MAX_STACK_SIZE:i32 = 20;
+var<private> topStack: i32 = -1;
 var<private> stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
 
 
@@ -201,7 +203,7 @@ fn intersectTLAS(ray: Ray) -> Intersection {
 
     loop  
     {
-        if (topStack <= -1) {break};
+        if (topStack == -1) {break};
 
         nextNode = pop_stack();
         // nodeIdx = int(pow(2, nextNode.level))  - 1 + nextNode.branch;
@@ -267,17 +269,17 @@ fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4
     var n: vec4<f32> = vec4<f32>(0.0);
     let objectPoint: vec4<f32> = objectParams.inverseTransform * point; // World to object
 
-    if (typeEnum == 0) {
-        n = objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
-    }
-    elseif (typeEnum == 1) {
-        n = vec4<f32>(0.0,1.0,0.0,0.0);
-    }
-    elseif (typeEnum == 2) {
+    // if (typeEnum == 0) {
+    //     n = objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    // }
+    // elseif (typeEnum == 1) {
+    //     n = vec4<f32>(0.0,1.0,0.0,0.0);
+    // }
+    // elseif (typeEnum == 2) {
         let shape: NodeBLAS = blas.BLAS[-(intersection.id+2)];
         n = shape.normal2 * intersection.uv.x + shape.normal3 * intersection.uv.y + shape.normal1 * (1.0 - intersection.uv.x - intersection.uv.y);
         n.w = 0.0;
-    }
+    // }
     return normalToWorld(n);
 }
 
@@ -406,7 +408,7 @@ fn renderScene(ray: Ray) -> vec4<f32> {
     // vec4 lightVec = normalize(ubo.lightPos - pos);       
     // vec3 normal;
 
-    if (intersection.id >= 0) {
+    // if (intersection.id >= 0) {
     //   for (int i = 0; i < arrayLength(shapes); i++)
     //   {
     //     if (objectID == i)
@@ -419,10 +421,11 @@ fn renderScene(ray: Ray) -> vec4<f32> {
     //       // color = vec4(1.0,0.0,0.0,1.0);
     //     }
     //   }
-        color = vec4<f32>(1.0,0.0,0.0,1.0);
-    }
+    //     color = vec4<f32>(1.0,0.0,0.0,1.0);
+    // }
 
-    else {
+    // else {
+    if (intersection.id != -1) {
         let hitParams: HitParams = getHitParams(ray, intersection, 2);
 
         let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
@@ -430,6 +433,10 @@ fn renderScene(ray: Ray) -> vec4<f32> {
         color = lighting(objectParams.material, ubo.lightPos,
                                 hitParams, shadowed);
         color.w = 1.0;
+
+        // color.g = 0.0;
+        // color.g = 1.0;
+        // color.g = 0.0;
         // color = vec4<f32>(0.0,1.0,0.0,1.0);
     }
     

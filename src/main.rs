@@ -36,7 +36,7 @@ use std::mem;
 // use core::num;
 
 // use wgpu::BufferUsage;
-use glam::{ Mat4, Vec4};
+use glam::{Mat4, Vec4};
 
 use engine::asset_importer::import_obj;
 
@@ -57,7 +57,6 @@ struct GameState {
     pub camera_centre: [f32; 3],
     pub camera_up: [f32; 3],
 }
-
 
 struct RenderApp {
     renderer: RenginWgpu,
@@ -138,7 +137,7 @@ impl RenderApp {
         let camera_dist = 9.0;
         // TODO: find out why models are appearing upside-down
         let camera_centre = [0.0, 1.0, 0.0];
-        let camera_up = [0.0, 1.0, 0.0];
+        let camera_up = [0.0, -1.0, 0.0];
 
         self.game_state = Some(GameState {
             camera_angle_xz,
@@ -151,7 +150,7 @@ impl RenderApp {
         let camera_position = [
             camera_angle_xz.cos() * camera_angle_y.sin() * camera_dist,
             camera_angle_xz.sin() * camera_dist + camera_centre[1],
-            camera_angle_xz.cos() * camera_angle_y.cos() * camera_dist,
+            -camera_angle_xz.cos() * camera_angle_y.cos() * camera_dist,
         ];
 
         println!("{} {}", camera_angle_y, camera_angle_xz);
@@ -256,6 +255,13 @@ impl RenderApp {
         log::info!("Creating buffers...");
 
         let (dragon_tlas, dragon_blas) = self.objects.as_ref().unwrap().get(0).unwrap();
+
+        // for node in dragon_blas {
+        //     println!("{:?}", node.points);
+        // }
+        // for node in dragon_tlas {
+        //     println!("{:?}", node);
+        // }
 
         let buf_ubo = self
             .renderer
@@ -546,7 +552,12 @@ impl RenderApp {
         );
     }
 
-    fn update_device_event(&mut self, event: DeviceEvent, left_mouse_down: &mut bool, something_changed: &mut bool) {
+    fn update_device_event(
+        &mut self,
+        event: DeviceEvent,
+        left_mouse_down: &mut bool,
+        something_changed: &mut bool,
+    ) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
                 // println!("x:{}, y:{}", position.x, position.y);
@@ -651,7 +662,7 @@ impl RenderApp {
                 Event::RedrawEventsCleared => {
                     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                     let time_since_last_frame = last_update_inst.elapsed();
-                    
+
                     if something_changed && time_since_last_frame >= target_frametime {
                         self.renderer.window.request_redraw();
                         last_update_inst = Instant::now();
@@ -780,7 +791,11 @@ impl RenderApp {
                 }
                 Event::DeviceEvent { event, .. } => match event {
                     _ => {
-                        self.update_device_event(event, &mut left_mouse_down, &mut something_changed);
+                        self.update_device_event(
+                            event,
+                            &mut left_mouse_down,
+                            &mut something_changed,
+                        );
                     }
                 },
                 Event::WindowEvent { event, .. } => match event {

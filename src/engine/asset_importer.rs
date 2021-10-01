@@ -1,11 +1,13 @@
 use crate::engine::rt_primitives::{NodeBLAS, NodeTLAS};
-use glam::const_vec4;
+use glam::{const_mat4, const_vec4};
 use tobj;
 
 fn empty_bounds() -> NodeTLAS {
     NodeTLAS {
         first: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
         second: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
+        // first: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
+        // second: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
     }
 }
 
@@ -30,6 +32,7 @@ pub fn import_obj(path: &str) -> Option<Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)>> {
     let mut ret: Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)> = vec![];
 
     for model in models.iter() {
+        // println!("{:?}",model.mesh.indices);
         let mut triangles: Vec<NodeBLAS> = model
             .mesh
             .indices
@@ -38,46 +41,48 @@ pub fn import_obj(path: &str) -> Option<Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)>> {
             .map(|triangle_indices| {
                 // println!("{:?}", triangle_indices);
                 NodeBLAS {
-                    points: [
-                        const_vec4!([
+                    points: const_mat4!(
+                        [
                             model.mesh.positions[3 * triangle_indices[0] as usize],
                             model.mesh.positions[(3 * triangle_indices[0] + 1) as usize],
                             model.mesh.positions[(3 * triangle_indices[0] + 2) as usize],
                             1.0
-                        ]),
-                        const_vec4!([
+                        ],
+                        [
                             model.mesh.positions[3 * triangle_indices[1] as usize],
                             model.mesh.positions[(3 * triangle_indices[1] + 1) as usize],
                             model.mesh.positions[(3 * triangle_indices[1] + 2) as usize],
                             1.0
-                        ]),
-                        const_vec4!([
+                        ],
+                        [
                             model.mesh.positions[3 * triangle_indices[2] as usize],
                             model.mesh.positions[(3 * triangle_indices[2] + 1) as usize],
                             model.mesh.positions[(3 * triangle_indices[2] + 2) as usize],
                             1.0
-                        ]),
-                    ],
-                    normals: [
-                        const_vec4!([
+                        ],
+                        [0.0; 4]
+                    ),
+                    normals: const_mat4!(
+                        [
                             model.mesh.normals[3 * triangle_indices[0] as usize],
                             model.mesh.normals[(3 * triangle_indices[0] + 1) as usize],
                             model.mesh.normals[(3 * triangle_indices[0] + 2) as usize],
                             0.0
-                        ]),
-                        const_vec4!([
+                        ],
+                        [
                             model.mesh.normals[3 * triangle_indices[1] as usize],
                             model.mesh.normals[(3 * triangle_indices[1] + 1) as usize],
                             model.mesh.normals[(3 * triangle_indices[1] + 2) as usize],
                             0.0
-                        ]),
-                        const_vec4!([
+                        ],
+                        [
                             model.mesh.normals[3 * triangle_indices[2] as usize],
                             model.mesh.normals[(3 * triangle_indices[2] + 1) as usize],
                             model.mesh.normals[(3 * triangle_indices[2] + 2) as usize],
                             0.0
-                        ]),
-                    ],
+                        ],
+                        [0.0; 4]
+                    ),
                 }
             })
             .collect();
@@ -128,14 +133,15 @@ fn recursive_build(
     end: usize,
     tlas_height: usize,
 ) -> () {
-    let mut centroid_bounds: NodeTLAS = NodeTLAS {
-        first: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
-        second: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
-    };
+    let centroid_bounds = triangle_params_unsorted[start..end].iter().fold(
+        NodeTLAS {
+            first: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
+            second: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
+        },
+        |acc, new| acc.merge(&new.bounds()),
+    );
 
-    centroid_bounds = triangle_params_unsorted
-        .iter()
-        .fold(centroid_bounds, |acc, new| acc.merge(&new.bounds()));
+    println!("cb: {:?}", centroid_bounds);
 
     let diagonal = centroid_bounds.second - centroid_bounds.first;
 
@@ -152,13 +158,15 @@ fn recursive_build(
     } else {
         let mid = (start + end) / 2;
 
-        triangle_params_unsorted.select_nth_unstable_by(mid, |a, b| {
+        triangle_params_unsorted[start..end].select_nth_unstable_by(mid - start, |a, b| {
             b.bounds_centroid()[split_dimension]
                 .partial_cmp(&a.bounds_centroid()[split_dimension])
                 .unwrap()
         });
 
         let node: usize = 2usize.pow(level as u32) + branch - 1;
+
+        // println!("adding: {:?}",centroid_bounds);
         tlas[node] = centroid_bounds;
 
         let n_shapes = end - start;
@@ -198,6 +206,7 @@ fn recursive_build(
 
                 // tlas[dummy_node] = total_bounds();
                 // tlas.swap(dummy_node, node);
+                // println!("adding dummy: {:?}",centroid_bounds);
                 tlas[dummy_node] = centroid_bounds;
                 tlas[dummy_node + 1] = empty_bounds();
 
