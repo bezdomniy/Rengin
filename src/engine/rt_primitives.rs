@@ -126,54 +126,12 @@ impl NodeBLAS {
         }
     }
     pub fn bounds(&self) -> NodeTLAS {
-        let min = const_vec4!([
-            self.points
-                .col(0)
-                .to_array()
-                .iter()
-                .fold(f32::INFINITY, |a, &b| a.min(b)),
-            self.points
-                .col(1)
-                .to_array()
-                .iter()
-                .fold(f32::INFINITY, |a, &b| a.min(b)),
-            self.points
-                .col(2)
-                .to_array()
-                .iter()
-                .fold(f32::INFINITY, |a, &b| a.min(b)),
-            1.0
-        ]);
-
-        let max = const_vec4!([
-            self.points
-                .col(0)
-                .to_array()
-                .iter()
-                .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-            self.points
-                .col(1)
-                .to_array()
-                .iter()
-                .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-            self.points
-                .col(2)
-                .to_array()
-                .iter()
-                .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-            1.0
-        ]);
-
-        NodeTLAS {
-            first: min,
-            second: max,
-        }
-        // let ret = self.points
-        //     .iter()
-        //     .fold(NodeTLAS::empty(), |aabb, p| aabb.add_point(p));
-
-        // println! {"{:?}",ret};
-        // ret
+        self.points
+            .to_cols_array_2d()
+            .iter()
+            .fold(NodeTLAS::empty(), |aabb, p| {
+                aabb.add_point(&Vec4::new(p[0], p[1], p[2], 1f32))
+            })
     }
 
     pub fn bounds_centroid(&self) -> Vec4 {
