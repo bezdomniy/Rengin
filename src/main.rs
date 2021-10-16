@@ -7,7 +7,7 @@ mod shaders;
 use wgpu::util::{DeviceExt, StagingBelt};
 use wgpu::{
     BindGroup, BindGroupLayout, Buffer, ComputePipeline, RenderPipeline, Sampler, ShaderModule,
-    Texture, TextureView,
+    Texture,
 };
 use winit::event::{
     DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode,
@@ -22,13 +22,13 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use std::borrow::Cow;
 // use std::pin::Pin;
 // use std::task::{Context, Poll};
-use std::thread;
+// use std::thread;
 use std::time::{Duration, Instant};
 
 use std::collections::HashMap;
 // use std::borrow::Cow;
 // use std::collections::HashMap;
-use std::env;
+use std::{default, env};
 // use std::fs::File;
 // use std::io::Write;
 use std::mem;
@@ -36,7 +36,7 @@ use std::mem;
 // use core::num;
 
 // use wgpu::BufferUsage;
-use glam::{Mat4, Vec4};
+use glam::{const_vec2, const_vec4, Mat4, Vec2, Vec4};
 
 use engine::asset_importer::import_obj;
 
@@ -46,9 +46,9 @@ use crate::renderer::wgpu_utils::RenginWgpu;
 
 static WIDTH: u32 = 800;
 static HEIGHT: u32 = 600;
-static WORKGROUP_SIZE: [u32; 3] = [32, 32, 1];
+static WORKGROUP_SIZE: [u32; 3] = [8, 8, 1];
 
-static FRAMERATE: f64 = 10.0;
+static FRAMERATE: f64 = 5.0;
 
 struct GameState {
     pub camera_angle_y: f32,
@@ -161,7 +161,8 @@ impl RenderApp {
             camera_up,
             WIDTH as u32,
             HEIGHT as u32,
-            1.0472f32,
+            std::f32::consts::FRAC_PI_3,
+            // 1.0472f32,
         );
 
         self.ubo = Some(UBO::new(
@@ -277,7 +278,7 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("TLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&dragon_tlas),
+                contents: bytemuck::cast_slice(dragon_tlas),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -286,7 +287,7 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("BLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&dragon_blas),
+                contents: bytemuck::cast_slice(dragon_blas),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -385,7 +386,7 @@ impl RenderApp {
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("compute"),
-                    bind_group_layouts: &[&self.compute_bind_group_layout.as_ref().unwrap()],
+                    bind_group_layouts: &[self.compute_bind_group_layout.as_ref().unwrap()],
                     push_constant_ranges: &[],
                 });
 
@@ -439,10 +440,10 @@ impl RenderApp {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler.as_ref().unwrap()),
+                        resource: wgpu::BindingResource::Sampler(self.sampler.as_ref().unwrap()),
                     },
                 ],
-                layout: &self.render_bind_group_layout.as_ref().unwrap(),
+                layout: self.render_bind_group_layout.as_ref().unwrap(),
                 label: Some("bind group"),
             },
         ));
@@ -452,7 +453,7 @@ impl RenderApp {
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("render"),
-                    bind_group_layouts: &[&self.render_bind_group_layout.as_ref().unwrap()],
+                    bind_group_layouts: &[self.render_bind_group_layout.as_ref().unwrap()],
                     push_constant_ranges: &[],
                 });
 
@@ -497,7 +498,7 @@ impl RenderApp {
                 .device
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: None,
-                    layout: &self.compute_bind_group_layout.as_ref().unwrap(),
+                    layout: self.compute_bind_group_layout.as_ref().unwrap(),
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -568,8 +569,8 @@ impl RenderApp {
                     //     game_state.camera_angle_y, game_state.camera_angle_xz
                     // );
 
-                    game_state.camera_angle_y = game_state.camera_angle_y + (delta.0 as f32);
-                    game_state.camera_angle_xz = game_state.camera_angle_xz + (delta.1 as f32);
+                    game_state.camera_angle_y += delta.0 as f32;
+                    game_state.camera_angle_xz += delta.1 as f32;
 
                     let norm_x = game_state.camera_angle_y / self.renderer.config.width as f32;
                     let norm_y = game_state.camera_angle_xz / self.renderer.config.height as f32;
@@ -597,7 +598,7 @@ impl RenderApp {
                 MouseScrollDelta::LineDelta(x, y) => {
                     // println!("{} {}", x, y);
                     let game_state: &mut GameState = self.game_state.as_mut().unwrap();
-                    game_state.camera_dist = game_state.camera_dist - ((y as f32) / 3.0);
+                    game_state.camera_dist -= (y as f32) / 3.;
 
                     let norm_x = game_state.camera_angle_y / self.renderer.config.width as f32;
                     let norm_y = game_state.camera_angle_xz / self.renderer.config.height as f32;
@@ -708,7 +709,7 @@ impl RenderApp {
                             .device
                             .create_bind_group(&wgpu::BindGroupDescriptor {
                                 label: None,
-                                layout: &self.compute_bind_group_layout.as_ref().unwrap(),
+                                layout: self.compute_bind_group_layout.as_ref().unwrap(),
                                 entries: &[
                                     wgpu::BindGroupEntry {
                                         binding: 0,
@@ -772,11 +773,11 @@ impl RenderApp {
                                 wgpu::BindGroupEntry {
                                     binding: 1,
                                     resource: wgpu::BindingResource::Sampler(
-                                        &self.sampler.as_ref().unwrap(),
+                                        self.sampler.as_ref().unwrap(),
                                     ),
                                 },
                             ],
-                            layout: &self.render_bind_group_layout.as_ref().unwrap(),
+                            layout: self.render_bind_group_layout.as_ref().unwrap(),
                             label: Some("bind group"),
                         },
                     ));
@@ -832,7 +833,7 @@ impl RenderApp {
                     // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
                     // println!("done");
                     println!("redrawing");
-                    let frame = match self.renderer.window_surface.get_current_frame() {
+                    let frame = match self.renderer.window_surface.get_current_texture() {
                         Ok(frame) => frame,
                         Err(_) => {
                             self.renderer
@@ -840,12 +841,11 @@ impl RenderApp {
                                 .configure(&self.renderer.device, &self.renderer.config);
                             self.renderer
                                 .window_surface
-                                .get_current_frame()
+                                .get_current_texture()
                                 .expect("Failed to acquire next surface texture!")
                         }
                     };
                     let view = frame
-                        .output
                         .texture
                         .create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -914,22 +914,242 @@ impl RenderApp {
                     command_encoder.pop_debug_group();
 
                     self.renderer.queue.submit(Some(command_encoder.finish()));
+                    frame.present();
                 }
                 _ => {}
             }
         });
     }
 }
+//######################## TEST
+
+const MAXLEN: f32 = 10000.0;
+struct Ray {
+    rayO: Vec4,
+    rayD: Vec4,
+}
+
+struct Intersection {
+    uv: Vec2,
+    id: i32,
+    closestT: f32,
+}
+
+fn intersectAABB(ray: &Ray, aabbIdx: i32, tlas: &Vec<NodeTLAS>) -> bool {
+    let INFINITY: f32 = 1.0 / 0.0;
+
+    let mut t_min: f32 = -INFINITY;
+    let mut t_max: f32 = INFINITY;
+    let mut temp: f32;
+    let mut invD: f32;
+    let mut t0: f32;
+    let mut t1: f32;
+
+    for a in 0..3 {
+        invD = 1.0 / ray.rayD[a];
+        t0 = (tlas.get(aabbIdx as usize).unwrap().first[a] - ray.rayO[a]) * invD;
+        t1 = (tlas.get(aabbIdx as usize).unwrap().second[a] - ray.rayO[a]) * invD;
+        if (invD < 0.0) {
+            temp = t0;
+            t0 = t1;
+            t1 = temp;
+        }
+        if (t0 > t_min) {
+            t_min = t0;
+        }
+        if (t1 < t_max) {
+            t_max = t1;
+        }
+        if (t_max <= t_min) {
+            return false;
+        }
+    }
+    return true;
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Node {
+    level: i32,
+    branch: i32,
+}
+impl Default for Node {
+    fn default() -> Node {
+        Node {
+            level: 0,
+            branch: 0,
+        }
+    }
+}
+
+const MAX_STACK_SIZE: usize = 20;
+// var<private> topStack: i32 = -1;
+// var<private> stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
+
+fn push_stack(node: Node, topStack: &mut i32, stack: &mut [Node; MAX_STACK_SIZE]) {
+    *topStack = *topStack + 1;
+    stack[*topStack as usize] = node;
+}
+
+fn pop_stack(topStack: &mut i32, stack: &mut [Node; MAX_STACK_SIZE]) -> Node {
+    let ret: Node = stack[*topStack as usize];
+    *topStack = *topStack - 1;
+    return ret;
+}
+
+fn intersectTLAS(ray: &Ray, tlas: &Vec<NodeTLAS>) -> Intersection {
+    // int topPrimivitiveIndices = 0;
+    let mut nextNode: Node = Node {
+        level: 0,
+        branch: 0,
+    };
+    let mut firstChildIdx: i32 = -1;
+    // let mut t1: Intersection = Intersection {
+    //     uv: const_vec2!([0.0, 0.0]),
+    //     id: -1,
+    //     closestT: -1.0,
+    // };
+    // let mut t2: Intersection = Intersection {
+    //     uv: const_vec2!([0.0, 0.0]),
+    //     id: -1,
+    //     closestT: -1.0,
+    // };
+    // let mut primIdx: i32 = -1;
+
+    let mut topStack: i32 = -1;
+    let mut stack: [Node; MAX_STACK_SIZE] = Default::default();
+
+    let mut ret: Intersection = Intersection {
+        uv: const_vec2!([0.0, 0.0]),
+        id: -1,
+        closestT: MAXLEN,
+    };
+    push_stack(nextNode, &mut topStack, &mut stack);
+
+    loop {
+        if (topStack == -1) {
+            break;
+        };
+
+        if topStack > 2 {
+            println!("{}", topStack);
+        }
+
+        nextNode = pop_stack(&mut topStack, &mut stack);
+        // nodeIdx = int(pow(2, nextNode.level))  - 1 + nextNode.branch;
+
+        firstChildIdx =
+            (f32::powf(2.0, (nextNode.level as f32) + 1.0) as i32) - 1 + (nextNode.branch * 2);
+
+        // var test: u32 = ubo.len_tlas;
+
+        if (firstChildIdx < tlas.len() as i32) {
+            if (intersectAABB(ray, firstChildIdx, tlas)) {
+                push_stack(
+                    Node {
+                        level: nextNode.level + 1,
+                        branch: nextNode.branch * 2,
+                    },
+                    &mut topStack,
+                    &mut stack,
+                );
+            }
+
+            if (intersectAABB(ray, firstChildIdx + 1, tlas)) {
+                push_stack(
+                    Node {
+                        level: nextNode.level + 1,
+                        branch: (nextNode.branch * 2) + 1,
+                    },
+                    &mut topStack,
+                    &mut stack,
+                );
+            }
+        } else {
+        }
+    }
+    return ret;
+}
+
+fn intersect(ray: Ray, inverseTransform: Mat4, tlas: &Vec<NodeTLAS>) -> Intersection {
+    // TODO: this will need the id of the object as input in future when we are rendering more than one model
+    let nRay: Ray = Ray {
+        rayO: inverseTransform * ray.rayO,
+        rayD: inverseTransform * ray.rayD,
+    };
+    return intersectTLAS(&nRay, tlas);
+}
+
+fn rayForPixel(x: u32, y: u32, camera: &Camera) -> Ray {
+    let xOffset: f32 = ((x as f32) + 0.5) * camera.pixel_size;
+    let yOffset: f32 = ((y as f32) + 0.5) * camera.pixel_size;
+
+    let worldX: f32 = camera.half_width - xOffset;
+    let worldY: f32 = camera.half_height - yOffset;
+
+    let pixel: Vec4 = camera.inverse_transform * const_vec4!([worldX, worldY, -1.0, 1.0]);
+
+    let rayO: Vec4 = camera.inverse_transform * const_vec4!([0.0, 0.0, 0.0, 1.0]);
+
+    return Ray {
+        rayO,
+        rayD: Vec4::normalize(pixel - rayO),
+    };
+}
+//########################
 
 fn main() {
     env_logger::init();
     let args: Vec<String> = env::args().collect();
 
     let model_path = &args[1];
+    // let objects = import_obj(model_path);
+    // let (tlas, blas) = objects.as_ref().unwrap().get(0).unwrap();
+
+    // let inverseTransform = Mat4::IDENTITY;
+
+    // let camera_angle_y = 0.0;
+    // let camera_angle_xz = 0.0;
+    // let camera_dist = 9.0;
+    // // TODO: find out why models are appearing upside-down
+    // let camera_centre = [0.0, 1.0, 0.0];
+    // let camera_up = [0.0, -1.0, 0.0];
+
+    // let game_state = Some(GameState {
+    //     camera_angle_xz,
+    //     camera_angle_y,
+    //     camera_dist,
+    //     camera_centre,
+    //     camera_up,
+    // });
+
+    // let camera_position = [
+    //     camera_angle_xz.cos() * camera_angle_y.sin() * camera_dist,
+    //     camera_angle_xz.sin() * camera_dist + camera_centre[1],
+    //     -camera_angle_xz.cos() * camera_angle_y.cos() * camera_dist,
+    // ];
+
+    // // println!("{} {}", camera_angle_y, camera_angle_xz);
+
+    // let camera = Camera::new(
+    //     camera_position,
+    //     camera_centre,
+    //     camera_up,
+    //     WIDTH as u32,
+    //     HEIGHT as u32,
+    //     std::f32::consts::FRAC_PI_3,
+    //     // 1.0472f32,
+    // );
+
+    // for x in 0..WIDTH {
+    //     for y in 0..HEIGHT {
+    //         let ray: Ray = rayForPixel(x, y, &camera);
+    //         intersect(ray, inverseTransform, tlas);
+    //     }
+    // }
 
     let event_loop = EventLoop::new();
     let mut app = RenderApp::new(&event_loop);
-    app.init(&model_path);
+    app.init(model_path);
 
     // let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();
     // renderdoc_api.start_frame_capture(std::ptr::null(), std::ptr::null());
