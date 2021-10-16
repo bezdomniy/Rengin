@@ -1,24 +1,8 @@
-use crate::engine::rt_primitives::{NodeBLAS, NodeTLAS};
-use glam::{const_mat4, const_vec4};
+use crate::engine::rt_primitives::{BoundingBox, BoundingBoxes, NodeInner, NodeLeaf, BVH};
+use glam::{const_mat4, const_vec4, Vec4Swizzles};
 use tobj;
 
-fn empty_bounds() -> NodeTLAS {
-    NodeTLAS {
-        first: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
-        second: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
-        // first: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
-        // second: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
-    }
-}
-
-fn total_bounds() -> NodeTLAS {
-    NodeTLAS {
-        first: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
-        second: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
-    }
-}
-
-pub fn import_obj(path: &str) -> Option<Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)>> {
+pub fn import_obj(path: &str) -> Option<Vec<BVH>> {
     let (models, _materials) = tobj::load_obj(
         path,
         &tobj::LoadOptions {
@@ -29,18 +13,18 @@ pub fn import_obj(path: &str) -> Option<Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)>> {
     )
     .expect("Failed to OBJ load file");
 
-    let mut ret: Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)> = vec![];
+    let mut ret: Vec<BVH> = vec![];
 
     for model in models.iter() {
         // println!("{:?}",model.mesh.indices);
-        let mut triangles: Vec<NodeBLAS> = model
+        let mut triangles: Vec<NodeLeaf> = model
             .mesh
             .indices
             .chunks_exact(3)
             .into_iter()
             .map(|triangle_indices| {
                 // println!("{:?}", triangle_indices);
-                NodeBLAS {
+                NodeLeaf {
                     points: const_mat4!(
                         [
                             model.mesh.positions[3 * triangle_indices[0] as usize],
@@ -87,8 +71,10 @@ pub fn import_obj(path: &str) -> Option<Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)>> {
             })
             .collect();
 
-        let (tlas, blas) = build(&mut triangles);
-        ret.push((tlas, blas));
+        let (bounding_boxes, leaf_nodes) = build(&mut triangles);
+        let inner_nodes = flatten(&bounding_boxes);
+
+        ret.push(BVH::new(inner_nodes, leaf_nodes));
     }
 
     Some(ret)
@@ -102,39 +88,53 @@ fn log_2(x: usize) -> usize {
     num_bits::<usize>() - x.leading_zeros() as usize - 1
 }
 
-fn build(triangles: &mut Vec<NodeBLAS>) -> (Vec<NodeTLAS>, Vec<NodeBLAS>) {
-    let mut tlas: Vec<NodeTLAS> = Vec::new();
-    tlas.resize(triangles.len().next_power_of_two(), empty_bounds());
-    let tlas_height = log_2(triangles.len());
+// TODO: placeholder for now
+fn flatten(bounding_boxes: &BoundingBoxes) -> Vec<NodeInner> {
+    bounding_boxes
+        .items
+        .iter()
+        .map(|bounding_box| NodeInner {
+            first: bounding_box.first.xyz(),
+            skip_ptr_or_prim_idx1: 1,
+            second: bounding_box.second.xyz(),
+            prim_idx2: 1,
+        })
+        .collect()
+}
 
-    let mut blas: Vec<NodeBLAS> = Vec::with_capacity(triangles.len().next_power_of_two());
+fn build(triangles: &mut Vec<NodeLeaf>) -> (BoundingBoxes, Vec<NodeLeaf>) {
+    let mut bounding_boxes: BoundingBoxes = BoundingBoxes::new(triangles.len().next_power_of_two());
+
+    let bvh_height = log_2(triangles.len());
+
+    let mut primitives: Vec<NodeLeaf> = Vec::with_capacity(triangles.len().next_power_of_two());
 
     recursive_build(
-        &mut tlas,
-        &mut blas,
+        &mut bounding_boxes,
+        &mut primitives,
         triangles,
         0,
         0,
         0,
         triangles.len(),
-        tlas_height,
+        bvh_height,
     );
 
-    (tlas, blas)
+    (bounding_boxes, primitives)
 }
 
 fn recursive_build(
-    tlas: &mut Vec<NodeTLAS>,
-    blas: &mut Vec<NodeBLAS>,
-    triangle_params_unsorted: &mut Vec<NodeBLAS>,
+    bounding_boxes: &mut BoundingBoxes,
+    primitives: &mut Vec<NodeLeaf>,
+    triangle_params_unsorted: &mut Vec<NodeLeaf>,
     level: usize,
     branch: usize,
     start: usize,
     end: usize,
-    tlas_height: usize,
+    bvh_height: usize,
 ) -> () {
     let centroid_bounds = triangle_params_unsorted[start..end].iter().fold(
-        NodeTLAS {
+        BoundingBox {
             first: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
             second: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
         },
@@ -167,51 +167,51 @@ fn recursive_build(
         let node: usize = 2usize.pow(level as u32) + branch - 1;
 
         // println!("adding: {:?}",centroid_bounds);
-        tlas[node] = centroid_bounds;
+        bounding_boxes[node] = centroid_bounds;
 
         let n_shapes = end - start;
 
         if n_shapes > 2 {
             recursive_build(
-                tlas,
-                blas,
+                bounding_boxes,
+                primitives,
                 triangle_params_unsorted,
                 level + 1,
                 branch * 2,
                 start,
                 mid,
-                tlas_height,
+                bvh_height,
             );
             recursive_build(
-                tlas,
-                blas,
+                bounding_boxes,
+                primitives,
                 triangle_params_unsorted,
                 level + 1,
                 (branch * 2) + 1,
                 mid,
                 end,
-                tlas_height,
+                bvh_height,
             );
         } else {
-            blas.push(triangle_params_unsorted[start]);
+            primitives.push(triangle_params_unsorted[start]);
 
             if n_shapes == 2 {
-                blas.push(triangle_params_unsorted[start + 1]);
+                primitives.push(triangle_params_unsorted[start + 1]);
             } else {
-                blas.push(NodeBLAS::empty());
+                primitives.push(NodeLeaf::empty());
             }
-            if level < tlas_height {
-                // println!("level {}, tlas_height {}", level, tlas_height);
+            if level < bvh_height {
+                // println!("level {}, bvh_height {}", level, bvh_height);
                 let dummy_node = 2usize.pow((level + 1) as u32) + (branch * 2) - 1;
 
-                // tlas[dummy_node] = total_bounds();
+                // tlas[dummy_node] = BoundingBox::total();
                 // tlas.swap(dummy_node, node);
                 // println!("adding dummy: {:?}",centroid_bounds);
-                tlas[dummy_node] = centroid_bounds;
-                tlas[dummy_node + 1] = empty_bounds();
+                bounding_boxes[dummy_node] = centroid_bounds;
+                bounding_boxes[dummy_node + 1] = BoundingBox::empty();
 
-                blas.push(NodeBLAS::empty());
-                blas.push(NodeBLAS::empty());
+                primitives.push(NodeLeaf::empty());
+                primitives.push(NodeLeaf::empty());
             }
             ()
         }

@@ -1,4 +1,6 @@
-use glam::{const_mat4, const_vec3, const_vec4, Mat3, Mat4, Vec4};
+use std::ops::{Index, IndexMut};
+
+use glam::{const_mat4, const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -17,28 +19,109 @@ pub struct ObjectParams {
     pub material: Material,
 }
 
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone)]
 #[repr(C)]
-pub struct NodeTLAS {
+pub struct BoundingBox {
     pub first: Vec4,
     pub second: Vec4,
 }
 
+pub struct BoundingBoxes {
+    pub items: Vec<BoundingBox>,
+}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct NodeBLAS {
+pub struct NodeLeaf {
     pub points: Mat4,
     pub normals: Mat4,
     // pub points: [Vec4; 3],
     // pub normals: [Vec4; 3],
 }
 
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct Shape {
-    tlas_offset: u32,
-    blas_offset: u32,
-    type_enum: u32,
+pub struct NodeInner {
+    pub first: Vec3,
+    pub skip_ptr_or_prim_idx1: u32,
+    pub second: Vec3,
+    pub prim_idx2: u32,
 }
+
+#[derive(Debug, Default)]
+#[repr(C)]
+pub struct BVH {
+    pub inner_nodes: Vec<NodeInner>,
+    pub leaf_nodes: Vec<NodeLeaf>,
+}
+
+pub struct BoundingBoxesIter<'a> {
+    bounding_boxes: &'a BoundingBoxes,
+    stack: Vec<(u32, u32)>,
+}
+
+impl BVH {
+    pub fn new(inner_nodes: Vec<NodeInner>, leaf_nodes: Vec<NodeLeaf>) -> Self {
+        BVH {
+            inner_nodes,
+            leaf_nodes,
+        }
+    }
+}
+
+impl BoundingBoxes {
+    pub fn new(size: usize) -> Self {
+        let mut items: Vec<BoundingBox> = Vec::new();
+        items.resize(size, BoundingBox::empty());
+        BoundingBoxes { items }
+    }
+    pub fn iter(&self) -> BoundingBoxesIter<'_> {
+        BoundingBoxesIter {
+            bounding_boxes: self,
+            stack: vec![(0, 0)],
+        }
+    }
+}
+
+impl Index<usize> for BoundingBoxes {
+    type Output = BoundingBox;
+    fn index(&self, i: usize) -> &BoundingBox {
+        self.items.get(i).unwrap()
+    }
+}
+
+impl IndexMut<usize> for BoundingBoxes {
+    fn index_mut(&mut self, i: usize) -> &mut BoundingBox {
+        self.items.get_mut(i).unwrap()
+    }
+}
+
+impl<'a> Iterator for BoundingBoxesIter<'a> {
+    type Item = &'a BoundingBox;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stack.is_empty() {
+            return None;
+        }
+
+        let (level, branch) = self.stack.pop().unwrap();
+        let first_child_idx = u32::pow(2, level) - 1 + (branch * 2);
+
+        if first_child_idx < self.bounding_boxes.items.len() as u32 {
+            self.stack.push((level + 1, branch * 2));
+            self.stack.push((level + 1, (branch * 2) + 1));
+        }
+
+        self.bounding_boxes.items.get(first_child_idx as usize)
+    }
+}
+
+// #[repr(C)]
+// pub struct Shape {
+//     tlas_offset: u32,
+//     blas_offset: u32,
+//     type_enum: u32,
+// }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -57,18 +140,23 @@ pub struct UBO {
     // Compute shader uniform block object
     light_pos: Vec4,
     pub camera: Camera,
-    len_tlas: i32,
-    len_blas: i32,
+    len_inner_nodes: i32,
+    len_leaf_nodes: i32,
     _padding: [u32; 2],
 }
 
 impl UBO {
-    pub fn new(light_pos: [f32; 4], len_tlas: i32, len_blas: i32, camera: Camera) -> UBO {
+    pub fn new(
+        light_pos: [f32; 4],
+        len_inner_nodes: i32,
+        len_leaf_nodes: i32,
+        camera: Camera,
+    ) -> UBO {
         UBO {
             light_pos: const_vec4!(light_pos),
-            camera: camera,
-            len_tlas: len_tlas,
-            len_blas: len_blas,
+            camera,
+            len_inner_nodes,
+            len_leaf_nodes,
             _padding: [0, 0],
         }
     }
@@ -118,18 +206,18 @@ impl Camera {
     }
 }
 
-impl NodeBLAS {
-    pub fn empty() -> NodeBLAS {
-        NodeBLAS {
+impl NodeLeaf {
+    pub fn empty() -> NodeLeaf {
+        NodeLeaf {
             points: const_mat4!([f32::NEG_INFINITY; 16]),
             normals: const_mat4!([f32::NEG_INFINITY; 16]),
         }
     }
-    pub fn bounds(&self) -> NodeTLAS {
+    pub fn bounds(&self) -> BoundingBox {
         self.points
             .to_cols_array_2d()
             .iter()
-            .fold(NodeTLAS::empty(), |aabb, p| {
+            .fold(BoundingBox::empty(), |aabb, p| {
                 aabb.add_point(&Vec4::new(p[0], p[1], p[2], 1f32))
             })
     }
@@ -140,9 +228,9 @@ impl NodeBLAS {
     }
 }
 
-impl NodeTLAS {
-    pub fn empty() -> NodeTLAS {
-        NodeTLAS {
+impl BoundingBox {
+    pub fn empty() -> Self {
+        BoundingBox {
             first: const_vec4!([
                 f32::NEG_INFINITY,
                 f32::NEG_INFINITY,
@@ -158,7 +246,14 @@ impl NodeTLAS {
         }
     }
 
-    pub fn merge(&self, other: &NodeTLAS) -> NodeTLAS {
+    pub fn total() -> Self {
+        BoundingBox {
+            first: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
+            second: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
+        }
+    }
+
+    pub fn merge(&self, other: &BoundingBox) -> Self {
         let min: Vec4 = const_vec4!([
             f32::min(self.first.x, other.first.x),
             f32::min(self.first.y, other.first.y),
@@ -173,14 +268,14 @@ impl NodeTLAS {
             1.
         ]);
 
-        NodeTLAS {
+        BoundingBox {
             first: min,
             second: max,
         }
     }
 
     pub fn add_point(&self, point: &Vec4) -> Self {
-        NodeTLAS {
+        BoundingBox {
             first: self.first.min(*point),
             second: self.second.max(*point),
         }
