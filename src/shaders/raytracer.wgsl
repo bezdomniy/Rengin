@@ -188,13 +188,13 @@ let MAX_STACK_SIZE:i32 = 30;
 
 
 fn push_stack(node: Node, topStack: ptr<function,i32>, stack: ptr<function,array<Node,MAX_STACK_SIZE>>) {
-  topStack = *topStack + 1;
-  stack[*topStack] = node;
+  *topStack = *topStack + 1;
+  (*stack)[*topStack] = node;
 }
 
 fn pop_stack(topStack: ptr<function,i32>, stack: ptr<function,array<Node,MAX_STACK_SIZE>>) -> Node {
-  let ret: Node = *stack[*topStack];
-  topStack = *topStack - 1;
+  let ret: Node = (*stack)[*topStack];
+  *topStack = *topStack - 1;
   return ret;
 }
 
