@@ -40,13 +40,13 @@ use glam::{Mat4, Vec4};
 
 use engine::asset_importer::import_obj;
 
-use engine::rt_primitives::{Camera, Material, NodeBLAS, NodeTLAS, ObjectParams, UBO};
+use engine::rt_primitives::{BoundingBox, Camera, Material, NodeLeaf, ObjectParams, BVH, UBO};
 
 use crate::renderer::wgpu_utils::RenginWgpu;
 
 static WIDTH: u32 = 800;
 static HEIGHT: u32 = 600;
-static WORKGROUP_SIZE: [u32; 3] = [32, 32, 1];
+static WORKGROUP_SIZE: [u32; 3] = [8, 8, 1];
 
 static FRAMERATE: f64 = 10.0;
 
@@ -68,7 +68,7 @@ struct RenderApp {
     render_bind_group_layout: Option<BindGroupLayout>,
     render_bind_group: Option<BindGroup>,
     sampler: Option<Sampler>,
-    objects: Option<Vec<(Vec<NodeTLAS>, Vec<NodeBLAS>)>>,
+    objects: Option<Vec<BVH>>,
     buffers: Option<HashMap<&'static str, Buffer>>,
     texture: Option<Texture>,
     object_params: Option<ObjectParams>,
@@ -105,7 +105,6 @@ impl RenderApp {
         let mut now = Instant::now();
         log::info!("Loading models...");
         self.objects = import_obj(model_path);
-        // let (dragon_tlas, dragon_blas) = &objects[0];
         log::info!(
             "Finished loading models in {} millis.",
             now.elapsed().as_millis()
@@ -150,7 +149,7 @@ impl RenderApp {
         let camera_position = [
             camera_angle_xz.cos() * camera_angle_y.sin() * camera_dist,
             camera_angle_xz.sin() * camera_dist + camera_centre[1],
-            -camera_angle_xz.cos() * camera_angle_y.cos() * camera_dist,
+            camera_angle_xz.cos() * camera_angle_y.cos() * camera_dist,
         ];
 
         println!("{} {}", camera_angle_y, camera_angle_xz);
@@ -165,9 +164,21 @@ impl RenderApp {
         );
 
         self.ubo = Some(UBO::new(
-            [-4f32, 2f32, -3f32, 1f32],
-            self.objects.as_ref().unwrap().get(0).unwrap().0.len() as i32,
-            self.objects.as_ref().unwrap().get(0).unwrap().1.len() as i32,
+            [-4f32, 2f32, 3f32, 1f32],
+            self.objects
+                .as_ref()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .inner_nodes
+                .len() as i32,
+            self.objects
+                .as_ref()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .leaf_nodes
+                .len() as i32,
             camera,
         ));
 
@@ -254,7 +265,7 @@ impl RenderApp {
         let mut now = Instant::now();
         log::info!("Creating buffers...");
 
-        let (dragon_tlas, dragon_blas) = self.objects.as_ref().unwrap().get(0).unwrap();
+        let bvh = self.objects.as_ref().unwrap().get(0).unwrap();
 
         // for node in dragon_blas {
         //     println!("{:?}", node.points);
@@ -277,7 +288,7 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("TLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&dragon_tlas),
+                contents: bytemuck::cast_slice(&bvh.inner_nodes),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -286,7 +297,7 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("BLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&dragon_blas),
+                contents: bytemuck::cast_slice(&bvh.leaf_nodes),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 

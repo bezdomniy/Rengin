@@ -1,4 +1,4 @@
-struct NodeBLAS {
+struct NodeLeaf {
     point1: vec4<f32>;
     point2: vec4<f32>;
     point3: vec4<f32>;
@@ -9,9 +9,11 @@ struct NodeBLAS {
     blankv: vec4<f32>;
 };
 
-struct NodeTLAS {
-    first: vec4<f32>;
-    second: vec4<f32>;
+struct NodeInner {
+    first: vec3<f32>;
+    skip_ptr_or_prim_idx1: u32;
+    second: vec3<f32>;
+    idx2: u32;
 };
 
 struct Node {
@@ -48,19 +50,25 @@ struct Camera {
 struct UBO {
     lightPos: vec4<f32>;
     camera: Camera;
-    len_tlas: i32;
-    len_blas: i32;
-    padding: array<u32,2>;
+    len_inner_nodes: i32;
+    len_leaf_nodes: i32;
+    // padding: array<u32,2>;
+};
+
+// [[block]]
+// struct BVH {
+//     InnerNodes: [[stride(32)]] array<NodeInner>;
+//     LeafNodes: [[stride(128)]] array<NodeLeaf>;
+// };
+
+[[block]]
+struct InnerNodes {
+    InnerNodes: [[stride(32)]] array<NodeInner>;
 };
 
 [[block]]
-struct TLAS {
-    TLAS: [[stride(32)]] array<NodeTLAS>;
-};
-
-[[block]]
-struct BLAS {
-    BLAS: [[stride(128)]] array<NodeBLAS>;
+struct LeafNodes {
+    LeafNodes: [[stride(128)]] array<NodeLeaf>;
 };
 
 [[block]]
@@ -85,9 +93,9 @@ var imageData: texture_storage_2d<rgba8unorm,write>;
 [[group(0), binding(1)]]
 var<uniform> ubo: UBO;
 [[group(0), binding(2)]]
-var<storage, read> tlas: TLAS;
+var<storage, read> inner_nodes: InnerNodes;
 [[group(0), binding(3)]]
-var<storage, read> blas: BLAS;
+var<storage, read> leaf_nodes: LeafNodes;
 [[group(0), binding(4)]]
 var<storage, read> objectParams: ObjectParams;
 
@@ -113,18 +121,18 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
 
     var t_min: f32 = -INFINITY;
     var t_max: f32 = INFINITY;
-    var temp: f32;
-    var invD: f32;
+    // var temp: f32;
+    // var invD: f32;
     var t0: f32;
     var t1: f32;
 
     for (var a: i32 = 0; a < 3; a = a+1)
     {
-        invD = 1.0 / ray.rayD[a];
-        t0 = (tlas.TLAS[aabbIdx].first[a] - ray.rayO[a]) * invD;
-        t1 = (tlas.TLAS[aabbIdx].second[a] - ray.rayO[a]) * invD;
+        let invD = 1.0 / ray.rayD[a];
+        t0 = (inner_nodes.InnerNodes[aabbIdx].first[a] - ray.rayO[a]) * invD;
+        t1 = (inner_nodes.InnerNodes[aabbIdx].second[a] - ray.rayO[a]) * invD;
         if (invD < 0.0) {
-            temp = t0;
+            let temp = t0;
             t0 = t1;
             t1 = temp;
         }
@@ -145,8 +153,8 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
 
 fn triangleIntersect(ray: Ray, triangleIdx: i32, inIntersection: Intersection) -> Intersection {
     var uv: vec2<f32> = vec2<f32>(0.0);
-    let e1: vec3<f32> = (blas.BLAS[triangleIdx].point2 - blas.BLAS[triangleIdx].point1).xyz;
-    let e2: vec3<f32> = (blas.BLAS[triangleIdx].point3 - blas.BLAS[triangleIdx].point1).xyz;
+    let e1: vec3<f32> = (leaf_nodes.LeafNodes[triangleIdx].point2 - leaf_nodes.LeafNodes[triangleIdx].point1).xyz;
+    let e2: vec3<f32> = (leaf_nodes.LeafNodes[triangleIdx].point3 - leaf_nodes.LeafNodes[triangleIdx].point1).xyz;
 
     let dirCrossE2: vec3<f32> = cross(ray.rayD.xyz, e2);
     let det: f32 = dot(e1, dirCrossE2);
@@ -155,7 +163,7 @@ fn triangleIntersect(ray: Ray, triangleIdx: i32, inIntersection: Intersection) -
     }
 
     let f: f32 = 1.0 / det;
-    let p1ToOrigin: vec3<f32> = (ray.rayO - blas.BLAS[triangleIdx].point1).xyz;
+    let p1ToOrigin: vec3<f32> = (ray.rayO - leaf_nodes.LeafNodes[triangleIdx].point1).xyz;
     uv.x = f * dot(p1ToOrigin, dirCrossE2);
     if (uv.x < 0.0 || uv.x > 1.0) {
       return Intersection(inIntersection.uv,inIntersection.id,-1.0);
@@ -174,63 +182,70 @@ struct Node {
   level: i32;
   branch: i32;
 };
-let MAX_STACK_SIZE:i32 = 20;
-var<private> topStack: i32 = -1;
-var<private> stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
+let MAX_STACK_SIZE:i32 = 30;
+// var<private> topStack: i32 = -1;
+// var<private> stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
 
 
-fn push_stack(node: Node) {
-  topStack = topStack + 1;
-  stack[topStack] = node;
+fn push_stack(node: Node, topStack: ptr<function,i32>, stack: ptr<function,array<Node,MAX_STACK_SIZE>>) {
+  topStack = *topStack + 1;
+  stack[*topStack] = node;
 }
 
-fn pop_stack() -> Node {
-  let ret: Node = stack[topStack];
-  topStack = topStack - 1;
+fn pop_stack(topStack: ptr<function,i32>, stack: ptr<function,array<Node,MAX_STACK_SIZE>>) -> Node {
+  let ret: Node = *stack[*topStack];
+  topStack = *topStack - 1;
   return ret;
 }
 
-fn intersectTLAS(ray: Ray) -> Intersection {
+fn intersectInnerNodes(ray: Ray) -> Intersection {
     // int topPrimivitiveIndices = 0;
-    var nextNode: Node = Node(0, 0);
+    // var nextNode: Node = Node(0, 0);
     var firstChildIdx: i32 = -1;
-    var t1: Intersection = Intersection(vec2<f32>(0.0), -1, -1.0);
-    var t2: Intersection = Intersection(vec2<f32>(0.0), -1, -1.0);
-    var primIdx: i32 = -1;
+    // var t1: Intersection = Intersection(vec2<f32>(0.0), -1, -1.0);
+    // var t2: Intersection = Intersection(vec2<f32>(0.0), -1, -1.0);
+    // var primIdx: i32 = -1;
+
+    var stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
+    var topStack: i32 = -1;
 
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
-    push_stack(nextNode);
+    push_stack(Node(0, 0),&topStack, &stack);
 
     loop  
     {
         if (topStack == -1) {break};
 
-        nextNode = pop_stack();
+        let nextNode = pop_stack(&topStack, &stack);
         // nodeIdx = int(pow(2, nextNode.level))  - 1 + nextNode.branch;
 
-        firstChildIdx = i32(pow(2.0, f32(nextNode.level) + 1.0)) - 1 + (nextNode.branch * 2);
+        var next_level: i32 = 1;
+        for (var i: i32 = 0; i < nextNode.level; i = i+1) {
+            next_level = next_level * 2;
+        }
+        firstChildIdx = next_level - 1 + (nextNode.branch * 2);
 
-        // var test: u32 = ubo.len_tlas;
+        // firstChildIdx = i32(pow(2.0, f32(nextNode.level) + 1.0)) - 1 + (nextNode.branch * 2);
 
-        if (firstChildIdx < ubo.len_tlas) {
+        if (firstChildIdx < ubo.len_inner_nodes) {
             if (intersectAABB(ray, firstChildIdx)) {
-                push_stack(Node(nextNode.level + 1, nextNode.branch * 2));
+                push_stack(Node(nextNode.level + 1, nextNode.branch * 2),&topStack, &stack);
             }
 
             if (intersectAABB(ray, firstChildIdx + 1)) {
-                push_stack(Node(nextNode.level + 1, (nextNode.branch * 2) + 1));
+                push_stack(Node(nextNode.level + 1, (nextNode.branch * 2) + 1),&topStack, &stack);
             }
         }
         else {
             // primitiveIndices[topPrimivitiveIndices] = nextNode.branch * 2;
             // topPrimivitiveIndices += 1;
-            t1 = Intersection(ret.uv, ret.id, -1.0);
-            t2 = Intersection(ret.uv, ret.id, -1.0);
-            primIdx = nextNode.branch * 2;
+            // t1 = Intersection(ret.uv, ret.id, -1.0);
+            var t2 = Intersection(ret.uv, ret.id, -1.0);
+            let primIdx = nextNode.branch * 2;
 
-            t1 = triangleIntersect(ray, primIdx, ret);
+            let t1 = triangleIntersect(ray, primIdx, ret);
 
-            if (primIdx + 1 < ubo.len_blas && blas.BLAS[primIdx + 1].point1.w > 0.0) {
+            if (primIdx + 1 < ubo.len_leaf_nodes && leaf_nodes.LeafNodes[primIdx + 1].point1.w > 0.0) {
                 t2 = triangleIntersect(ray, primIdx + 1, ret);
             }
 
@@ -253,21 +268,21 @@ fn intersectTLAS(ray: Ray) -> Intersection {
 fn intersect(ray: Ray) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     let nRay: Ray = Ray(objectParams.inverseTransform * ray.rayO, objectParams.inverseTransform * ray.rayD);
-    return intersectTLAS(nRay);
+    return intersectInnerNodes(nRay);
 }
 
 fn normalToWorld(normal: vec4<f32>) -> vec4<f32>
 {
-    var ret: vec4<f32> = transpose(objectParams.inverseTransform) * normal;
-    ret.w = 0.0;
-    ret = normalize(ret);
+    let ret: vec4<f32> = normalize(vec4<f32>((transpose(objectParams.inverseTransform) * normal).xyz,0.0));
+    // ret.w = 0.0;
+    // ret = normalize(ret);
 
     return ret;
 }
 
 fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4<f32> {
-    var n: vec4<f32> = vec4<f32>(0.0);
-    let objectPoint: vec4<f32> = objectParams.inverseTransform * point; // World to object
+    // var n: vec4<f32> = vec4<f32>(0.0);
+    // let objectPoint: vec4<f32> = objectParams.inverseTransform * point; // World to object
 
     // if (typeEnum == 0) {
     //     n = objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -276,11 +291,11 @@ fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4
     //     n = vec4<f32>(0.0,1.0,0.0,0.0);
     // }
     // elseif (typeEnum == 2) {
-        let shape: NodeBLAS = blas.BLAS[-(intersection.id+2)];
-        n = shape.normal2 * intersection.uv.x + shape.normal3 * intersection.uv.y + shape.normal1 * (1.0 - intersection.uv.x - intersection.uv.y);
-        n.w = 0.0;
+        let shape: NodeLeaf = leaf_nodes.LeafNodes[-(intersection.id+2)];
+        return normalToWorld(vec4<f32>((shape.normal2 * intersection.uv.x + shape.normal3 * intersection.uv.y + shape.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)).xyz,0.0));
+        // n.w = 0.0;
     // }
-    return normalToWorld(n);
+    // return (n);
 }
 
 struct HitParams {
@@ -443,7 +458,7 @@ fn renderScene(ray: Ray) -> vec4<f32> {
     return color;
 }
 
-[[stage(compute), workgroup_size(32, 32, 1)]]
+[[stage(compute), workgroup_size(8, 8, 1)]]
 fn main([[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>) {
     let ray: Ray = rayForPixel(global_invocation_id.xy);
     let color: vec4<f32> = renderScene(ray);
