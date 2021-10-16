@@ -1,3 +1,5 @@
+use std::ops::{Index, IndexMut};
+
 use glam::{const_mat4, const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4};
 
 #[repr(C)]
@@ -24,6 +26,10 @@ pub struct BoundingBox {
     pub second: Vec4,
 }
 
+pub struct BoundingBoxes {
+    pub items: Vec<BoundingBox>,
+}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct NodeLeaf {
@@ -42,11 +48,72 @@ pub struct NodeInner {
     pub prim_idx2: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[repr(C)]
 pub struct BVH {
     pub inner_nodes: Vec<NodeInner>,
     pub leaf_nodes: Vec<NodeLeaf>,
+}
+
+pub struct BoundingBoxesIter<'a> {
+    bounding_boxes: &'a BoundingBoxes,
+    stack: Vec<(u32, u32)>,
+}
+
+impl BVH {
+    pub fn new(inner_nodes: Vec<NodeInner>, leaf_nodes: Vec<NodeLeaf>) -> Self {
+        BVH {
+            inner_nodes,
+            leaf_nodes,
+        }
+    }
+}
+
+impl BoundingBoxes {
+    pub fn new(size: usize) -> Self {
+        let mut items: Vec<BoundingBox> = Vec::new();
+        items.resize(size, BoundingBox::empty());
+        BoundingBoxes { items }
+    }
+    pub fn iter(&self) -> BoundingBoxesIter<'_> {
+        BoundingBoxesIter {
+            bounding_boxes: self,
+            stack: vec![(0, 0)],
+        }
+    }
+}
+
+impl Index<usize> for BoundingBoxes {
+    type Output = BoundingBox;
+    fn index(&self, i: usize) -> &BoundingBox {
+        self.items.get(i).unwrap()
+    }
+}
+
+impl IndexMut<usize> for BoundingBoxes {
+    fn index_mut(&mut self, i: usize) -> &mut BoundingBox {
+        self.items.get_mut(i).unwrap()
+    }
+}
+
+impl<'a> Iterator for BoundingBoxesIter<'a> {
+    type Item = &'a BoundingBox;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stack.is_empty() {
+            return None;
+        }
+
+        let (level, branch) = self.stack.pop().unwrap();
+        let first_child_idx = u32::pow(2, level) - 1 + (branch * 2);
+
+        if first_child_idx < self.bounding_boxes.items.len() as u32 {
+            self.stack.push((level + 1, branch * 2));
+            self.stack.push((level + 1, (branch * 2) + 1));
+        }
+
+        self.bounding_boxes.items.get(first_child_idx as usize)
+    }
 }
 
 // #[repr(C)]
@@ -162,7 +229,7 @@ impl NodeLeaf {
 }
 
 impl BoundingBox {
-    pub fn empty() -> BoundingBox {
+    pub fn empty() -> Self {
         BoundingBox {
             first: const_vec4!([
                 f32::NEG_INFINITY,
@@ -179,7 +246,14 @@ impl BoundingBox {
         }
     }
 
-    pub fn merge(&self, other: &BoundingBox) -> BoundingBox {
+    pub fn total() -> Self {
+        BoundingBox {
+            first: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
+            second: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
+        }
+    }
+
+    pub fn merge(&self, other: &BoundingBox) -> Self {
         let min: Vec4 = const_vec4!([
             f32::min(self.first.x, other.first.x),
             f32::min(self.first.y, other.first.y),

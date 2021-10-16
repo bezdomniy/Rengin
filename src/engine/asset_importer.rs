@@ -1,22 +1,6 @@
-use crate::engine::rt_primitives::{BoundingBox, NodeInner, NodeLeaf, BVH};
+use crate::engine::rt_primitives::{BoundingBox, BoundingBoxes, NodeInner, NodeLeaf, BVH};
 use glam::{const_mat4, const_vec4, Vec4Swizzles};
 use tobj;
-
-fn empty_bounds() -> BoundingBox {
-    BoundingBox {
-        first: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
-        second: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
-        // first: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
-        // second: const_vec4!([-1.0, -1.0, -1.0, -1.0]),
-    }
-}
-
-fn total_bounds() -> BoundingBox {
-    BoundingBox {
-        first: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
-        second: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
-    }
-}
 
 pub fn import_obj(path: &str) -> Option<Vec<BVH>> {
     let (models, _materials) = tobj::load_obj(
@@ -90,10 +74,7 @@ pub fn import_obj(path: &str) -> Option<Vec<BVH>> {
         let (bounding_boxes, leaf_nodes) = build(&mut triangles);
         let inner_nodes = flatten(&bounding_boxes);
 
-        ret.push(BVH {
-            inner_nodes,
-            leaf_nodes,
-        });
+        ret.push(BVH::new(inner_nodes, leaf_nodes));
     }
 
     Some(ret)
@@ -108,8 +89,9 @@ fn log_2(x: usize) -> usize {
 }
 
 // TODO: placeholder for now
-fn flatten(bounding_boxes: &Vec<BoundingBox>) -> Vec<NodeInner> {
+fn flatten(bounding_boxes: &BoundingBoxes) -> Vec<NodeInner> {
     bounding_boxes
+        .items
         .iter()
         .map(|bounding_box| NodeInner {
             first: bounding_box.first.xyz(),
@@ -120,9 +102,9 @@ fn flatten(bounding_boxes: &Vec<BoundingBox>) -> Vec<NodeInner> {
         .collect()
 }
 
-fn build(triangles: &mut Vec<NodeLeaf>) -> (Vec<BoundingBox>, Vec<NodeLeaf>) {
-    let mut bounding_boxes: Vec<BoundingBox> = Vec::new();
-    bounding_boxes.resize(triangles.len().next_power_of_two(), empty_bounds());
+fn build(triangles: &mut Vec<NodeLeaf>) -> (BoundingBoxes, Vec<NodeLeaf>) {
+    let mut bounding_boxes: BoundingBoxes = BoundingBoxes::new(triangles.len().next_power_of_two());
+
     let bvh_height = log_2(triangles.len());
 
     let mut primitives: Vec<NodeLeaf> = Vec::with_capacity(triangles.len().next_power_of_two());
@@ -142,7 +124,7 @@ fn build(triangles: &mut Vec<NodeLeaf>) -> (Vec<BoundingBox>, Vec<NodeLeaf>) {
 }
 
 fn recursive_build(
-    bounding_boxes: &mut Vec<BoundingBox>,
+    bounding_boxes: &mut BoundingBoxes,
     primitives: &mut Vec<NodeLeaf>,
     triangle_params_unsorted: &mut Vec<NodeLeaf>,
     level: usize,
@@ -222,11 +204,11 @@ fn recursive_build(
                 // println!("level {}, bvh_height {}", level, bvh_height);
                 let dummy_node = 2usize.pow((level + 1) as u32) + (branch * 2) - 1;
 
-                // tlas[dummy_node] = total_bounds();
+                // tlas[dummy_node] = BoundingBox::total();
                 // tlas.swap(dummy_node, node);
                 // println!("adding dummy: {:?}",centroid_bounds);
                 bounding_boxes[dummy_node] = centroid_bounds;
-                bounding_boxes[dummy_node + 1] = empty_bounds();
+                bounding_boxes[dummy_node + 1] = BoundingBox::empty();
 
                 primitives.push(NodeLeaf::empty());
                 primitives.push(NodeLeaf::empty());
