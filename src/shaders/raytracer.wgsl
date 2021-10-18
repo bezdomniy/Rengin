@@ -178,89 +178,61 @@ fn triangleIntersect(ray: Ray, triangleIdx: i32, inIntersection: Intersection) -
     return Intersection(uv,inIntersection.id,f * dot(e2, originCrossE1));
 }
 
-struct Node {
-  level: i32;
-  branch: i32;
-};
-let MAX_STACK_SIZE:i32 = 30;
-// var<private> topStack: i32 = -1;
-// var<private> stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
-
-
-fn push_stack(node: Node, topStack: ptr<function,i32>, stack: ptr<function,array<Node,MAX_STACK_SIZE>>) {
-  *topStack = *topStack + 1;
-  (*stack)[*topStack] = node;
-}
-
-fn pop_stack(topStack: ptr<function,i32>, stack: ptr<function,array<Node,MAX_STACK_SIZE>>) -> Node {
-  let ret: Node = (*stack)[*topStack];
-  *topStack = *topStack - 1;
-  return ret;
-}
-
+//TODO:
+// i = 0
+// while i < bvh.size():
+// if bvh[i] is a primitive:
+// perform and record the ray-object intersection check
+// else if the ray does not hit the bounding volume of bvh[i]:
+// i += bvh[i].skip_index
+// else:
+// i++
 fn intersectInnerNodes(ray: Ray) -> Intersection {
-    // int topPrimivitiveIndices = 0;
-    // var nextNode: Node = Node(0, 0);
-    var firstChildIdx: i32 = -1;
-    // var t1: Intersection = Intersection(vec2<f32>(0.0), -1, -1.0);
-    // var t2: Intersection = Intersection(vec2<f32>(0.0), -1, -1.0);
-    // var primIdx: i32 = -1;
-
-    var stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
-    var topStack: i32 = -1;
-
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
-    push_stack(Node(0, 0),&topStack, &stack);
 
+    var idx: i32 = 0;
     loop  
     {
-        if (topStack == -1) {break};
+        if (idx >= ubo.len_inner_nodes - 1) {break};
 
-        let nextNode = pop_stack(&topStack, &stack);
-        // nodeIdx = int(pow(2, nextNode.level))  - 1 + nextNode.branch;
 
-        var next_level: i32 = 1;
-        for (var i: i32 = 0; i < nextNode.level; i = i+1) {
-            next_level = next_level * 2;
-        }
-        firstChildIdx = next_level - 1 + (nextNode.branch * 2);
+        if (inner_nodes.InnerNodes[idx].idx2 > 0u) {
+            if (intersectAABB(ray, idx)) {
+                var t2 = Intersection(ret.uv, ret.id, -1.0);
+                let primIdx = i32(inner_nodes.InnerNodes[idx].skip_ptr_or_prim_idx1);
 
-        // firstChildIdx = i32(pow(2.0, f32(nextNode.level) + 1.0)) - 1 + (nextNode.branch * 2);
+                let t1 = triangleIntersect(ray, primIdx, ret);
 
-        if (firstChildIdx < ubo.len_inner_nodes) {
-            if (intersectAABB(ray, firstChildIdx)) {
-                push_stack(Node(nextNode.level + 1, nextNode.branch * 2),&topStack, &stack);
+                if (primIdx + 1 < ubo.len_leaf_nodes && leaf_nodes.LeafNodes[primIdx + 1].point1.w > 0.0) {
+                    t2 = triangleIntersect(ray, primIdx + 1, ret);
+                }
+
+                if ((t1.closestT > EPSILON) && (t1.closestT < ret.closestT) && (t2.closestT < 0.0 || (t1.closestT < t2.closestT))) {
+                    ret.uv = t1.uv;
+                    ret.id = -(primIdx + 2);
+                    ret.closestT = t1.closestT;
+                }
+                elseif ((t2.closestT > EPSILON) && (t2.closestT < ret.closestT))
+                {
+                    ret.uv = t2.uv;
+                    ret.id = -(primIdx + 3);
+                    ret.closestT = t2.closestT;
+                }
             }
-
-            if (intersectAABB(ray, firstChildIdx + 1)) {
-                push_stack(Node(nextNode.level + 1, (nextNode.branch * 2) + 1),&topStack, &stack);
-            }
+            // TODO: figure this out - this shouldn't be here, it should just end traversal.
+            idx = idx + 1;
         }
         else {
-            // primitiveIndices[topPrimivitiveIndices] = nextNode.branch * 2;
-            // topPrimivitiveIndices += 1;
-            // t1 = Intersection(ret.uv, ret.id, -1.0);
-            var t2 = Intersection(ret.uv, ret.id, -1.0);
-            let primIdx = nextNode.branch * 2;
-
-            let t1 = triangleIntersect(ray, primIdx, ret);
-
-            if (primIdx + 1 < ubo.len_leaf_nodes && leaf_nodes.LeafNodes[primIdx + 1].point1.w > 0.0) {
-                t2 = triangleIntersect(ray, primIdx + 1, ret);
+            if (!intersectAABB(ray, idx)) {
+                idx = idx + i32(inner_nodes.InnerNodes[idx].skip_ptr_or_prim_idx1);
+                // idx = idx + 1;
             }
-
-            if ((t1.closestT > EPSILON) && (t1.closestT < ret.closestT) && (t2.closestT < 0.0 || (t1.closestT < t2.closestT))) {
-                ret.uv = t1.uv;
-                ret.id = -(primIdx + 2);
-                ret.closestT = t1.closestT;
-            }
-            elseif ((t2.closestT > EPSILON) && (t2.closestT < ret.closestT))
-            {
-                ret.uv = t2.uv;
-                ret.id = -(primIdx + 3);
-                ret.closestT = t2.closestT;
+            else {
+                idx = idx + 1;
+                
             }
         }
+
     }
     return ret;
 }

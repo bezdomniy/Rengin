@@ -97,22 +97,27 @@ impl IndexMut<usize> for BoundingBoxes {
 }
 
 impl<'a> Iterator for BoundingBoxesIter<'a> {
-    type Item = &'a BoundingBox;
+    type Item = (u32, u32);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.stack.is_empty() {
-            return None;
+        loop {
+            if self.stack.is_empty() {
+                return None;
+            }
+
+            let (level, branch) = self.stack.pop().unwrap();
+
+            let first_child_idx = u32::pow(2, level) - 1 + branch;
+            // println!("{} {} {}", level, branch, first_child_idx);
+
+            if first_child_idx < self.bounding_boxes.items.len() as u32 - 1 {
+                self.stack.push((level + 1, (branch * 2) + 1));
+                self.stack.push((level + 1, branch * 2));
+                // println!("{:?}", self.stack);
+                return Some((level, branch));
+                // return self.bounding_boxes.items.get(first_child_idx as usize);
+            }
         }
-
-        let (level, branch) = self.stack.pop().unwrap();
-        let first_child_idx = u32::pow(2, level) - 1 + (branch * 2);
-
-        if first_child_idx < self.bounding_boxes.items.len() as u32 {
-            self.stack.push((level + 1, branch * 2));
-            self.stack.push((level + 1, (branch * 2) + 1));
-        }
-
-        self.bounding_boxes.items.get(first_child_idx as usize)
     }
 }
 

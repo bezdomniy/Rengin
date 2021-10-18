@@ -88,18 +88,61 @@ fn log_2(x: usize) -> usize {
     num_bits::<usize>() - x.leading_zeros() as usize - 1
 }
 
-// TODO: placeholder for now
 fn flatten(bounding_boxes: &BoundingBoxes) -> Vec<NodeInner> {
+    let bvh_height = log_2(bounding_boxes.items.len()) as u32;
+    println!("len:{} height: {}", bounding_boxes.items.len(), bvh_height);
     bounding_boxes
-        .items
         .iter()
-        .map(|bounding_box| NodeInner {
-            first: bounding_box.first.xyz(),
-            skip_ptr_or_prim_idx1: 1,
-            second: bounding_box.second.xyz(),
-            prim_idx2: 1,
+        .map(|(level, branch)| {
+            let bounding_box_idx = 2usize.pow(level as u32) - 1 + (branch as usize);
+
+            let &bounding_box = bounding_boxes.items.get(bounding_box_idx).unwrap();
+
+            let skip_ptr = u32::pow(2, bvh_height - level) - 1;
+
+            // println!("{} {} {} {}", level, branch, bounding_box_idx, skip_ptr);
+
+            if level == bvh_height - 1 {
+                return NodeInner {
+                    first: bounding_box.first.xyz(),
+                    skip_ptr_or_prim_idx1: branch * 2,
+                    second: bounding_box.second.xyz(),
+                    prim_idx2: (branch * 2) + 1,
+                };
+            }
+
+            NodeInner {
+                first: bounding_box.first.xyz(),
+                skip_ptr_or_prim_idx1: skip_ptr,
+                second: bounding_box.second.xyz(),
+                prim_idx2: 0,
+            }
         })
         .collect()
+
+    // // TODO: placeholder for now
+    // bounding_boxes
+    //     .items
+    //     .iter()
+    //     .enumerate()
+    //     .map(|(bounding_box_idx, bounding_box)| {
+    //         if bounding_box_idx as usize > bounding_boxes.items.len() / 2 {
+    //             return NodeInner {
+    //                 first: bounding_box.first.xyz(),
+    //                 skip_ptr_or_prim_idx1: 1,
+    //                 second: bounding_box.second.xyz(),
+    //                 prim_idx2: 1,
+    //             };
+    //         }
+
+    //         NodeInner {
+    //             first: bounding_box.first.xyz(),
+    //             skip_ptr_or_prim_idx1: 1,
+    //             second: bounding_box.second.xyz(),
+    //             prim_idx2: 1,
+    //         }
+    //     })
+    //     .collect()
 }
 
 fn build(triangles: &mut Vec<NodeLeaf>) -> (BoundingBoxes, Vec<NodeLeaf>) {
