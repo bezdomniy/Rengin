@@ -126,11 +126,13 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
     var t0: f32;
     var t1: f32;
 
+    let inner_node = inner_nodes.InnerNodes[aabbIdx];
+
     for (var a: i32 = 0; a < 3; a = a+1)
     {
         let invD = 1.0 / ray.rayD[a];
-        t0 = (inner_nodes.InnerNodes[aabbIdx].first[a] - ray.rayO[a]) * invD;
-        t1 = (inner_nodes.InnerNodes[aabbIdx].second[a] - ray.rayO[a]) * invD;
+        t0 = (inner_node.first[a] - ray.rayO[a]) * invD;
+        t1 = (inner_node.second[a] - ray.rayO[a]) * invD;
         if (invD < 0.0) {
             let temp = t0;
             t0 = t1;
@@ -152,9 +154,10 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
 }
 
 fn triangleIntersect(ray: Ray, triangleIdx: i32, inIntersection: Intersection) -> Intersection {
+    let triangle = leaf_nodes.LeafNodes[triangleIdx];
     var uv: vec2<f32> = vec2<f32>(0.0);
-    let e1: vec3<f32> = (leaf_nodes.LeafNodes[triangleIdx].point2 - leaf_nodes.LeafNodes[triangleIdx].point1).xyz;
-    let e2: vec3<f32> = (leaf_nodes.LeafNodes[triangleIdx].point3 - leaf_nodes.LeafNodes[triangleIdx].point1).xyz;
+    let e1: vec3<f32> = (triangle.point2 - triangle.point1).xyz;
+    let e2: vec3<f32> = (triangle.point3 - triangle.point1).xyz;
 
     let dirCrossE2: vec3<f32> = cross(ray.rayD.xyz, e2);
     let det: f32 = dot(e1, dirCrossE2);
@@ -163,7 +166,7 @@ fn triangleIntersect(ray: Ray, triangleIdx: i32, inIntersection: Intersection) -
     }
 
     let f: f32 = 1.0 / det;
-    let p1ToOrigin: vec3<f32> = (ray.rayO - leaf_nodes.LeafNodes[triangleIdx].point1).xyz;
+    let p1ToOrigin: vec3<f32> = (ray.rayO - triangle.point1).xyz;
     uv.x = f * dot(p1ToOrigin, dirCrossE2);
     if (uv.x < 0.0 || uv.x > 1.0) {
       return Intersection(inIntersection.uv,inIntersection.id,-1.0);
@@ -195,11 +198,13 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
     {
         if (idx >= ubo.len_inner_nodes - 1) {break};
 
+        let current_node: NodeInner = inner_nodes.InnerNodes[idx];
+        let is_inner_node: bool = current_node.idx2 > 0u;
 
-        if (inner_nodes.InnerNodes[idx].idx2 > 0u) {
-            if (intersectAABB(ray, idx)) {
+        if (intersectAABB(ray, idx)) {
+            if (is_inner_node) {
                 var t2 = Intersection(ret.uv, ret.id, -1.0);
-                let primIdx = i32(inner_nodes.InnerNodes[idx].skip_ptr_or_prim_idx1);
+                let primIdx = i32(current_node.skip_ptr_or_prim_idx1);
 
                 let t1 = triangleIntersect(ray, primIdx, ret);
 
@@ -218,21 +223,18 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
                     ret.id = -(primIdx + 3);
                     ret.closestT = t2.closestT;
                 }
+                // return ret;
             }
-            // TODO: figure this out - this shouldn't be here, it should just end traversal.
             idx = idx + 1;
         }
         else {
-            if (!intersectAABB(ray, idx)) {
-                idx = idx + i32(inner_nodes.InnerNodes[idx].skip_ptr_or_prim_idx1);
-                // idx = idx + 1;
+            if (!is_inner_node) {
+                idx = idx + i32(current_node.skip_ptr_or_prim_idx1);
             }
             else {
                 idx = idx + 1;
-                
             }
         }
-
     }
     return ret;
 }
