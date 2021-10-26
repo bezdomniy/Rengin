@@ -97,10 +97,12 @@ var<storage, read> inner_nodes: InnerNodes;
 [[group(0), binding(3)]]
 var<storage, read> leaf_nodes: LeafNodes;
 [[group(0), binding(4)]]
-var<storage, read> objectParams: ObjectParams;
+var<storage, read> object_params: ObjectParams;
 
 let EPSILON:f32 = 0.0001;
 let MAXLEN: f32 = 10000.0;
+let INFINITY: f32 = 340282346638528859811704183484516925440.0;
+let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
 fn rayForPixel(p: vec2<u32>) -> Ray {
     let xOffset: f32 = (f32(p.x) + 0.5) * ubo.camera.pixelSize;
@@ -116,10 +118,12 @@ fn rayForPixel(p: vec2<u32>) -> Ray {
     return Ray(rayO, normalize(pixel - rayO));
 }
 
-fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
-    let INFINITY: f32 = 1.0 / 0.0;
 
-    var t_min: f32 = -INFINITY;
+
+fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
+    // let INFINITY: f32 = 1.0 / 0.0;
+
+    var t_min: f32 = NEG_INFINITY;
     var t_max: f32 = INFINITY;
     // var temp: f32;
     // var invD: f32;
@@ -241,13 +245,13 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
 
 fn intersect(ray: Ray) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
-    let nRay: Ray = Ray(objectParams.inverseTransform * ray.rayO, objectParams.inverseTransform * ray.rayD);
+    let nRay: Ray = Ray(object_params.inverseTransform * ray.rayO, object_params.inverseTransform * ray.rayD);
     return intersectInnerNodes(nRay);
 }
 
 fn normalToWorld(normal: vec4<f32>) -> vec4<f32>
 {
-    let ret: vec4<f32> = normalize(vec4<f32>((transpose(objectParams.inverseTransform) * normal).xyz,0.0));
+    let ret: vec4<f32> = normalize(vec4<f32>((transpose(object_params.inverseTransform) * normal).xyz,0.0));
     // ret.w = 0.0;
     // ret = normalize(ret);
 
@@ -256,7 +260,7 @@ fn normalToWorld(normal: vec4<f32>) -> vec4<f32>
 
 fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4<f32> {
     // var n: vec4<f32> = vec4<f32>(0.0);
-    // let objectPoint: vec4<f32> = objectParams.inverseTransform * point; // World to object
+    // let objectPoint: vec4<f32> = object_params.inverseTransform * point; // World to object
 
     // if (typeEnum == 0) {
     //     n = objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -419,7 +423,7 @@ fn renderScene(ray: Ray) -> vec4<f32> {
 
         let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
         // let shadowed = false;
-        color = lighting(objectParams.material, ubo.lightPos,
+        color = lighting(object_params.material, ubo.lightPos,
                                 hitParams, shadowed);
         color.w = 1.0;
 
