@@ -470,32 +470,25 @@ impl RenderApp {
                     push_constant_ranges: &[],
                 });
 
-        self.render_pipeline = Some(
-            self.renderer
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: None,
-                    layout: Some(&render_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: self.shaders.as_ref().unwrap().get("vert").as_ref().unwrap(),
-                        entry_point: "main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: self.shaders.as_ref().unwrap().get("frag").as_ref().unwrap(),
-                        entry_point: "main",
-                        targets: &[self
-                            .renderer
-                            .window_surface
-                            .get_preferred_format(&self.renderer.adapter)
-                            .unwrap()
-                            .into()],
-                    }),
-                    primitive: wgpu::PrimitiveState::default(),
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
+        self.render_pipeline = Some(self.renderer.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: None,
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: self.shaders.as_ref().unwrap().get("vert").as_ref().unwrap(),
+                    entry_point: "main",
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: self.shaders.as_ref().unwrap().get("frag").as_ref().unwrap(),
+                    entry_point: "main",
+                    targets: &[self.renderer.config.format.into()],
                 }),
-        );
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+            },
+        ));
 
         self.compute_pipeline = Some(self.renderer.device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
@@ -688,7 +681,12 @@ impl RenderApp {
                     }
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::Resized(size),
+                    event:
+                        WindowEvent::Resized(size)
+                        | WindowEvent::ScaleFactorChanged {
+                            new_inner_size: &mut size,
+                            ..
+                        },
                     ..
                 } => {
                     let texture_extent = wgpu::Extent3d {
@@ -796,8 +794,9 @@ impl RenderApp {
                     ));
 
                     // Reconfigure the surface with the new size
-                    self.renderer.config.width = size.width;
-                    self.renderer.config.height = size.height;
+                    self.renderer.config.width = size.width.max(1);
+                    self.renderer.config.height = size.height.max(1);
+                    // println!("{} {}", size.width, size.height);
                     self.renderer
                         .window_surface
                         .configure(&self.renderer.device, &self.renderer.config);
