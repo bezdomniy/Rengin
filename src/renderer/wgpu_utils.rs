@@ -39,6 +39,8 @@ impl RenginWgpu {
             .build(event_loop)
             .unwrap();
 
+        let size = window.inner_size();
+
         let window_surface = unsafe { instance.create_surface(&window) };
 
         let adapter = instance
@@ -72,7 +74,8 @@ impl RenginWgpu {
                 max_push_constant_size: 4,
                 ..wgpu::Limits::default()
             }
-        };
+        }
+        .using_resolution(adapter.limits());
         let adapter_features = adapter.features();
         assert!(
             adapter_features.contains(required_features),
@@ -95,10 +98,11 @@ impl RenginWgpu {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: window_surface.get_preferred_format(&adapter).unwrap(),
-            width: width,
-            height: height,
-            present_mode: wgpu::PresentMode::Mailbox,
+            width: size.width,
+            height: size.height,
+            present_mode: wgpu::PresentMode::Fifo,
         };
+        // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
 
         RenginWgpu {

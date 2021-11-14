@@ -270,7 +270,7 @@ fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4
     // }
     // elseif (typeEnum == 2) {
         let shape: NodeLeaf = leaf_nodes.LeafNodes[-(intersection.id+2)];
-        return normalToWorld(vec4<f32>((shape.normal2 * intersection.uv.x + shape.normal3 * intersection.uv.y + shape.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)).xyz,0.0));
+        return normalToWorld((shape.normal2 * intersection.uv.x + shape.normal3 * intersection.uv.y + shape.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)));
         // n.w = 0.0;
     // }
     // return (n);
@@ -436,12 +436,21 @@ fn renderScene(ray: Ray) -> vec4<f32> {
     return color;
 }
 
-[[stage(compute), workgroup_size(8, 8, 1)]]
-fn main([[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>) {
+[[stage(compute), workgroup_size(8, 8)]]
+fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
+        [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
+        [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
+        ) {
     let ray: Ray = rayForPixel(global_invocation_id.xy);
     let color: vec4<f32> = renderScene(ray);
 
-    // let color: vec4<f32> = vec4<f32>(0.0,1.0,0.0,1.0);
+    // var color: vec4<f32> = vec4<f32>(0.0,1.0,0.0,1.0);
+
+    // if (workgroup_id.x == u32(4) && workgroup_id.y == u32(4)) {
+    //     color = vec4<f32>(vec3<f32>(local_invocation_id.xyz)/255.0,1.0);
+    // }
+    
+
 
     textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }
