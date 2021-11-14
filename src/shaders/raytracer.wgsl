@@ -203,10 +203,10 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
         if (idx >= ubo.len_inner_nodes - 1) {break};
 
         let current_node: NodeInner = inner_nodes.InnerNodes[idx];
-        let is_inner_node: bool = current_node.idx2 > 0u;
+        let not_leaf_node: bool = current_node.idx2 == 0u;
 
         if (intersectAABB(ray, idx)) {
-            if (is_inner_node) {
+            if (!not_leaf_node) {
                 var t2 = Intersection(ret.uv, ret.id, -1.0);
                 let primIdx = i32(current_node.skip_ptr_or_prim_idx1);
 
@@ -220,24 +220,23 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
                     ret.uv = t1.uv;
                     ret.id = -(primIdx + 2);
                     ret.closestT = t1.closestT;
+                    // break;
                 }
-                elseif ((t2.closestT > EPSILON) && (t2.closestT < ret.closestT))
+                if ((t2.closestT > EPSILON) && (t2.closestT < ret.closestT))
                 {
                     ret.uv = t2.uv;
                     ret.id = -(primIdx + 3);
                     ret.closestT = t2.closestT;
+                    // break;
                 }
-                // return ret;
             }
             idx = idx + 1;
         }
+        elseif (not_leaf_node) {
+            idx = idx + i32(current_node.skip_ptr_or_prim_idx1);
+        }
         else {
-            if (!is_inner_node) {
-                idx = idx + i32(current_node.skip_ptr_or_prim_idx1);
-            }
-            else {
-                idx = idx + 1;
-            }
+            idx = idx + 1;
         }
     }
     return ret;
