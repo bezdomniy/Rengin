@@ -9,6 +9,7 @@ use wgpu::{
     BindGroup, BindGroupLayout, Buffer, ComputePipeline, RenderPipeline, Sampler, ShaderModule,
     Texture,
 };
+use winit::dpi::LogicalSize;
 use winit::event::{
     DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode,
     WindowEvent,
@@ -692,9 +693,20 @@ impl RenderApp {
                         },
                     ..
                 } => {
+                    // println!("p: {} {}", size.width, size.height);
+                    // Reconfigure the surface with the new size
+                    self.renderer.config.width = size.width.max(1);
+                    self.renderer.config.height = size.height.max(1);
+
+                    let logical_size: LogicalSize<u32> =
+                        winit::dpi::PhysicalSize::new(size.width, size.height)
+                            .to_logical(self.renderer.scale_factor);
+
+                    // println!("l: {} {}", logical_size.width, logical_size.height);
+
                     let texture_extent = wgpu::Extent3d {
-                        width: size.width / 2,
-                        height: size.height / 2,
+                        width: logical_size.width,
+                        height: logical_size.height,
                         depth_or_array_layers: 1,
                     };
 
@@ -796,9 +808,6 @@ impl RenderApp {
                         },
                     ));
 
-                    // Reconfigure the surface with the new size
-                    self.renderer.config.width = size.width.max(1);
-                    self.renderer.config.height = size.height.max(1);
                     // println!("{} {}", size.width, size.height);
                     self.renderer
                         .window_surface

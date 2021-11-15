@@ -4,6 +4,7 @@ use wgpu::{
     RenderPipeline, Surface,
 };
 use winit::{
+    dpi::PhysicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
@@ -21,6 +22,7 @@ pub struct RenginWgpu {
     pub width: u32,
     pub workgroup_size: [u32; 3],
     pub continous_motion: bool,
+    pub scale_factor: f64,
 }
 
 impl RenginWgpu {
@@ -34,10 +36,14 @@ impl RenginWgpu {
         let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
         let instance = wgpu::Instance::new(backend);
 
+        let scale_factor: f64 = event_loop.primary_monitor().unwrap().scale_factor();
+        let physical_size: PhysicalSize<f64> =
+            winit::dpi::LogicalSize::new(width, height).to_physical(scale_factor);
+
         let window = WindowBuilder::new()
             .with_title("Rengin")
             .with_resizable(true)
-            .with_inner_size(winit::dpi::LogicalSize::new(width, height))
+            .with_inner_size(physical_size)
             .build(event_loop)
             .unwrap();
 
@@ -119,6 +125,7 @@ impl RenginWgpu {
             height,
             workgroup_size,
             continous_motion,
+            scale_factor,
         }
     }
 
