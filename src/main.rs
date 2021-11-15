@@ -79,9 +79,14 @@ struct RenderApp {
 }
 
 impl RenderApp {
-    pub fn new(event_loop: &EventLoop<()>) -> Self {
-        let renderer =
-            futures::executor::block_on(RenginWgpu::new(WIDTH, HEIGHT, WORKGROUP_SIZE, event_loop));
+    pub fn new(event_loop: &EventLoop<()>, continous_motion: bool) -> Self {
+        let renderer = futures::executor::block_on(RenginWgpu::new(
+            WIDTH,
+            HEIGHT,
+            WORKGROUP_SIZE,
+            event_loop,
+            continous_motion,
+        ));
 
         Self {
             renderer,
@@ -659,18 +664,16 @@ impl RenderApp {
         let mut something_changed = false;
 
         event_loop.run(move |event, _, control_flow| {
-            // Have the closure take ownership of the resources.
-            // `event_loop.run` never returns, therefore we must do this to ensure
-            // the resources are properly cleaned up.
-            // let _ = (&self.renderer.instance, &self.adapter, &compute_pipeline); //, &self.device, &self.config);
-
             *control_flow = ControlFlow::Wait;
             match event {
                 Event::RedrawEventsCleared => {
                     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                     let time_since_last_frame = last_update_inst.elapsed();
 
-                    if something_changed && time_since_last_frame >= target_frametime {
+                    if something_changed
+                        && time_since_last_frame >= target_frametime
+                        && (!left_mouse_down || self.renderer.continous_motion)
+                    {
                         self.renderer.window.request_redraw();
                         last_update_inst = Instant::now();
                         something_changed = false;
@@ -690,8 +693,8 @@ impl RenderApp {
                     ..
                 } => {
                     let texture_extent = wgpu::Extent3d {
-                        width: size.width,
-                        height: size.height,
+                        width: size.width / 2,
+                        height: size.height / 2,
                         depth_or_array_layers: 1,
                     };
 
@@ -1160,7 +1163,7 @@ fn main() {
     // }
 
     let event_loop = EventLoop::new();
-    let mut app = RenderApp::new(&event_loop);
+    let mut app = RenderApp::new(&event_loop, args[2].parse::<bool>().unwrap());
     app.init(model_path);
 
     // let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();

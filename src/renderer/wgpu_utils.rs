@@ -20,6 +20,7 @@ pub struct RenginWgpu {
     pub height: u32,
     pub width: u32,
     pub workgroup_size: [u32; 3],
+    pub continous_motion: bool,
 }
 
 impl RenginWgpu {
@@ -28,6 +29,7 @@ impl RenginWgpu {
         height: u32,
         workgroup_size: [u32; 3],
         event_loop: &EventLoop<()>,
+        continous_motion: bool,
     ) -> RenginWgpu {
         let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
         let instance = wgpu::Instance::new(backend);
@@ -116,6 +118,7 @@ impl RenginWgpu {
             width,
             height,
             workgroup_size,
+            continous_motion,
         }
     }
 
