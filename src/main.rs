@@ -71,10 +71,10 @@ struct RenderApp {
     render_bind_group_layout: Option<BindGroupLayout>,
     render_bind_group: Option<BindGroup>,
     sampler: Option<Sampler>,
-    objects: Option<Vec<BVH>>,
+    objects: Option<BVH>,
     buffers: Option<HashMap<&'static str, Buffer>>,
     texture: Option<Texture>,
-    object_params: Option<ObjectParams>,
+    object_params: Option<Vec<ObjectParams>>,
     ubo: Option<UBO>,
     game_state: Option<GameState>,
 }
@@ -118,7 +118,7 @@ impl RenderApp {
             now.elapsed().as_millis()
         );
 
-        self.object_params = Some(ObjectParams {
+        self.object_params = Some(vec![ObjectParams {
             inverse_transform: Mat4::IDENTITY,
             material: Material {
                 colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
@@ -127,7 +127,7 @@ impl RenderApp {
                 specular: 0.3,
                 shininess: 200.0,
             },
-        });
+        }]);
 
         // log::info!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
         // log::info!(
@@ -174,20 +174,8 @@ impl RenderApp {
 
         self.ubo = Some(UBO::new(
             [-4f32, 2f32, 3f32, 1f32],
-            self.objects
-                .as_ref()
-                .unwrap()
-                .get(0)
-                .unwrap()
-                .inner_nodes
-                .len() as i32,
-            self.objects
-                .as_ref()
-                .unwrap()
-                .get(0)
-                .unwrap()
-                .leaf_nodes
-                .len() as i32,
+            *self.objects.as_ref().unwrap().inner_lengths.get(0).unwrap(),
+            *self.objects.as_ref().unwrap().leaf_lengths.get(0).unwrap(),
             camera,
         ));
 
@@ -274,7 +262,7 @@ impl RenderApp {
         let mut now = Instant::now();
         log::info!("Creating buffers...");
 
-        let bvh = self.objects.as_ref().unwrap().get(0).unwrap();
+        // let bvh = self.objects.as_ref().unwrap().get(0).unwrap();
 
         // for node in dragon_blas {
         //     println!("{:?}", node.points);
@@ -297,7 +285,7 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("TLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&bvh.inner_nodes),
+                contents: bytemuck::cast_slice(&self.objects.as_ref().unwrap().inner_nodes),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -306,7 +294,7 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("BLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&bvh.leaf_nodes),
+                contents: bytemuck::cast_slice(&self.objects.as_ref().unwrap().leaf_nodes),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -315,7 +303,7 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Material storage Buffer"),
-                contents: bytemuck::bytes_of(&self.object_params.unwrap()),
+                contents: bytemuck::cast_slice(&self.object_params.as_ref().unwrap()),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 

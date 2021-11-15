@@ -2,7 +2,7 @@ use crate::engine::rt_primitives::{BoundingBox, BoundingBoxes, NodeInner, NodeLe
 use glam::{const_mat4, const_vec4, Vec4Swizzles};
 use tobj;
 
-pub fn import_obj(path: &str) -> Option<Vec<BVH>> {
+pub fn import_obj(path: &str) -> Option<BVH> {
     let (models, _materials) = tobj::load_obj(
         path,
         &tobj::LoadOptions {
@@ -13,7 +13,8 @@ pub fn import_obj(path: &str) -> Option<Vec<BVH>> {
     )
     .expect("Failed to OBJ load file");
 
-    let mut ret: Vec<BVH> = vec![];
+    let mut object_inner_nodes: Vec<Vec<NodeInner>> = vec![];
+    let mut object_leaf_nodes: Vec<Vec<NodeLeaf>> = vec![];
 
     for model in models.iter() {
         // println!("{:?}",model.mesh.indices);
@@ -74,10 +75,11 @@ pub fn import_obj(path: &str) -> Option<Vec<BVH>> {
         let (bounding_boxes, leaf_nodes) = build(&mut triangles);
         let inner_nodes = flatten(&bounding_boxes);
 
-        ret.push(BVH::new(inner_nodes, leaf_nodes));
+        object_inner_nodes.push(inner_nodes);
+        object_leaf_nodes.push(leaf_nodes);
     }
 
-    Some(ret)
+    Some(BVH::new(object_inner_nodes, object_leaf_nodes))
 }
 
 const fn num_bits<T>() -> usize {

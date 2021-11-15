@@ -71,10 +71,14 @@ struct LeafNodes {
     LeafNodes: [[stride(128)]] array<NodeLeaf>;
 };
 
+struct ObjectParam {
+    inverse_transform: mat4x4<f32>;
+    material: Material;
+};
+
 [[block]]
 struct ObjectParams {
-    inverseTransform: mat4x4<f32>;
-    material: Material;
+    ObjectParams: [[stride(96)]] array<ObjectParam>;
 };
 
 struct Ray {
@@ -245,13 +249,13 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
 
 fn intersect(ray: Ray) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
-    let nRay: Ray = Ray(object_params.inverseTransform * ray.rayO, object_params.inverseTransform * ray.rayD);
+    let nRay: Ray = Ray(object_params.ObjectParams[0].inverse_transform * ray.rayO, object_params.ObjectParams[0].inverse_transform * ray.rayD);
     return intersectInnerNodes(nRay);
 }
 
 fn normalToWorld(normal: vec4<f32>) -> vec4<f32>
 {
-    let ret: vec4<f32> = normalize(vec4<f32>((transpose(object_params.inverseTransform) * normal).xyz,0.0));
+    let ret: vec4<f32> = normalize(vec4<f32>((transpose(object_params.ObjectParams[0].inverse_transform) * normal).xyz,0.0));
     // ret.w = 0.0;
     // ret = normalize(ret);
 
@@ -260,7 +264,7 @@ fn normalToWorld(normal: vec4<f32>) -> vec4<f32>
 
 fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4<f32> {
     // var n: vec4<f32> = vec4<f32>(0.0);
-    // let objectPoint: vec4<f32> = object_params.inverseTransform * point; // World to object
+    // let objectPoint: vec4<f32> = object_params.ObjectParams[0].inverse_transform * point; // World to object
 
     // if (typeEnum == 0) {
     //     n = objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -423,7 +427,7 @@ fn renderScene(ray: Ray) -> vec4<f32> {
 
         let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
         // let shadowed = false;
-        color = lighting(object_params.material, ubo.lightPos,
+        color = lighting(object_params.ObjectParams[0].material, ubo.lightPos,
                                 hitParams, shadowed);
         color.w = 1.0;
 
