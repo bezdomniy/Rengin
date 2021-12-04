@@ -9,6 +9,7 @@ use wgpu::{
     BindGroup, BindGroupLayout, Buffer, ComputePipeline, RenderPipeline, Sampler, ShaderModule,
     Texture,
 };
+use winit::dpi::LogicalSize;
 use winit::event::{
     DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode,
     WindowEvent,
@@ -70,18 +71,23 @@ struct RenderApp {
     render_bind_group_layout: Option<BindGroupLayout>,
     render_bind_group: Option<BindGroup>,
     sampler: Option<Sampler>,
-    objects: Option<Vec<BVH>>,
+    objects: Option<BVH>,
     buffers: Option<HashMap<&'static str, Buffer>>,
     texture: Option<Texture>,
-    object_params: Option<ObjectParams>,
+    object_params: Option<Vec<ObjectParams>>,
     ubo: Option<UBO>,
     game_state: Option<GameState>,
 }
 
 impl RenderApp {
-    pub fn new(event_loop: &EventLoop<()>) -> Self {
-        let renderer =
-            futures::executor::block_on(RenginWgpu::new(WIDTH, HEIGHT, WORKGROUP_SIZE, event_loop));
+    pub fn new(event_loop: &EventLoop<()>, continous_motion: bool) -> Self {
+        let renderer = futures::executor::block_on(RenginWgpu::new(
+            WIDTH,
+            HEIGHT,
+            WORKGROUP_SIZE,
+            event_loop,
+            continous_motion,
+        ));
 
         Self {
             renderer,
@@ -112,7 +118,7 @@ impl RenderApp {
             now.elapsed().as_millis()
         );
 
-        self.object_params = Some(ObjectParams {
+        self.object_params = Some(vec![ObjectParams {
             inverse_transform: Mat4::IDENTITY,
             material: Material {
                 colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
@@ -121,7 +127,7 @@ impl RenderApp {
                 specular: 0.3,
                 shininess: 200.0,
             },
-        });
+        }]);
 
         // log::info!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
         // log::info!(
@@ -168,20 +174,8 @@ impl RenderApp {
 
         self.ubo = Some(UBO::new(
             [-4f32, 2f32, 3f32, 1f32],
-            self.objects
-                .as_ref()
-                .unwrap()
-                .get(0)
-                .unwrap()
-                .inner_nodes
-                .len() as i32,
-            self.objects
-                .as_ref()
-                .unwrap()
-                .get(0)
-                .unwrap()
-                .leaf_nodes
-                .len() as i32,
+            *self.objects.as_ref().unwrap().inner_lengths.get(0).unwrap(),
+            *self.objects.as_ref().unwrap().leaf_lengths.get(0).unwrap(),
             camera,
         ));
 
@@ -268,7 +262,7 @@ impl RenderApp {
         let mut now = Instant::now();
         log::info!("Creating buffers...");
 
-        let bvh = self.objects.as_ref().unwrap().get(0).unwrap();
+        // let bvh = self.objects.as_ref().unwrap().get(0).unwrap();
 
         // for node in dragon_blas {
         //     println!("{:?}", node.points);
@@ -291,7 +285,7 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("TLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&bvh.inner_nodes),
+                contents: bytemuck::cast_slice(&self.objects.as_ref().unwrap().inner_nodes),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -300,7 +294,7 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("BLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&bvh.leaf_nodes),
+                contents: bytemuck::cast_slice(&self.objects.as_ref().unwrap().leaf_nodes),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -309,7 +303,7 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Material storage Buffer"),
-                contents: bytemuck::bytes_of(&self.object_params.unwrap()),
+                contents: bytemuck::cast_slice(&self.object_params.as_ref().unwrap()),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -659,18 +653,16 @@ impl RenderApp {
         let mut something_changed = false;
 
         event_loop.run(move |event, _, control_flow| {
-            // Have the closure take ownership of the resources.
-            // `event_loop.run` never returns, therefore we must do this to ensure
-            // the resources are properly cleaned up.
-            // let _ = (&self.renderer.instance, &self.adapter, &compute_pipeline); //, &self.device, &self.config);
-
             *control_flow = ControlFlow::Wait;
             match event {
                 Event::RedrawEventsCleared => {
                     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                     let time_since_last_frame = last_update_inst.elapsed();
 
-                    if something_changed && time_since_last_frame >= target_frametime {
+                    if something_changed
+                        && time_since_last_frame >= target_frametime
+                        && (!left_mouse_down || self.renderer.continous_motion)
+                    {
                         self.renderer.window.request_redraw();
                         last_update_inst = Instant::now();
                         something_changed = false;
@@ -689,9 +681,20 @@ impl RenderApp {
                         },
                     ..
                 } => {
+                    // println!("p: {} {}", size.width, size.height);
+                    // Reconfigure the surface with the new size
+                    self.renderer.config.width = size.width.max(1);
+                    self.renderer.config.height = size.height.max(1);
+
+                    let logical_size: LogicalSize<u32> =
+                        winit::dpi::PhysicalSize::new(size.width, size.height)
+                            .to_logical(self.renderer.scale_factor);
+
+                    // println!("l: {} {}", logical_size.width, logical_size.height);
+
                     let texture_extent = wgpu::Extent3d {
-                        width: size.width,
-                        height: size.height,
+                        width: logical_size.width,
+                        height: logical_size.height,
                         depth_or_array_layers: 1,
                     };
 
@@ -793,9 +796,6 @@ impl RenderApp {
                         },
                     ));
 
-                    // Reconfigure the surface with the new size
-                    self.renderer.config.width = size.width.max(1);
-                    self.renderer.config.height = size.height.max(1);
                     // println!("{} {}", size.width, size.height);
                     self.renderer
                         .window_surface
@@ -1160,7 +1160,7 @@ fn main() {
     // }
 
     let event_loop = EventLoop::new();
-    let mut app = RenderApp::new(&event_loop);
+    let mut app = RenderApp::new(&event_loop, args[2].parse::<bool>().unwrap());
     app.init(model_path);
 
     // let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();

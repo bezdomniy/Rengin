@@ -53,6 +53,8 @@ pub struct NodeInner {
 pub struct BVH {
     pub inner_nodes: Vec<NodeInner>,
     pub leaf_nodes: Vec<NodeLeaf>,
+    pub inner_lengths: Vec<i32>,
+    pub leaf_lengths: Vec<i32>,
 }
 
 pub struct BoundingBoxesIter<'a> {
@@ -61,10 +63,22 @@ pub struct BoundingBoxesIter<'a> {
 }
 
 impl BVH {
-    pub fn new(inner_nodes: Vec<NodeInner>, leaf_nodes: Vec<NodeLeaf>) -> Self {
+    pub fn new(inner_nodes: Vec<Vec<NodeInner>>, leaf_nodes: Vec<Vec<NodeLeaf>>) -> Self {
+        let inner_lengths: Vec<i32> = inner_nodes
+            .iter()
+            .map(|next_vec| next_vec.len() as i32)
+            .collect();
+
+        let leaf_lengths: Vec<i32> = leaf_nodes
+            .iter()
+            .map(|next_vec| next_vec.len() as i32)
+            .collect();
+
         BVH {
-            inner_nodes,
-            leaf_nodes,
+            inner_nodes: inner_nodes.into_iter().flatten().collect::<Vec<_>>(),
+            leaf_nodes: leaf_nodes.into_iter().flatten().collect::<Vec<_>>(),
+            inner_lengths,
+            leaf_lengths,
         }
     }
 }
