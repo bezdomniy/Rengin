@@ -169,24 +169,38 @@ fn triangleIntersect(ray: Ray, triangleIdx: i32, inIntersection: Intersection) -
 
     let dirCrossE2: vec3<f32> = cross(ray.rayD.xyz, e2);
     let det: f32 = dot(e1, dirCrossE2);
-    if (abs(det) < EPSILON) {
-        return Intersection(inIntersection.uv,inIntersection.id,-1.0);
-    }
+    // if (abs(det) < EPSILON) {
+    //     return Intersection(inIntersection.uv,inIntersection.id,-1.0);
+    // }
 
     let f: f32 = 1.0 / det;
     let p1ToOrigin: vec3<f32> = (ray.rayO - triangle.point1).xyz;
     uv.x = f * dot(p1ToOrigin, dirCrossE2);
-    if (uv.x < 0.0 || uv.x > 1.0) {
-      return Intersection(inIntersection.uv,inIntersection.id,-1.0);
-    }
+    // if (uv.x < 0.0 || uv.x > 1.0) {
+    //   return Intersection(inIntersection.uv,inIntersection.id,-1.0);
+    // }
 
     let originCrossE1: vec3<f32>  = cross(p1ToOrigin, e1);
     uv.y = f * dot(ray.rayD.xyz, originCrossE1);
     // uv.y =1.0;
-    if (uv.y < 0.0 || (uv.x + uv.y) > 1.0) {
-        return Intersection(inIntersection.uv,inIntersection.id,-1.0);
+
+    // if (uv.y < 0.0 || (uv.x + uv.y) > 1.0) {
+    //     return Intersection(inIntersection.uv,inIntersection.id,-1.0);
+    // }
+    // return Intersection(uv,inIntersection.id,f * dot(e2, originCrossE1));
+
+    let t = f * dot(e2, originCrossE1);
+
+    let isHit: bool = (uv.x >= 0.0) && (uv.y >= 0.0)
+                    && (uv.x + uv.y <= 1.0)
+                    && (t < inIntersection.closestT)
+                    && (t > EPSILON);
+
+    if (isHit) {
+        return Intersection(uv,inIntersection.id,t);
     }
-    return Intersection(uv,inIntersection.id,f * dot(e2, originCrossE1));
+    return inIntersection;
+    // return isHit ? Intersection(uv,inIntersection.id,t) : inIntersection;
 }
 
 //TODO:
@@ -207,10 +221,11 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
         if (idx >= ubo.len_inner_nodes - 1) {break};
 
         let current_node: NodeInner = inner_nodes.InnerNodes[idx];
-        let not_leaf_node: bool = current_node.idx2 == 0u;
+        let leaf_node: bool = current_node.idx2 > 0u;
 
         if (intersectAABB(ray, idx)) {
-            if (!not_leaf_node) {
+            idx = idx + 1;
+            if (leaf_node) {
                 var t2 = Intersection(ret.uv, ret.id, -1.0);
                 let primIdx = i32(current_node.skip_ptr_or_prim_idx1);
 
@@ -234,13 +249,14 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
                     // break;
                 }
             }
-            idx = idx + 1;
+            
         }
-        elseif (not_leaf_node) {
-            idx = idx + i32(current_node.skip_ptr_or_prim_idx1);
+        elseif (leaf_node) {
+            idx = idx + 1;
         }
         else {
-            idx = idx + 1;
+            // idx = idx + 1;
+            idx = idx + i32(current_node.skip_ptr_or_prim_idx1);
         }
     }
     return ret;
@@ -452,8 +468,12 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
     // if (workgroup_id.x == u32(4) && workgroup_id.y == u32(4)) {
     //     color = vec4<f32>(vec3<f32>(local_invocation_id.xyz)/255.0,1.0);
     // }
-    
 
+    // var color: vec4<f32> = vec4<f32>(f32(workgroup_id.x % 2u),f32(workgroup_id.y % 2u),0.0,1.0);
+
+    // if (workgroup_id.x == u32(4) && workgroup_id.y == u32(4)) {
+    //     color = vec4<f32>(vec3<f32>(local_invocation_id.xyz)/255.0,1.0);
+    // }
 
     textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }
