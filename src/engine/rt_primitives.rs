@@ -250,12 +250,7 @@ impl NodeLeaf {
 impl BoundingBox {
     pub fn empty() -> Self {
         BoundingBox {
-            first: const_vec4!([
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY
-            ]),
+            first: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, f32::INFINITY]),
             second: const_vec4!([
                 f32::NEG_INFINITY,
                 f32::NEG_INFINITY,
