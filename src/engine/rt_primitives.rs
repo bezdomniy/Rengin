@@ -1,5 +1,3 @@
-use std::ops::{Index, IndexMut};
-
 use glam::{const_mat4, const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4};
 
 #[repr(C)]
@@ -17,17 +15,6 @@ pub struct Material {
 pub struct ObjectParams {
     pub inverse_transform: Mat4,
     pub material: Material,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C)]
-pub struct BoundingBox {
-    pub first: Vec4,
-    pub second: Vec4,
-}
-
-pub struct BoundingBoxes {
-    pub items: Vec<BoundingBox>,
 }
 
 #[repr(C)]
@@ -53,84 +40,27 @@ pub struct NodeInner {
 pub struct BVH {
     pub inner_nodes: Vec<NodeInner>,
     pub leaf_nodes: Vec<NodeLeaf>,
-    pub inner_lengths: Vec<i32>,
-    pub leaf_lengths: Vec<i32>,
-}
-
-pub struct BoundingBoxesIter<'a> {
-    bounding_boxes: &'a BoundingBoxes,
-    stack: Vec<(u32, u32)>,
+    pub max_inner_node_idx: Vec<u32>,
+    pub max_leaf_node_idx: Vec<u32>,
 }
 
 impl BVH {
     pub fn new(inner_nodes: Vec<Vec<NodeInner>>, leaf_nodes: Vec<Vec<NodeLeaf>>) -> Self {
-        let inner_lengths: Vec<i32> = inner_nodes
+        let max_inner_node_idx: Vec<u32> = inner_nodes
             .iter()
-            .map(|next_vec| next_vec.len() as i32)
+            .map(|next_vec| next_vec.len() as u32)
             .collect();
 
-        let leaf_lengths: Vec<i32> = leaf_nodes
+        let max_leaf_node_idx: Vec<u32> = leaf_nodes
             .iter()
-            .map(|next_vec| next_vec.len() as i32)
+            .map(|next_vec| next_vec.len() as u32)
             .collect();
 
         BVH {
             inner_nodes: inner_nodes.into_iter().flatten().collect::<Vec<_>>(),
             leaf_nodes: leaf_nodes.into_iter().flatten().collect::<Vec<_>>(),
-            inner_lengths,
-            leaf_lengths,
-        }
-    }
-}
-
-impl BoundingBoxes {
-    pub fn new(size: usize) -> Self {
-        let mut items: Vec<BoundingBox> = Vec::new();
-        items.resize(size, BoundingBox::empty());
-        BoundingBoxes { items }
-    }
-    pub fn iter(&self) -> BoundingBoxesIter<'_> {
-        BoundingBoxesIter {
-            bounding_boxes: self,
-            stack: vec![(0, 0)],
-        }
-    }
-}
-
-impl Index<usize> for BoundingBoxes {
-    type Output = BoundingBox;
-    fn index(&self, i: usize) -> &BoundingBox {
-        self.items.get(i).unwrap()
-    }
-}
-
-impl IndexMut<usize> for BoundingBoxes {
-    fn index_mut(&mut self, i: usize) -> &mut BoundingBox {
-        self.items.get_mut(i).unwrap()
-    }
-}
-
-impl<'a> Iterator for BoundingBoxesIter<'a> {
-    type Item = (u32, u32);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.stack.is_empty() {
-                return None;
-            }
-
-            let (level, branch) = self.stack.pop().unwrap();
-
-            let first_child_idx = u32::pow(2, level) - 1 + branch;
-            // println!("{} {} {}", level, branch, first_child_idx);
-
-            if first_child_idx < self.bounding_boxes.items.len() as u32 - 1 {
-                self.stack.push((level + 1, (branch * 2) + 1));
-                self.stack.push((level + 1, branch * 2));
-                // println!("{:?}", self.stack);
-                return Some((level, branch));
-                // return self.bounding_boxes.items.get(first_child_idx as usize);
-            }
+            max_inner_node_idx,
+            max_leaf_node_idx,
         }
     }
 }
@@ -159,23 +89,23 @@ pub struct UBO {
     // Compute shader uniform block object
     light_pos: Vec4,
     pub camera: Camera,
-    len_inner_nodes: i32,
-    len_leaf_nodes: i32,
+    max_inner_node_idx: u32,
+    max_leaf_node_idx: u32,
     _padding: [u32; 2],
 }
 
 impl UBO {
     pub fn new(
         light_pos: [f32; 4],
-        len_inner_nodes: i32,
-        len_leaf_nodes: i32,
+        max_inner_node_idx: u32,
+        max_leaf_node_idx: u32,
         camera: Camera,
     ) -> UBO {
         UBO {
             light_pos: const_vec4!(light_pos),
             camera,
-            len_inner_nodes,
-            len_leaf_nodes,
+            max_inner_node_idx,
+            max_leaf_node_idx,
             _padding: [0, 0],
         }
     }
@@ -232,66 +162,67 @@ impl NodeLeaf {
             normals: const_mat4!([f32::NEG_INFINITY; 16]),
         }
     }
-    pub fn bounds(&self) -> BoundingBox {
+    pub fn bounds(&self) -> NodeInner {
         self.points
             .to_cols_array_2d()
             .iter()
-            .fold(BoundingBox::empty(), |aabb, p| {
-                aabb.add_point(&Vec4::new(p[0], p[1], p[2], 1f32))
+            .fold(NodeInner::empty(), |aabb, p| {
+                aabb.add_point(&Vec3::new(p[0], p[1], p[2]))
             })
     }
 
-    pub fn bounds_centroid(&self) -> Vec4 {
+    pub fn bounds_centroid(&self) -> Vec3 {
         let bounds = self.bounds();
         0.5 * bounds.first + 0.5 * bounds.second
     }
 }
 
-impl BoundingBox {
+impl NodeInner {
     pub fn empty() -> Self {
-        BoundingBox {
-            first: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, f32::INFINITY]),
-            second: const_vec4!([
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY
-            ]),
+        NodeInner {
+            first: const_vec3!([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
+            skip_ptr_or_prim_idx1: 0,
+            second: const_vec3!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
+            prim_idx2: 0,
         }
     }
 
     pub fn total() -> Self {
-        BoundingBox {
-            first: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
-            second: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
+        NodeInner {
+            first: const_vec3!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
+            skip_ptr_or_prim_idx1: 0,
+            second: const_vec3!([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
+            prim_idx2: 0,
         }
     }
 
-    pub fn merge(&self, other: &BoundingBox) -> Self {
-        let min: Vec4 = const_vec4!([
+    pub fn merge(&self, other: &NodeInner) -> Self {
+        let min: Vec3 = const_vec3!([
             f32::min(self.first.x, other.first.x),
             f32::min(self.first.y, other.first.y),
             f32::min(self.first.z, other.first.z),
-            1.
         ]);
 
-        let max: Vec4 = const_vec4!([
+        let max: Vec3 = const_vec3!([
             f32::max(self.second.x, other.second.x),
             f32::max(self.second.y, other.second.y),
             f32::max(self.second.z, other.second.z),
-            1.
         ]);
 
-        BoundingBox {
+        NodeInner {
             first: min,
+            skip_ptr_or_prim_idx1: other.skip_ptr_or_prim_idx1,
             second: max,
+            prim_idx2: other.prim_idx2,
         }
     }
 
-    pub fn add_point(&self, point: &Vec4) -> Self {
-        BoundingBox {
+    pub fn add_point(&self, point: &Vec3) -> Self {
+        NodeInner {
             first: self.first.min(*point),
+            skip_ptr_or_prim_idx1: self.skip_ptr_or_prim_idx1,
             second: self.second.max(*point),
+            prim_idx2: self.prim_idx2,
         }
     }
 }

@@ -37,13 +37,11 @@ use std::mem;
 // use core::num;
 
 // use wgpu::BufferUsage;
-use glam::{const_vec2, const_vec4, Mat4, Vec2, Vec4};
+use glam::{const_vec2, const_vec4, Mat4, Vec2, Vec3, Vec4};
 
 use engine::asset_importer::import_obj;
 
-use engine::rt_primitives::{
-    BoundingBox, Camera, Material, NodeInner, NodeLeaf, ObjectParams, BVH, UBO,
-};
+use engine::rt_primitives::{Camera, Material, NodeInner, NodeLeaf, ObjectParams, BVH, UBO};
 
 use crate::renderer::wgpu_utils::RenginWgpu;
 
@@ -51,7 +49,7 @@ static WIDTH: u32 = 800;
 static HEIGHT: u32 = 600;
 static WORKGROUP_SIZE: [u32; 3] = [8, 8, 1];
 
-static FRAMERATE: f64 = 5.0;
+static FRAMERATE: f64 = 30.0;
 
 struct GameState {
     pub camera_angle_y: f32,
@@ -120,6 +118,7 @@ impl RenderApp {
 
         self.object_params = Some(vec![ObjectParams {
             inverse_transform: Mat4::IDENTITY,
+            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
             material: Material {
                 colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
                 ambient: 0.1,
@@ -174,8 +173,20 @@ impl RenderApp {
 
         self.ubo = Some(UBO::new(
             [-4f32, 2f32, 3f32, 1f32],
-            *self.objects.as_ref().unwrap().inner_lengths.get(0).unwrap(),
-            *self.objects.as_ref().unwrap().leaf_lengths.get(0).unwrap(),
+            *self
+                .objects
+                .as_ref()
+                .unwrap()
+                .max_inner_node_idx
+                .get(0)
+                .unwrap(),
+            *self
+                .objects
+                .as_ref()
+                .unwrap()
+                .max_leaf_node_idx
+                .get(0)
+                .unwrap(),
             camera,
         ));
 
@@ -844,7 +855,7 @@ impl RenderApp {
                     // println!("blocking");
                     // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
                     // println!("done");
-                    println!("redrawing");
+                    // println!("redrawing");
                     let frame = match self.renderer.window_surface.get_current_texture() {
                         Ok(frame) => frame,
                         Err(_) => {

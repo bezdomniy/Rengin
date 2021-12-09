@@ -1,5 +1,5 @@
-use crate::engine::rt_primitives::{BoundingBox, BoundingBoxes, NodeInner, NodeLeaf, BVH};
-use glam::{const_mat4, const_vec4, Vec4Swizzles};
+use crate::engine::rt_primitives::{NodeInner, NodeLeaf, BVH};
+use glam::{const_mat4, const_vec3, const_vec4, Vec4Swizzles};
 use tobj;
 
 pub fn import_obj(path: &str) -> Option<BVH> {
@@ -72,11 +72,10 @@ pub fn import_obj(path: &str) -> Option<BVH> {
             })
             .collect();
 
-        let (bounding_boxes, leaf_nodes) = build(&mut triangles);
-        let inner_nodes = flatten(&bounding_boxes);
+        let bounding_boxes = build(&mut triangles);
 
-        object_inner_nodes.push(inner_nodes);
-        object_leaf_nodes.push(leaf_nodes);
+        object_inner_nodes.push(bounding_boxes);
+        object_leaf_nodes.push(triangles);
     }
 
     Some(BVH::new(object_inner_nodes, object_leaf_nodes))
@@ -90,73 +89,14 @@ fn log_2(x: usize) -> usize {
     num_bits::<usize>() - x.leading_zeros() as usize - 1
 }
 
-fn flatten(bounding_boxes: &BoundingBoxes) -> Vec<NodeInner> {
-    let bvh_height = log_2(bounding_boxes.items.len()) as u32;
-    println!("len:{} height: {}", bounding_boxes.items.len(), bvh_height);
-    bounding_boxes
-        .iter()
-        .map(|(level, branch)| {
-            let bounding_box_idx = 2usize.pow(level as u32) - 1 + (branch as usize);
-
-            let &bounding_box = bounding_boxes.items.get(bounding_box_idx).unwrap();
-
-            let skip_ptr = u32::pow(2, bvh_height - level) - 1;
-
-            // println!("{} {} {} {}", level, branch, bounding_box_idx, skip_ptr);
-
-            if level == bvh_height - 1 {
-                return NodeInner {
-                    first: bounding_box.first.xyz(),
-                    skip_ptr_or_prim_idx1: branch * 2,
-                    second: bounding_box.second.xyz(),
-                    prim_idx2: (branch * 2) + 1,
-                };
-            }
-
-            NodeInner {
-                first: bounding_box.first.xyz(),
-                skip_ptr_or_prim_idx1: skip_ptr,
-                second: bounding_box.second.xyz(),
-                prim_idx2: 0,
-            }
-        })
-        .collect()
-
-    // // TODO: placeholder for now
-    // bounding_boxes
-    //     .items
-    //     .iter()
-    //     .enumerate()
-    //     .map(|(bounding_box_idx, bounding_box)| {
-    //         if bounding_box_idx as usize > bounding_boxes.items.len() / 2 {
-    //             return NodeInner {
-    //                 first: bounding_box.first.xyz(),
-    //                 skip_ptr_or_prim_idx1: 1,
-    //                 second: bounding_box.second.xyz(),
-    //                 prim_idx2: 1,
-    //             };
-    //         }
-
-    //         NodeInner {
-    //             first: bounding_box.first.xyz(),
-    //             skip_ptr_or_prim_idx1: 1,
-    //             second: bounding_box.second.xyz(),
-    //             prim_idx2: 1,
-    //         }
-    //     })
-    //     .collect()
-}
-
-fn build(triangles: &mut Vec<NodeLeaf>) -> (BoundingBoxes, Vec<NodeLeaf>) {
-    let mut bounding_boxes: BoundingBoxes = BoundingBoxes::new(triangles.len().next_power_of_two());
+fn build(triangles: &mut Vec<NodeLeaf>) -> Vec<NodeInner> {
+    let mut bounding_boxes: Vec<NodeInner> =
+        Vec::with_capacity(triangles.len().next_power_of_two());
 
     let bvh_height = log_2(triangles.len());
 
-    let mut primitives: Vec<NodeLeaf> = Vec::with_capacity(triangles.len().next_power_of_two());
-
     recursive_build(
         &mut bounding_boxes,
-        &mut primitives,
         triangles,
         0,
         0,
@@ -165,12 +105,11 @@ fn build(triangles: &mut Vec<NodeLeaf>) -> (BoundingBoxes, Vec<NodeLeaf>) {
         bvh_height,
     );
 
-    (bounding_boxes, primitives)
+    bounding_boxes
 }
 
 fn recursive_build(
-    bounding_boxes: &mut BoundingBoxes,
-    primitives: &mut Vec<NodeLeaf>,
+    bounding_boxes: &mut Vec<NodeInner>,
     triangle_params_unsorted: &mut Vec<NodeLeaf>,
     level: usize,
     branch: usize,
@@ -178,12 +117,18 @@ fn recursive_build(
     end: usize,
     bvh_height: usize,
 ) -> () {
-    let centroid_bounds = triangle_params_unsorted[start..end].iter().fold(
-        BoundingBox {
-            first: const_vec4!([f32::INFINITY, f32::INFINITY, f32::INFINITY, 1.0]),
-            second: const_vec4!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, 1.0]),
+    let mut centroid_bounds = triangle_params_unsorted[start..end].iter().fold(
+        NodeInner {
+            first: const_vec3!([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
+            skip_ptr_or_prim_idx1: 0,
+            second: const_vec3!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
+            prim_idx2: 0,
         },
-        |acc, new| acc.merge(&new.bounds()),
+        |acc, new| {
+            // println!("adding: {:?}", new.bounds_centroid());
+            // acc.add_point(&new.bounds_centroid())
+            acc.merge(&new.bounds())
+        },
     );
 
     // println!("cb: {:?}", centroid_bounds);
@@ -198,68 +143,47 @@ fn recursive_build(
         2
     };
 
-    if centroid_bounds.first[split_dimension] == centroid_bounds.second[split_dimension] {
-        ()
+    let n_shapes = end - start;
+    let mid = (start + end) / 2;
+
+    let is_leaf: bool = centroid_bounds.first[split_dimension]
+        == centroid_bounds.second[split_dimension]
+        || n_shapes <= 2;
+
+    if is_leaf {
+        centroid_bounds.skip_ptr_or_prim_idx1 = start as u32;
+        centroid_bounds.prim_idx2 = end as u32;
     } else {
-        let mid = (start + end) / 2;
+        centroid_bounds.skip_ptr_or_prim_idx1 = 2u32.pow((bvh_height - level) as u32) - 1;
+        centroid_bounds.prim_idx2 = 0;
 
         triangle_params_unsorted[start..end].select_nth_unstable_by(mid - start, |a, b| {
             a.bounds_centroid()[split_dimension]
                 .partial_cmp(&b.bounds_centroid()[split_dimension])
                 .unwrap()
         });
+    }
+    bounding_boxes.push(centroid_bounds);
 
-        let node: usize = 2usize.pow(level as u32) + branch - 1;
-
-        // println!("adding: {:?}",centroid_bounds);
-        bounding_boxes[node] = centroid_bounds;
-
-        let n_shapes = end - start;
-
-        if n_shapes > 2 {
-            recursive_build(
-                bounding_boxes,
-                primitives,
-                triangle_params_unsorted,
-                level + 1,
-                branch * 2,
-                start,
-                mid,
-                bvh_height,
-            );
-            recursive_build(
-                bounding_boxes,
-                primitives,
-                triangle_params_unsorted,
-                level + 1,
-                (branch * 2) + 1,
-                mid,
-                end,
-                bvh_height,
-            );
-        } else {
-            primitives.push(triangle_params_unsorted[start]);
-
-            if n_shapes == 2 {
-                primitives.push(triangle_params_unsorted[start + 1]);
-            } else {
-                primitives.push(NodeLeaf::empty());
-            }
-            if level < bvh_height {
-                // println!("level {}, bvh_height {}", level, bvh_height);
-                let dummy_node = 2usize.pow((level + 1) as u32) + (branch * 2) - 1;
-
-                // tlas[dummy_node] = BoundingBox::total();
-                // tlas.swap(dummy_node, node);
-                // println!("adding dummy: {:?}",centroid_bounds);
-                bounding_boxes[dummy_node] = centroid_bounds;
-                bounding_boxes[dummy_node + 1] = BoundingBox::empty();
-
-                primitives.push(NodeLeaf::empty());
-                primitives.push(NodeLeaf::empty());
-            }
-            ()
-        }
+    if !is_leaf {
+        recursive_build(
+            bounding_boxes,
+            triangle_params_unsorted,
+            level + 1,
+            branch * 2,
+            start,
+            mid,
+            bvh_height,
+        );
+        recursive_build(
+            bounding_boxes,
+            triangle_params_unsorted,
+            level + 1,
+            (branch * 2) + 1,
+            mid,
+            end,
+            bvh_height,
+        );
     }
     ()
 }

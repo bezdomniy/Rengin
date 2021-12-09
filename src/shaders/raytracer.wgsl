@@ -50,8 +50,8 @@ struct Camera {
 struct UBO {
     lightPos: vec4<f32>;
     camera: Camera;
-    len_inner_nodes: i32;
-    len_leaf_nodes: i32;
+    max_inner_node_idx: i32;
+    max_leaf_node_idx: i32;
     // padding: array<u32,2>;
 };
 
@@ -161,7 +161,7 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
     return true;
 }
 
-fn triangleIntersect(ray: Ray, triangleIdx: i32, inIntersection: Intersection) -> Intersection {
+fn triangleIntersect(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -> Intersection {
     let triangle = leaf_nodes.LeafNodes[triangleIdx];
     var uv: vec2<f32> = vec2<f32>(0.0);
     let e1: vec3<f32> = (triangle.point2 - triangle.point1).xyz;
@@ -197,7 +197,7 @@ fn triangleIntersect(ray: Ray, triangleIdx: i32, inIntersection: Intersection) -
                     && (t > EPSILON);
 
     if (isHit) {
-        return Intersection(uv,inIntersection.id,t);
+        return Intersection(uv,-(i32(triangleIdx + 2u)),t);
     }
     return inIntersection;
     // return isHit ? Intersection(uv,inIntersection.id,t) : inIntersection;
@@ -218,7 +218,7 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
     var idx: i32 = 0;
     loop  
     {
-        if (idx >= ubo.len_inner_nodes - 1) {break};
+        if (idx >= ubo.max_inner_node_idx ) {break};
 
         let current_node: NodeInner = inner_nodes.InnerNodes[idx];
         let leaf_node: bool = current_node.idx2 > 0u;
@@ -226,27 +226,8 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
         if (intersectAABB(ray, idx)) {
             idx = idx + 1;
             if (leaf_node) {
-                var t2 = Intersection(ret.uv, ret.id, -1.0);
-                let primIdx = i32(current_node.skip_ptr_or_prim_idx1);
-
-                let t1 = triangleIntersect(ray, primIdx, ret);
-
-                if (primIdx + 1 < ubo.len_leaf_nodes && leaf_nodes.LeafNodes[primIdx + 1].point1.w > 0.0) {
-                    t2 = triangleIntersect(ray, primIdx + 1, ret);
-                }
-
-                if ((t1.closestT > EPSILON) && (t1.closestT < ret.closestT) && (t2.closestT < 0.0 || (t1.closestT < t2.closestT))) {
-                    ret.uv = t1.uv;
-                    ret.id = -(primIdx + 2);
-                    ret.closestT = t1.closestT;
-                    // break;
-                }
-                if ((t2.closestT > EPSILON) && (t2.closestT < ret.closestT))
-                {
-                    ret.uv = t2.uv;
-                    ret.id = -(primIdx + 3);
-                    ret.closestT = t2.closestT;
-                    // break;
+                for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1; primIdx < current_node.idx2; primIdx = primIdx + 1u) {
+                    ret = triangleIntersect(ray, primIdx, ret);
                 }
             }
             
@@ -255,7 +236,6 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
             idx = idx + 1;
         }
         else {
-            // idx = idx + 1;
             idx = idx + i32(current_node.skip_ptr_or_prim_idx1);
         }
     }
