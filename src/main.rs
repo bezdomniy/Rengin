@@ -663,9 +663,9 @@ impl RenderApp {
                         && time_since_last_frame >= target_frametime
                         && (!left_mouse_down || self.renderer.continous_motion)
                     {
+                        something_changed = false;
                         self.renderer.window.request_redraw();
                         last_update_inst = Instant::now();
-                        something_changed = false;
                     } else {
                         *control_flow = ControlFlow::WaitUntil(
                             Instant::now() + target_frametime - time_since_last_frame,

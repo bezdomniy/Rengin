@@ -204,8 +204,8 @@ fn recursive_build(
         let mid = (start + end) / 2;
 
         triangle_params_unsorted[start..end].select_nth_unstable_by(mid - start, |a, b| {
-            b.bounds_centroid()[split_dimension]
-                .partial_cmp(&a.bounds_centroid()[split_dimension])
+            a.bounds_centroid()[split_dimension]
+                .partial_cmp(&b.bounds_centroid()[split_dimension])
                 .unwrap()
         });
 
