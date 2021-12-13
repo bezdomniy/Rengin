@@ -1,3 +1,5 @@
+#![feature(iter_partition_in_place)]
+
 mod engine;
 mod renderer;
 mod shaders;
@@ -676,6 +678,7 @@ impl RenderApp {
                     {
                         something_changed = false;
                         self.renderer.window.request_redraw();
+                        println!("render time: {:?}", time_since_last_frame);
                         last_update_inst = Instant::now();
                     } else {
                         *control_flow = ControlFlow::WaitUntil(

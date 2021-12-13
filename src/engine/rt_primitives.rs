@@ -225,6 +225,29 @@ impl NodeInner {
             prim_idx2: self.prim_idx2,
         }
     }
+
+    pub fn diagonal(&self) -> Vec3 {
+        self.second - self.first
+    }
+
+    pub fn surface_area(&self) -> f32 {
+        let d = self.diagonal();
+        2 as f32 * (d.x * d.y + d.x * d.z + d.y * d.z)
+    }
+
+    pub fn offset(&self, point: &Vec3) -> Vec3 {
+        let mut o = *point - self.first;
+        if self.second.x > self.first.x {
+            o.x /= self.second.x - self.first.x
+        }
+        if self.second.y > self.first.y {
+            o.y /= self.second.y - self.first.y
+        }
+        if self.second.z > self.first.z {
+            o.z /= self.second.z - self.first.z
+        };
+        return o;
+    }
 }
 
 // TODO: need buffers containing: TLASes, BLASes, Materials, u32 pairs for shape offsets into tlas and blas buffers,

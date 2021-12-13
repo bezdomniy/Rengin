@@ -14,7 +14,7 @@ std = ["glam/std"]
 libm = ["glam/libm"]
 
 [dependencies]
-glam = { version = "0.17.1", default-features = false, features = ["bytemuck"] }
+glam = { version = "0.20.1", default-features = false, features = ["bytemuck"] }
 winit = "0.25.0"
 wgpu = {version = "0.11"}
 tobj = "3.1.0"

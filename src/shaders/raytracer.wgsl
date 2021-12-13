@@ -236,7 +236,7 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
             idx = idx + 1;
         }
         else {
-            idx = idx + i32(current_node.skip_ptr_or_prim_idx1);
+            idx = i32(current_node.skip_ptr_or_prim_idx1);
         }
     }
     return ret;
