@@ -41,7 +41,7 @@ use std::mem;
 // use wgpu::BufferUsage;
 use glam::{const_vec2, const_vec4, Mat4, Vec2, Vec3, Vec4};
 
-use engine::asset_importer::import_obj;
+use engine::asset_importer::import_objs;
 
 use engine::rt_primitives::{
     Camera, Material, NodeInner, NodeLeaf, NodeNormal, ObjectParams, BVH, UBO,
@@ -114,23 +114,48 @@ impl RenderApp {
     fn init(&mut self, model_path: &str) {
         let mut now = Instant::now();
         log::info!("Loading models...");
-        self.objects = import_obj(model_path);
+        self.objects = import_objs(vec![model_path, model_path]);
         log::info!(
             "Finished loading models in {} millis.",
             now.elapsed().as_millis()
         );
 
-        self.object_params = Some(vec![ObjectParams {
-            inverse_transform: Mat4::IDENTITY,
-            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            material: Material {
-                colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
-                ambient: 0.1,
-                diffuse: 0.7,
-                specular: 0.3,
-                shininess: 200.0,
+        // let transform1 = Mat4::from_cols_array_2d(&[
+        //     [1f32, 0f32, 0f32, 2f32],
+        //     [0f32, 1f32, 0f32, 0f32],
+        //     [0f32, 0f32, 1f32, 0f32],
+        //     [0f32, 0f32, 0f32, 1f32],
+        // ])
+        // .transpose();
+
+        let transform1 = Mat4::from_translation(Vec3::new(2f32, 0f32, 0f32));
+        let transform2 = Mat4::from_translation(Vec3::new(-3f32, 0f32, 0f32));
+        // let transform1 = Mat4::IDENTITY;
+        // let transform2 = Mat4::IDENTITY;
+
+        self.object_params = Some(vec![
+            ObjectParams {
+                inverse_transform: transform1,
+                // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
+                material: Material {
+                    colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
+                    ambient: 0.1,
+                    diffuse: 0.7,
+                    specular: 0.3,
+                    shininess: 200.0,
+                },
             },
-        }]);
+            ObjectParams {
+                inverse_transform: transform2,
+                material: Material {
+                    colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
+                    ambient: 0.1,
+                    diffuse: 0.7,
+                    specular: 0.3,
+                    shininess: 200.0,
+                },
+            },
+        ]);
 
         // log::info!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
         // log::info!(

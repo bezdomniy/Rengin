@@ -1,7 +1,10 @@
 struct NodeLeaf {
-    point1: vec4<f32>;
-    point2: vec4<f32>;
-    point3: vec4<f32>;
+    point1: vec3<f32>;
+    object_id: u32;
+    point2: vec3<f32>;
+    pad1: u32;
+    point3: vec3<f32>;
+    pad2: u32;
 };
 
 struct Normal {
@@ -17,10 +20,6 @@ struct NodeInner {
     idx2: u32;
 };
 
-struct Node {
-    level: i32;
-    branch: i32;
-};
 
 struct HitParams {
     point: vec4<f32>;
@@ -96,6 +95,7 @@ struct Intersection {
     uv: vec2<f32>;
     id: i32;
     closestT: f32;
+    model_id: u32;
 };
 
 [[group(0), binding(0)]]
@@ -172,8 +172,8 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
 fn triangleIntersect(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -> Intersection {
     let triangle = leaf_nodes.LeafNodes[triangleIdx];
     var uv: vec2<f32> = vec2<f32>(0.0);
-    let e1: vec3<f32> = (triangle.point2 - triangle.point1).xyz;
-    let e2: vec3<f32> = (triangle.point3 - triangle.point1).xyz;
+    let e1: vec3<f32> = triangle.point2 - triangle.point1;
+    let e2: vec3<f32> = triangle.point3 - triangle.point1;
 
     let dirCrossE2: vec3<f32> = cross(ray.rayD.xyz, e2);
     let det: f32 = dot(e1, dirCrossE2);
@@ -182,7 +182,7 @@ fn triangleIntersect(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -
     // }
 
     let f: f32 = 1.0 / det;
-    let p1ToOrigin: vec3<f32> = (ray.rayO - triangle.point1).xyz;
+    let p1ToOrigin: vec3<f32> = (ray.rayO.xyz - triangle.point1);
     uv.x = f * dot(p1ToOrigin, dirCrossE2);
     // if (uv.x < 0.0 || uv.x > 1.0) {
     //   return Intersection(inIntersection.uv,inIntersection.id,-1.0);
@@ -205,7 +205,7 @@ fn triangleIntersect(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -
                     && (t > EPSILON);
 
     if (isHit) {
-        return Intersection(uv,-(i32(triangleIdx + 2u)),t);
+        return Intersection(uv,i32(triangleIdx),t,triangle.object_id);
     }
     return inIntersection;
     // return isHit ? Intersection(uv,inIntersection.id,t) : inIntersection;
@@ -220,8 +220,9 @@ fn triangleIntersect(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -
 // i += bvh[i].skip_index
 // else:
 // i++
-fn intersectInnerNodes(ray: Ray) -> Intersection {
-    var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
+fn intersectInnerNodes(ray: Ray, inIntersection: Intersection) -> Intersection {
+    // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
+    var ret: Intersection = inIntersection;
 
     var idx: i32 = 0;
     loop  
@@ -235,7 +236,11 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
             idx = idx + 1;
             if (leaf_node) {
                 for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1; primIdx < current_node.idx2; primIdx = primIdx + 1u) {
-                    ret = triangleIntersect(ray, primIdx, ret);
+                    let next_intersection = triangleIntersect(ray, primIdx, ret);
+
+                    if ((next_intersection.closestT < inIntersection.closestT)  && (next_intersection.closestT > EPSILON)) {
+                        ret = next_intersection;
+                    }
                 }
             }
             
@@ -252,13 +257,23 @@ fn intersectInnerNodes(ray: Ray) -> Intersection {
 
 fn intersect(ray: Ray) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
-    let nRay: Ray = Ray(object_params.ObjectParams[0].inverse_transform * ray.rayO, object_params.ObjectParams[0].inverse_transform * ray.rayD);
-    return intersectInnerNodes(nRay);
+    var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
+
+    // TODO: fix loop range - get number of objects
+    for (var i: i32 = 0; i < 2; i = i+1) {
+        let nRay: Ray = Ray(object_params.ObjectParams[i].inverse_transform * ray.rayO, object_params.ObjectParams[i].inverse_transform * ray.rayD);
+        ret = intersectInnerNodes(nRay,ret);
+    }
+
+    // let nRay: Ray = Ray(object_params.ObjectParams[0].inverse_transform * ray.rayO, object_params.ObjectParams[0].inverse_transform * ray.rayD);
+    // ret = intersectInnerNodes(nRay,ret);
+    
+    return ret;
 }
 
-fn normalToWorld(normal: vec4<f32>) -> vec4<f32>
+fn normalToWorld(normal: vec4<f32>, object_id: u32) -> vec4<f32>
 {
-    let ret: vec4<f32> = normalize(vec4<f32>((transpose(object_params.ObjectParams[0].inverse_transform) * normal).xyz,0.0));
+    let ret: vec4<f32> = normalize(vec4<f32>((transpose(object_params.ObjectParams[object_id].inverse_transform) * normal).xyz,0.0));
     // ret.w = 0.0;
     // ret = normalize(ret);
 
@@ -276,8 +291,8 @@ fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4
     //     n = vec4<f32>(0.0,1.0,0.0,0.0);
     // }
     // elseif (typeEnum == 2) {
-        let normal: Normal = normal_nodes.Normals[-(intersection.id+2)];
-        return normalToWorld((normal.normal2 * intersection.uv.x + normal.normal3 * intersection.uv.y + normal.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)));
+        let normal: Normal = normal_nodes.Normals[intersection.id];
+        return normalToWorld((normal.normal2 * intersection.uv.x + normal.normal3 * intersection.uv.y + normal.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
         // n.w = 0.0;
     // }
     // return (n);

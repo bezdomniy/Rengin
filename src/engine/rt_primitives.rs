@@ -26,7 +26,12 @@ pub struct ObjectParams {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct NodeLeaf {
-    pub points: [Vec4; 3],
+    pub point1: Vec3,
+    pub object_id: u32,
+    pub point2: Vec3,
+    pub pad1: u32,
+    pub point3: Vec3,
+    pub pad2: u32,
 }
 
 #[repr(C)]
@@ -171,13 +176,14 @@ impl Camera {
 }
 
 impl NodeLeaf {
-    pub fn new(v: [f32; 9]) -> Self {
+    pub fn new(v: [f32; 9], object_id: u32) -> Self {
         NodeLeaf {
-            points: [
-                const_vec4!([v[0], v[1], v[2], 1f32]),
-                const_vec4!([v[3], v[4], v[5], 1f32]),
-                const_vec4!([v[6], v[7], v[8], 1f32]),
-            ],
+            point1: const_vec3!([v[0], v[1], v[2]]),
+            point2: const_vec3!([v[3], v[4], v[5]]),
+            point3: const_vec3!([v[6], v[7], v[8]]),
+            object_id,
+            pad1: 0,
+            pad2: 0,
         }
     }
 }
@@ -203,6 +209,7 @@ impl Primitive {
                 aabb.add_point(&const_vec3!(*p))
             })
         // .add_point(&Vec3::new(0f32, 0f32, 0f32)) // This slows it down massively, but makes cube work for some reason...
+        // this is an issue with bounding boxes around axis aligned triangles - TODO, figure it out
     }
 
     pub fn bounds_centroid(&self) -> Vec3 {

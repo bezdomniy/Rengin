@@ -4,22 +4,37 @@ use tobj;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
 
-pub fn import_obj(path: &str) -> Option<BVH> {
-    let (models, _materials) = tobj::load_obj(
-        path,
-        &tobj::LoadOptions {
-            // triangulate: true,
-            single_index: true,
-            ..Default::default()
-        },
-    )
-    .expect("Failed to OBJ load file");
+pub fn import_objs(paths: Vec<&str>) -> Option<BVH> {
+    // let (models, _materials) = tobj::load_obj(
+    //     path,
+    //     &tobj::LoadOptions {
+    //         // triangulate: true,
+    //         single_index: true,
+    //         ..Default::default()
+    //     },
+    // )
+    // .expect("Failed to OBJ load file");
+
+    let (models, _materials): (Vec<_>, Vec<_>) = paths
+        .into_iter()
+        .map(|path| {
+            tobj::load_obj(
+                path,
+                &tobj::LoadOptions {
+                    // triangulate: true,
+                    single_index: true,
+                    ..Default::default()
+                },
+            )
+            .expect("Failed to OBJ load file")
+        })
+        .unzip();
 
     let mut object_inner_nodes: Vec<Vec<NodeInner>> = vec![];
     let mut object_leaf_nodes: Vec<Vec<NodeLeaf>> = vec![];
     let mut object_normal_nodes: Vec<Vec<NodeNormal>> = vec![];
 
-    for model in models.iter() {
+    for (i, model) in models.iter().flatten().enumerate() {
         // println!("{:?}",model.mesh.indices);
         let mut primitives: Vec<Primitive> = model
             .mesh
@@ -28,7 +43,7 @@ pub fn import_obj(path: &str) -> Option<BVH> {
             .into_iter()
             .map(|triangle_indices| {
                 // println!("{:?}", triangle_indices);
-                let p = Primitive {
+                Primitive {
                     points: const_mat3!(
                         [
                             model.mesh.positions[3 * triangle_indices[0] as usize],
@@ -63,9 +78,7 @@ pub fn import_obj(path: &str) -> Option<BVH> {
                             model.mesh.normals[(3 * triangle_indices[2] + 2) as usize],
                         ]
                     ),
-                };
-                // println!("add tri: {:?}", p.points);
-                p
+                }
             })
             .collect();
 
@@ -75,7 +88,7 @@ pub fn import_obj(path: &str) -> Option<BVH> {
             .into_iter()
             .map(|primitive| {
                 (
-                    NodeLeaf::new(primitive.points.to_cols_array()),
+                    NodeLeaf::new(primitive.points.to_cols_array(), i as u32),
                     NodeNormal::new(primitive.normals.to_cols_array()),
                 )
             })
