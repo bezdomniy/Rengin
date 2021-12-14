@@ -1,4 +1,4 @@
-use glam::{const_mat4, const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4};
+use glam::{const_mat3, const_mat4, const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -8,6 +8,12 @@ pub struct Material {
     pub diffuse: f32,
     pub specular: f32,
     pub shininess: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Primitive {
+    pub points: Mat3,
+    pub normals: Mat3,
 }
 
 #[repr(C)]
@@ -20,10 +26,13 @@ pub struct ObjectParams {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct NodeLeaf {
-    pub points: Mat4,
-    pub normals: Mat4,
-    // pub points: [Vec4; 3],
-    // pub normals: [Vec4; 3],
+    pub points: [Vec4; 3],
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct NodeNormal {
+    pub normals: [Vec4; 3],
 }
 
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -40,12 +49,17 @@ pub struct NodeInner {
 pub struct BVH {
     pub inner_nodes: Vec<NodeInner>,
     pub leaf_nodes: Vec<NodeLeaf>,
+    pub normal_nodes: Vec<NodeNormal>,
     pub max_inner_node_idx: Vec<u32>,
     pub max_leaf_node_idx: Vec<u32>,
 }
 
 impl BVH {
-    pub fn new(inner_nodes: Vec<Vec<NodeInner>>, leaf_nodes: Vec<Vec<NodeLeaf>>) -> Self {
+    pub fn new(
+        inner_nodes: Vec<Vec<NodeInner>>,
+        leaf_nodes: Vec<Vec<NodeLeaf>>,
+        normal_nodes: Vec<Vec<NodeNormal>>,
+    ) -> Self {
         let max_inner_node_idx: Vec<u32> = inner_nodes
             .iter()
             .map(|next_vec| next_vec.len() as u32)
@@ -59,6 +73,7 @@ impl BVH {
         BVH {
             inner_nodes: inner_nodes.into_iter().flatten().collect::<Vec<_>>(),
             leaf_nodes: leaf_nodes.into_iter().flatten().collect::<Vec<_>>(),
+            normal_nodes: normal_nodes.into_iter().flatten().collect::<Vec<_>>(),
             max_inner_node_idx,
             max_leaf_node_idx,
         }
@@ -156,19 +171,38 @@ impl Camera {
 }
 
 impl NodeLeaf {
-    pub fn empty() -> NodeLeaf {
+    pub fn new(v: [f32; 9]) -> Self {
         NodeLeaf {
-            points: const_mat4!([f32::NEG_INFINITY; 16]),
-            normals: const_mat4!([f32::NEG_INFINITY; 16]),
+            points: [
+                const_vec4!([v[0], v[1], v[2], 1f32]),
+                const_vec4!([v[3], v[4], v[5], 1f32]),
+                const_vec4!([v[6], v[7], v[8], 1f32]),
+            ],
         }
     }
+}
+
+impl NodeNormal {
+    pub fn new(v: [f32; 9]) -> Self {
+        NodeNormal {
+            normals: [
+                const_vec4!([v[0], v[1], v[2], 0f32]),
+                const_vec4!([v[3], v[4], v[5], 0f32]),
+                const_vec4!([v[6], v[7], v[8], 0f32]),
+            ],
+        }
+    }
+}
+
+impl Primitive {
     pub fn bounds(&self) -> NodeInner {
         self.points
             .to_cols_array_2d()
             .iter()
             .fold(NodeInner::empty(), |aabb, p| {
-                aabb.add_point(&Vec3::new(p[0], p[1], p[2]))
+                aabb.add_point(&const_vec3!(*p))
             })
+        // .add_point(&Vec3::new(0f32, 0f32, 0f32)) // This slows it down massively, but makes cube work for some reason...
     }
 
     pub fn bounds_centroid(&self) -> Vec3 {

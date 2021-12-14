@@ -1,5 +1,5 @@
-use crate::engine::rt_primitives::{NodeInner, NodeLeaf, BVH};
-use glam::{const_mat4, const_vec3, const_vec4, Vec4Swizzles};
+use crate::engine::rt_primitives::{NodeInner, NodeLeaf, NodeNormal, Primitive, BVH};
+use glam::{const_mat3, const_mat4, const_vec3, const_vec4, Mat4};
 use tobj;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
@@ -17,70 +17,84 @@ pub fn import_obj(path: &str) -> Option<BVH> {
 
     let mut object_inner_nodes: Vec<Vec<NodeInner>> = vec![];
     let mut object_leaf_nodes: Vec<Vec<NodeLeaf>> = vec![];
+    let mut object_normal_nodes: Vec<Vec<NodeNormal>> = vec![];
 
     for model in models.iter() {
         // println!("{:?}",model.mesh.indices);
-        let mut triangles: Vec<NodeLeaf> = model
+        let mut primitives: Vec<Primitive> = model
             .mesh
             .indices
             .chunks_exact(3)
             .into_iter()
             .map(|triangle_indices| {
                 // println!("{:?}", triangle_indices);
-                NodeLeaf {
-                    points: const_mat4!(
+                let p = Primitive {
+                    points: const_mat3!(
                         [
                             model.mesh.positions[3 * triangle_indices[0] as usize],
                             model.mesh.positions[(3 * triangle_indices[0] + 1) as usize],
                             model.mesh.positions[(3 * triangle_indices[0] + 2) as usize],
-                            1.0
                         ],
                         [
                             model.mesh.positions[3 * triangle_indices[1] as usize],
                             model.mesh.positions[(3 * triangle_indices[1] + 1) as usize],
                             model.mesh.positions[(3 * triangle_indices[1] + 2) as usize],
-                            1.0
                         ],
                         [
                             model.mesh.positions[3 * triangle_indices[2] as usize],
                             model.mesh.positions[(3 * triangle_indices[2] + 1) as usize],
                             model.mesh.positions[(3 * triangle_indices[2] + 2) as usize],
-                            1.0
-                        ],
-                        [0.0; 4]
+                        ]
                     ),
-                    normals: const_mat4!(
+                    normals: const_mat3!(
                         [
                             model.mesh.normals[3 * triangle_indices[0] as usize],
                             model.mesh.normals[(3 * triangle_indices[0] + 1) as usize],
                             model.mesh.normals[(3 * triangle_indices[0] + 2) as usize],
-                            0.0
                         ],
                         [
                             model.mesh.normals[3 * triangle_indices[1] as usize],
                             model.mesh.normals[(3 * triangle_indices[1] + 1) as usize],
                             model.mesh.normals[(3 * triangle_indices[1] + 2) as usize],
-                            0.0
                         ],
                         [
                             model.mesh.normals[3 * triangle_indices[2] as usize],
                             model.mesh.normals[(3 * triangle_indices[2] + 1) as usize],
                             model.mesh.normals[(3 * triangle_indices[2] + 2) as usize],
-                            0.0
-                        ],
-                        [0.0; 4]
+                        ]
                     ),
-                }
+                };
+                // println!("add tri: {:?}", p.points);
+                p
             })
             .collect();
 
-        let bounding_boxes = build(&mut triangles);
+        let bounding_boxes = build(&mut primitives);
+
+        let (triangles, normals): (Vec<NodeLeaf>, Vec<NodeNormal>) = primitives
+            .into_iter()
+            .map(|primitive| {
+                (
+                    NodeLeaf::new(primitive.points.to_cols_array()),
+                    NodeNormal::new(primitive.normals.to_cols_array()),
+                )
+            })
+            .unzip();
+
+        // for t in &triangles {
+        //     println!("{:?}", t);
+        // }
 
         object_inner_nodes.push(bounding_boxes);
         object_leaf_nodes.push(triangles);
+        object_normal_nodes.push(normals);
     }
 
-    Some(BVH::new(object_inner_nodes, object_leaf_nodes))
+    Some(BVH::new(
+        object_inner_nodes,
+        object_leaf_nodes,
+        object_normal_nodes,
+    ))
 }
 
 const fn num_bits<T>() -> usize {
@@ -99,11 +113,11 @@ enum SplitMethod {
     SAH,
 }
 
-fn build(triangles: &mut Vec<NodeLeaf>) -> Vec<NodeInner> {
+fn build(triangles: &mut Vec<Primitive>) -> Vec<NodeInner> {
     let mut bounding_boxes: Vec<NodeInner> =
         Vec::with_capacity(triangles.len().next_power_of_two());
 
-    let split_method = SplitMethod::SAH;
+    let split_method = SplitMethod::EqualCounts;
 
     recursive_build(
         &mut bounding_boxes,
@@ -119,7 +133,7 @@ fn build(triangles: &mut Vec<NodeLeaf>) -> Vec<NodeInner> {
 // TODO: make this return the skip pointer so it can bubble up
 fn recursive_build(
     bounding_boxes: &mut Vec<NodeInner>,
-    triangle_params_unsorted: &mut Vec<NodeLeaf>,
+    triangle_params_unsorted: &mut Vec<Primitive>,
     start: usize,
     end: usize,
     split_method: SplitMethod,
@@ -132,11 +146,7 @@ fn recursive_build(
             second: const_vec3!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
             prim_idx2: 0,
         },
-        |acc, new| {
-            // println!("adding: {:?}", new.bounds_centroid());
-            acc.add_point(&new.bounds_centroid())
-            // acc.merge(&new.bounds())
-        },
+        |acc, new| acc.add_point(&new.bounds_centroid()),
     );
 
     let mut bounds = triangle_params_unsorted[start..end].iter().fold(

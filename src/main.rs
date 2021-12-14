@@ -43,7 +43,9 @@ use glam::{const_vec2, const_vec4, Mat4, Vec2, Vec3, Vec4};
 
 use engine::asset_importer::import_obj;
 
-use engine::rt_primitives::{Camera, Material, NodeInner, NodeLeaf, ObjectParams, BVH, UBO};
+use engine::rt_primitives::{
+    Camera, Material, NodeInner, NodeLeaf, NodeNormal, ObjectParams, BVH, UBO,
+};
 
 use crate::renderer::wgpu_utils::RenginWgpu;
 
@@ -51,7 +53,7 @@ static WIDTH: u32 = 800;
 static HEIGHT: u32 = 600;
 static WORKGROUP_SIZE: [u32; 3] = [8, 8, 1];
 
-static FRAMERATE: f64 = 30.0;
+static FRAMERATE: f64 = 60.0;
 
 struct GameState {
     pub camera_angle_y: f32,
@@ -311,6 +313,15 @@ impl RenderApp {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
+        let buf_normals =
+            self.renderer
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("normals storage Buffer"),
+                    contents: bytemuck::cast_slice(&self.objects.as_ref().unwrap().normal_nodes),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+
         let buf_op = self
             .renderer
             .device
@@ -329,6 +340,7 @@ impl RenderApp {
         buffers.insert("ubo", buf_ubo);
         buffers.insert("tlas", buf_tlas);
         buffers.insert("blas", buf_blas);
+        buffers.insert("normals", buf_normals);
         buffers.insert("object_params", buf_op);
 
         buffers
@@ -364,10 +376,12 @@ impl RenderApp {
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
-                            // min_binding_size: wgpu::BufferSize::new(
-                            //     (dragon_tlas.len() * mem::size_of::<NodeTLAS>()) as _,
-                            // ),
-                            min_binding_size: None,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (self.objects.as_ref().unwrap().inner_nodes.len()
+                                    * mem::size_of::<NodeInner>())
+                                    as _,
+                            ),
+                            // min_binding_size: None,
                         },
                         count: None,
                     },
@@ -377,15 +391,32 @@ impl RenderApp {
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
-                            // min_binding_size: wgpu::BufferSize::new(
-                            //     (dragon_blas.len() * mem::size_of::<NodeBLAS>()) as _,
-                            // ),
-                            min_binding_size: None,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (self.objects.as_ref().unwrap().leaf_nodes.len()
+                                    * mem::size_of::<NodeLeaf>())
+                                    as _,
+                            ),
+                            // min_binding_size: None,
                         },
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (self.objects.as_ref().unwrap().normal_nodes.len()
+                                    * mem::size_of::<NodeNormal>())
+                                    as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -552,6 +583,17 @@ impl RenderApp {
                         },
                         wgpu::BindGroupEntry {
                             binding: 4,
+                            resource: self
+                                .buffers
+                                .as_ref()
+                                .unwrap()
+                                .get("normals")
+                                .as_ref()
+                                .unwrap()
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
                             resource: self
                                 .buffers
                                 .as_ref()
@@ -778,6 +820,17 @@ impl RenderApp {
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 4,
+                                        resource: self
+                                            .buffers
+                                            .as_ref()
+                                            .unwrap()
+                                            .get("normals")
+                                            .as_ref()
+                                            .unwrap()
+                                            .as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 5,
                                         resource: self
                                             .buffers
                                             .as_ref()

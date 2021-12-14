@@ -2,11 +2,12 @@ struct NodeLeaf {
     point1: vec4<f32>;
     point2: vec4<f32>;
     point3: vec4<f32>;
-    blankp: vec4<f32>;
+};
+
+struct Normal {
     normal1: vec4<f32>;
     normal2: vec4<f32>;
     normal3: vec4<f32>;
-    blankv: vec4<f32>;
 };
 
 struct NodeInner {
@@ -68,7 +69,12 @@ struct InnerNodes {
 
 [[block]]
 struct LeafNodes {
-    LeafNodes: [[stride(128)]] array<NodeLeaf>;
+    LeafNodes: [[stride(48)]] array<NodeLeaf>;
+};
+
+[[block]]
+struct Normals {
+    Normals: [[stride(48)]] array<Normal>;
 };
 
 struct ObjectParam {
@@ -101,6 +107,8 @@ var<storage, read> inner_nodes: InnerNodes;
 [[group(0), binding(3)]]
 var<storage, read> leaf_nodes: LeafNodes;
 [[group(0), binding(4)]]
+var<storage, read> normal_nodes: Normals;
+[[group(0), binding(5)]]
 var<storage, read> object_params: ObjectParams;
 
 let EPSILON:f32 = 0.0001;
@@ -268,8 +276,8 @@ fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4
     //     n = vec4<f32>(0.0,1.0,0.0,0.0);
     // }
     // elseif (typeEnum == 2) {
-        let shape: NodeLeaf = leaf_nodes.LeafNodes[-(intersection.id+2)];
-        return normalToWorld((shape.normal2 * intersection.uv.x + shape.normal3 * intersection.uv.y + shape.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)));
+        let normal: Normal = normal_nodes.Normals[-(intersection.id+2)];
+        return normalToWorld((normal.normal2 * intersection.uv.x + normal.normal3 * intersection.uv.y + normal.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)));
         // n.w = 0.0;
     // }
     // return (n);
