@@ -1,14 +1,5 @@
-use futures::io::Window;
-use wgpu::{
-    Adapter, Backend, BindGroup, Buffer, ComputePipeline, Device, Instance, QuerySet, Queue,
-    RenderPipeline, Surface,
-};
-use winit::{
-    dpi::PhysicalSize,
-    event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-};
+use wgpu::{Adapter, Device, Instance, Queue, Surface};
+use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::WindowBuilder};
 
 pub struct RenginWgpu {
     pub instance: Instance,

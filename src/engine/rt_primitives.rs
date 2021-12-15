@@ -1,4 +1,4 @@
-use glam::{const_mat3, const_mat4, const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4};
+use glam::{const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -241,15 +241,6 @@ impl NodeInner {
             first: const_vec3!([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
             skip_ptr_or_prim_idx1: 0,
             second: const_vec3!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
-            prim_idx2: 0,
-        }
-    }
-
-    pub fn total() -> Self {
-        NodeInner {
-            first: const_vec3!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
-            skip_ptr_or_prim_idx1: 0,
-            second: const_vec3!([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
             prim_idx2: 0,
         }
     }

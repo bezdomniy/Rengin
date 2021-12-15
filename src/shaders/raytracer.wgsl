@@ -209,6 +209,7 @@ fn triangleIntersect(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -
                     && (t > EPSILON);
 
     if (isHit) {
+        // TODO: probs dont need object_id in the leaf nodes, just in the pbject params
         return Intersection(uv,i32(triangleIdx),t,triangle.object_id);
     }
     return inIntersection;
@@ -259,6 +260,30 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
     return ret;
 }
 
+fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: i32) -> Intersection {
+    // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
+    var ret: Intersection = inIntersection;
+
+    let sphereToRay = ray.rayO - vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    let a = dot(ray.rayD, ray.rayD);
+    let b = 2.0 * dot(ray.rayD, sphereToRay);
+    let c = dot(sphereToRay, sphereToRay) - 1.0;
+    let discriminant = b * b - 4.0 * a * c;
+
+    if (discriminant < 0.0) {
+        return ret;
+    }
+
+    let t1 = (-b - sqrt(discriminant)) / (2.0 * a);
+    let t2 = (-b + sqrt(discriminant)) / (2.0 * a);
+
+    if (t1 < t2) {
+        return Intersection(vec2<f32>(0.0),0,t1,u32(object_id));
+    }
+    
+    return Intersection(vec2<f32>(0.0),0,t2,u32(object_id));
+}
+
 fn intersect(ray: Ray) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
@@ -270,11 +295,22 @@ fn intersect(ray: Ray) -> Intersection {
     // TODO: fix loop range - get number of objects
     for (var i: i32 = 0; i < ubo.n_objects; i = i+1) {
         let ob_params = object_params.ObjectParams[i];
-        max_inner_node_idx = max_inner_node_idx + ob_params.len_inner_nodes;
         let nRay: Ray = Ray(ob_params.inverse_transform * ray.rayO, ob_params.inverse_transform * ray.rayD);
-        ret = intersectInnerNodes(nRay,ret, min_inner_node_idx, max_inner_node_idx, leaf_offset);
-        min_inner_node_idx = min_inner_node_idx + ob_params.len_inner_nodes;
-        leaf_offset = leaf_offset + u32(ob_params.len_leaf_nodes);
+
+        if (ob_params.len_leaf_nodes > 0) {
+            // Triangle mesh
+            max_inner_node_idx = max_inner_node_idx + ob_params.len_inner_nodes;
+            ret = intersectInnerNodes(nRay,ret, min_inner_node_idx, max_inner_node_idx, leaf_offset);
+            min_inner_node_idx = min_inner_node_idx + ob_params.len_inner_nodes;
+            leaf_offset = leaf_offset + u32(ob_params.len_leaf_nodes);
+        }
+        else {
+            let type_enum = ob_params.len_inner_nodes;
+            if (type_enum == 1) { //Sphere
+                ret = intersectSphere(nRay,ret, i);
+            }
+        }
+
     }
 
     // let nRay: Ray = Ray(object_params.ObjectParams[0].inverse_transform * ray.rayO, object_params.ObjectParams[0].inverse_transform * ray.rayD);
@@ -302,12 +338,16 @@ fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4
     // elseif (typeEnum == 1) {
     //     n = vec4<f32>(0.0,1.0,0.0,0.0);
     // }
-    // elseif (typeEnum == 2) {
+    if (typeEnum == 0) {
         let normal: Normal = normal_nodes.Normals[intersection.id];
         return normalToWorld((normal.normal2 * intersection.uv.x + normal.normal3 * intersection.uv.y + normal.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
         // n.w = 0.0;
-    // }
-    // return (n);
+    }
+     elseif (typeEnum == 1) {
+        let objectPoint = object_params.ObjectParams[intersection.model_id].inverse_transform * point;
+        return objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    return vec4<f32>(0.0);
 }
 
 struct HitParams {
@@ -453,11 +493,17 @@ fn renderScene(ray: Ray) -> vec4<f32> {
 
     // else {
     if (intersection.id != -1) {
-        let hitParams: HitParams = getHitParams(ray, intersection, 2);
+        let ob_params = object_params.ObjectParams[intersection.model_id];
+        var type_enum = 0;
+        if (ob_params.len_leaf_nodes == 0) {
+            type_enum = ob_params.len_inner_nodes;
+        }
+
+        let hitParams: HitParams = getHitParams(ray, intersection, type_enum);
 
         let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
         // let shadowed = false;
-        color = lighting(object_params.ObjectParams[intersection.model_id].material, ubo.lightPos,
+        color = lighting(ob_params.material, ubo.lightPos,
                                 hitParams, shadowed);
         color.w = 1.0;
 

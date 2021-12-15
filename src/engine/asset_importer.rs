@@ -1,5 +1,5 @@
 use crate::engine::rt_primitives::{NodeInner, NodeLeaf, NodeNormal, Primitive, BVH};
-use glam::{const_mat3, const_mat4, const_vec3, const_vec4, Mat4};
+use glam::{const_mat3, const_vec3};
 use tobj;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
@@ -109,14 +109,6 @@ pub fn import_objs(paths: Vec<&str>) -> Option<BVH> {
         object_leaf_nodes,
         object_normal_nodes,
     ))
-}
-
-const fn num_bits<T>() -> usize {
-    std::mem::size_of::<T>() * 8
-}
-
-fn log_2(x: usize) -> usize {
-    num_bits::<usize>() - x.leading_zeros() as usize - 1
 }
 
 #[allow(dead_code)]

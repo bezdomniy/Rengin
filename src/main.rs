@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 use std::collections::HashMap;
 // use std::borrow::Cow;
 // use std::collections::HashMap;
-use std::{default, env};
+use std::env;
 // use std::fs::File;
 // use std::io::Write;
 use std::mem;
@@ -39,7 +39,7 @@ use std::mem;
 // use core::num;
 
 // use wgpu::BufferUsage;
-use glam::{const_vec2, const_vec4, Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec3, Vec4};
 
 use engine::asset_importer::import_objs;
 
@@ -347,7 +347,7 @@ impl RenderApp {
     }
 
     fn create_buffers(&mut self) -> HashMap<&'static str, Buffer> {
-        let mut now = Instant::now();
+        let now = Instant::now();
         log::info!("Creating buffers...");
 
         // let bvh = self.objects.as_ref().unwrap().get(0).unwrap();
@@ -723,7 +723,7 @@ impl RenderApp {
                 }
             }
             DeviceEvent::MouseWheel { delta } => match delta {
-                MouseScrollDelta::LineDelta(x, y) => {
+                MouseScrollDelta::LineDelta(_, y) => {
                     // println!("{} {}", x, y);
                     let game_state: &mut GameState = self.game_state.as_mut().unwrap();
                     game_state.camera_dist -= (y as f32) / 3.;
@@ -1073,181 +1073,6 @@ impl RenderApp {
         });
     }
 }
-//######################## TEST
-
-const MAXLEN: f32 = 10000.0;
-struct Ray {
-    rayO: Vec4,
-    rayD: Vec4,
-}
-
-struct Intersection {
-    uv: Vec2,
-    id: i32,
-    closestT: f32,
-}
-
-fn intersectAABB(ray: &Ray, aabbIdx: i32, tlas: &Vec<NodeInner>) -> bool {
-    let INFINITY: f32 = 1.0 / 0.0;
-
-    let mut t_min: f32 = -INFINITY;
-    let mut t_max: f32 = INFINITY;
-    let mut temp: f32;
-    let mut invD: f32;
-    let mut t0: f32;
-    let mut t1: f32;
-
-    for a in 0..3 {
-        invD = 1.0 / ray.rayD[a];
-        t0 = (tlas.get(aabbIdx as usize).unwrap().first[a] - ray.rayO[a]) * invD;
-        t1 = (tlas.get(aabbIdx as usize).unwrap().second[a] - ray.rayO[a]) * invD;
-        if (invD < 0.0) {
-            temp = t0;
-            t0 = t1;
-            t1 = temp;
-        }
-        if (t0 > t_min) {
-            t_min = t0;
-        }
-        if (t1 < t_max) {
-            t_max = t1;
-        }
-        if (t_max <= t_min) {
-            return false;
-        }
-    }
-    return true;
-}
-
-#[derive(Debug, Copy, Clone)]
-struct Node {
-    level: i32,
-    branch: i32,
-}
-impl Default for Node {
-    fn default() -> Node {
-        Node {
-            level: 0,
-            branch: 0,
-        }
-    }
-}
-
-const MAX_STACK_SIZE: usize = 20;
-// var<private> topStack: i32 = -1;
-// var<private> stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
-
-fn push_stack(node: Node, topStack: &mut i32, stack: &mut [Node; MAX_STACK_SIZE]) {
-    *topStack = *topStack + 1;
-    stack[*topStack as usize] = node;
-}
-
-fn pop_stack(topStack: &mut i32, stack: &mut [Node; MAX_STACK_SIZE]) -> Node {
-    let ret: Node = stack[*topStack as usize];
-    *topStack = *topStack - 1;
-    return ret;
-}
-
-fn intersectTLAS(ray: &Ray, tlas: &Vec<NodeInner>) -> Intersection {
-    // int topPrimivitiveIndices = 0;
-    let mut nextNode: Node = Node {
-        level: 0,
-        branch: 0,
-    };
-    let mut firstChildIdx: i32 = -1;
-    // let mut t1: Intersection = Intersection {
-    //     uv: const_vec2!([0.0, 0.0]),
-    //     id: -1,
-    //     closestT: -1.0,
-    // };
-    // let mut t2: Intersection = Intersection {
-    //     uv: const_vec2!([0.0, 0.0]),
-    //     id: -1,
-    //     closestT: -1.0,
-    // };
-    // let mut primIdx: i32 = -1;
-
-    let mut topStack: i32 = -1;
-    let mut stack: [Node; MAX_STACK_SIZE] = Default::default();
-
-    let mut ret: Intersection = Intersection {
-        uv: const_vec2!([0.0, 0.0]),
-        id: -1,
-        closestT: MAXLEN,
-    };
-    push_stack(nextNode, &mut topStack, &mut stack);
-
-    loop {
-        if (topStack == -1) {
-            break;
-        };
-
-        if topStack > 2 {
-            println!("{}", topStack);
-        }
-
-        nextNode = pop_stack(&mut topStack, &mut stack);
-        // nodeIdx = int(pow(2, nextNode.level))  - 1 + nextNode.branch;
-
-        firstChildIdx =
-            (f32::powf(2.0, (nextNode.level as f32) + 1.0) as i32) - 1 + (nextNode.branch * 2);
-
-        // var test: u32 = ubo.len_tlas;
-
-        if (firstChildIdx < tlas.len() as i32) {
-            if (intersectAABB(ray, firstChildIdx, tlas)) {
-                push_stack(
-                    Node {
-                        level: nextNode.level + 1,
-                        branch: nextNode.branch * 2,
-                    },
-                    &mut topStack,
-                    &mut stack,
-                );
-            }
-
-            if (intersectAABB(ray, firstChildIdx + 1, tlas)) {
-                push_stack(
-                    Node {
-                        level: nextNode.level + 1,
-                        branch: (nextNode.branch * 2) + 1,
-                    },
-                    &mut topStack,
-                    &mut stack,
-                );
-            }
-        } else {
-        }
-    }
-    return ret;
-}
-
-fn intersect(ray: Ray, inverseTransform: Mat4, tlas: &Vec<NodeInner>) -> Intersection {
-    // TODO: this will need the id of the object as input in future when we are rendering more than one model
-    let nRay: Ray = Ray {
-        rayO: inverseTransform * ray.rayO,
-        rayD: inverseTransform * ray.rayD,
-    };
-    return intersectTLAS(&nRay, tlas);
-}
-
-fn rayForPixel(x: u32, y: u32, camera: &Camera) -> Ray {
-    let xOffset: f32 = ((x as f32) + 0.5) * camera.pixel_size;
-    let yOffset: f32 = ((y as f32) + 0.5) * camera.pixel_size;
-
-    let worldX: f32 = camera.half_width - xOffset;
-    let worldY: f32 = camera.half_height - yOffset;
-
-    let pixel: Vec4 = camera.inverse_transform * const_vec4!([worldX, worldY, -1.0, 1.0]);
-
-    let rayO: Vec4 = camera.inverse_transform * const_vec4!([0.0, 0.0, 0.0, 1.0]);
-
-    return Ray {
-        rayO,
-        rayD: Vec4::normalize(pixel - rayO),
-    };
-}
-//########################
 
 fn main() {
     env_logger::init();
