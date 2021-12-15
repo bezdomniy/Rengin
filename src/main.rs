@@ -114,7 +114,12 @@ impl RenderApp {
     fn init(&mut self, model_path: &str) {
         let mut now = Instant::now();
         log::info!("Loading models...");
-        self.objects = import_objs(vec![model_path, model_path]);
+        // self.objects = import_objs(vec![model_path, model_path]);
+        self.objects = import_objs(vec![
+            "./assets/models/suzanne.obj",
+            model_path,
+            "./assets/models/lucy.obj",
+        ]);
         log::info!(
             "Finished loading models in {} millis.",
             now.elapsed().as_millis()
@@ -128,34 +133,90 @@ impl RenderApp {
         // ])
         // .transpose();
 
-        let transform1 = Mat4::from_translation(Vec3::new(2f32, 0f32, 0f32));
-        let transform2 = Mat4::from_translation(Vec3::new(-3f32, 0f32, 0f32));
+        let transform0 = Mat4::from_translation(Vec3::new(2f32, 0f32, 0f32));
+        let transform1 = Mat4::from_translation(Vec3::new(-3f32, 1f32, 0f32));
         // let transform1 = Mat4::IDENTITY;
         // let transform2 = Mat4::IDENTITY;
 
-        self.object_params = Some(vec![
-            ObjectParams {
-                inverse_transform: transform1,
-                // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-                material: Material {
-                    colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
-                    ambient: 0.1,
-                    diffuse: 0.7,
-                    specular: 0.3,
-                    shininess: 200.0,
-                },
+        let object_param0 = ObjectParams::new(
+            transform0,
+            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
+            Material {
+                colour: Vec4::new(0.831, 0.537, 0.214, 1.0),
+                ambient: 0.1,
+                diffuse: 0.7,
+                specular: 0.3,
+                shininess: 200.0,
             },
-            ObjectParams {
-                inverse_transform: transform2,
-                material: Material {
-                    colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
-                    ambient: 0.1,
-                    diffuse: 0.7,
-                    specular: 0.3,
-                    shininess: 200.0,
-                },
+            *self
+                .objects
+                .as_ref()
+                .unwrap()
+                .len_inner_nodes
+                .get(0)
+                .unwrap(),
+            *self
+                .objects
+                .as_ref()
+                .unwrap()
+                .len_leaf_nodes
+                .get(0)
+                .unwrap(),
+        );
+
+        let object_param1 = ObjectParams::new(
+            transform1,
+            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
+            Material {
+                colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
+                ambient: 0.1,
+                diffuse: 0.7,
+                specular: 0.3,
+                shininess: 200.0,
             },
-        ]);
+            *self
+                .objects
+                .as_ref()
+                .unwrap()
+                .len_inner_nodes
+                .get(1)
+                .unwrap(),
+            *self
+                .objects
+                .as_ref()
+                .unwrap()
+                .len_leaf_nodes
+                .get(1)
+                .unwrap(),
+        );
+
+        let object_param2 = ObjectParams::new(
+            // transform1,
+            Mat4::from_scale(Vec3::new(0.005, 0.005, 0.005)).inverse(),
+            Material {
+                colour: Vec4::new(0.837, 0.131, 0.114, 1.0),
+                ambient: 0.1,
+                diffuse: 0.7,
+                specular: 0.3,
+                shininess: 200.0,
+            },
+            *self
+                .objects
+                .as_ref()
+                .unwrap()
+                .len_inner_nodes
+                .get(2)
+                .unwrap(),
+            *self
+                .objects
+                .as_ref()
+                .unwrap()
+                .len_leaf_nodes
+                .get(2)
+                .unwrap(),
+        );
+
+        self.object_params = Some(vec![object_param0, object_param1, object_param2]);
 
         // log::info!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
         // log::info!(
@@ -202,20 +263,7 @@ impl RenderApp {
 
         self.ubo = Some(UBO::new(
             [-4f32, 2f32, 3f32, 1f32],
-            *self
-                .objects
-                .as_ref()
-                .unwrap()
-                .max_inner_node_idx
-                .get(0)
-                .unwrap(),
-            *self
-                .objects
-                .as_ref()
-                .unwrap()
-                .max_leaf_node_idx
-                .get(0)
-                .unwrap(),
+            self.objects.as_ref().unwrap().n_objects,
             camera,
         ));
 

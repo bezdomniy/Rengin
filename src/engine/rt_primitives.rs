@@ -21,6 +21,26 @@ pub struct Primitive {
 pub struct ObjectParams {
     pub inverse_transform: Mat4,
     pub material: Material,
+    pub len_inner_nodes: u32,
+    pub len_leaf_nodes: u32,
+    _padding: [u32; 2],
+}
+
+impl ObjectParams {
+    pub fn new(
+        inverse_transform: Mat4,
+        material: Material,
+        len_inner_nodes: u32,
+        len_leaf_nodes: u32,
+    ) -> Self {
+        ObjectParams {
+            inverse_transform,
+            material,
+            len_inner_nodes,
+            len_leaf_nodes,
+            _padding: [0u32, 0u32],
+        }
+    }
 }
 
 #[repr(C)]
@@ -55,8 +75,9 @@ pub struct BVH {
     pub inner_nodes: Vec<NodeInner>,
     pub leaf_nodes: Vec<NodeLeaf>,
     pub normal_nodes: Vec<NodeNormal>,
-    pub max_inner_node_idx: Vec<u32>,
-    pub max_leaf_node_idx: Vec<u32>,
+    pub len_inner_nodes: Vec<u32>,
+    pub len_leaf_nodes: Vec<u32>,
+    pub n_objects: u32,
 }
 
 impl BVH {
@@ -65,22 +86,25 @@ impl BVH {
         leaf_nodes: Vec<Vec<NodeLeaf>>,
         normal_nodes: Vec<Vec<NodeNormal>>,
     ) -> Self {
-        let max_inner_node_idx: Vec<u32> = inner_nodes
+        let len_inner_nodes: Vec<u32> = inner_nodes
             .iter()
             .map(|next_vec| next_vec.len() as u32)
             .collect();
 
-        let max_leaf_node_idx: Vec<u32> = leaf_nodes
+        let len_leaf_nodes: Vec<u32> = leaf_nodes
             .iter()
             .map(|next_vec| next_vec.len() as u32)
             .collect();
+
+        let n_objects = inner_nodes.len() as u32;
 
         BVH {
             inner_nodes: inner_nodes.into_iter().flatten().collect::<Vec<_>>(),
             leaf_nodes: leaf_nodes.into_iter().flatten().collect::<Vec<_>>(),
             normal_nodes: normal_nodes.into_iter().flatten().collect::<Vec<_>>(),
-            max_inner_node_idx,
-            max_leaf_node_idx,
+            len_inner_nodes,
+            len_leaf_nodes,
+            n_objects,
         }
     }
 }
@@ -109,24 +133,17 @@ pub struct UBO {
     // Compute shader uniform block object
     light_pos: Vec4,
     pub camera: Camera,
-    max_inner_node_idx: u32,
-    max_leaf_node_idx: u32,
-    _padding: [u32; 2],
+    n_objects: u32,
+    _padding: [u32; 3],
 }
 
 impl UBO {
-    pub fn new(
-        light_pos: [f32; 4],
-        max_inner_node_idx: u32,
-        max_leaf_node_idx: u32,
-        camera: Camera,
-    ) -> UBO {
+    pub fn new(light_pos: [f32; 4], n_objects: u32, camera: Camera) -> UBO {
         UBO {
             light_pos: const_vec4!(light_pos),
             camera,
-            max_inner_node_idx,
-            max_leaf_node_idx,
-            _padding: [0, 0],
+            n_objects,
+            _padding: [0; 3],
         }
     }
 }

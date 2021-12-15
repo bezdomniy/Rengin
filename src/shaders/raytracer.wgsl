@@ -50,8 +50,9 @@ struct Camera {
 struct UBO {
     lightPos: vec4<f32>;
     camera: Camera;
-    max_inner_node_idx: i32;
-    max_leaf_node_idx: i32;
+    n_objects: i32;
+    // max_inner_node_idx: i32;
+    // max_leaf_node_idx: i32;
     // padding: array<u32,2>;
 };
 
@@ -79,11 +80,14 @@ struct Normals {
 struct ObjectParam {
     inverse_transform: mat4x4<f32>;
     material: Material;
+    len_inner_nodes:i32;
+    len_leaf_nodes:i32;
 };
 
 [[block]]
 struct ObjectParams {
-    ObjectParams: [[stride(96)]] array<ObjectParam>;
+    ObjectParams: [[stride(112)]] array<ObjectParam>;
+    // ObjectParams: [[stride(96)]] array<ObjectParam>;
 };
 
 struct Ray {
@@ -220,14 +224,14 @@ fn triangleIntersect(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -
 // i += bvh[i].skip_index
 // else:
 // i++
-fn intersectInnerNodes(ray: Ray, inIntersection: Intersection) -> Intersection {
+fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_idx: i32, max_inner_node_idx: i32, leaf_offset: u32) -> Intersection {
     // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
     var ret: Intersection = inIntersection;
 
-    var idx: i32 = 0;
+    var idx: i32 = min_inner_node_idx;
     loop  
     {
-        if (idx >= ubo.max_inner_node_idx ) {break};
+        if (idx >= max_inner_node_idx ) {break};
 
         let current_node: NodeInner = inner_nodes.InnerNodes[idx];
         let leaf_node: bool = current_node.idx2 > 0u;
@@ -235,7 +239,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection) -> Intersection {
         if (intersectAABB(ray, idx)) {
             idx = idx + 1;
             if (leaf_node) {
-                for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1; primIdx < current_node.idx2; primIdx = primIdx + 1u) {
+                for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1 + leaf_offset; primIdx < current_node.idx2 + leaf_offset; primIdx = primIdx + 1u) {
                     let next_intersection = triangleIntersect(ray, primIdx, ret);
 
                     if ((next_intersection.closestT < inIntersection.closestT)  && (next_intersection.closestT > EPSILON)) {
@@ -249,7 +253,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection) -> Intersection {
             idx = idx + 1;
         }
         else {
-            idx = i32(current_node.skip_ptr_or_prim_idx1);
+            idx = i32(current_node.skip_ptr_or_prim_idx1) + min_inner_node_idx;
         }
     }
     return ret;
@@ -259,10 +263,18 @@ fn intersect(ray: Ray) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
+    var min_inner_node_idx = 0;
+    var max_inner_node_idx = 0;
+    var leaf_offset = u32(0);
+
     // TODO: fix loop range - get number of objects
-    for (var i: i32 = 0; i < 2; i = i+1) {
-        let nRay: Ray = Ray(object_params.ObjectParams[i].inverse_transform * ray.rayO, object_params.ObjectParams[i].inverse_transform * ray.rayD);
-        ret = intersectInnerNodes(nRay,ret);
+    for (var i: i32 = 0; i < ubo.n_objects; i = i+1) {
+        let ob_params = object_params.ObjectParams[i];
+        max_inner_node_idx = max_inner_node_idx + ob_params.len_inner_nodes;
+        let nRay: Ray = Ray(ob_params.inverse_transform * ray.rayO, ob_params.inverse_transform * ray.rayD);
+        ret = intersectInnerNodes(nRay,ret, min_inner_node_idx, max_inner_node_idx, leaf_offset);
+        min_inner_node_idx = min_inner_node_idx + ob_params.len_inner_nodes;
+        leaf_offset = leaf_offset + u32(ob_params.len_leaf_nodes);
     }
 
     // let nRay: Ray = Ray(object_params.ObjectParams[0].inverse_transform * ray.rayO, object_params.ObjectParams[0].inverse_transform * ray.rayD);
@@ -445,7 +457,7 @@ fn renderScene(ray: Ray) -> vec4<f32> {
 
         let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
         // let shadowed = false;
-        color = lighting(object_params.ObjectParams[0].material, ubo.lightPos,
+        color = lighting(object_params.ObjectParams[intersection.model_id].material, ubo.lightPos,
                                 hitParams, shadowed);
         color.w = 1.0;
 

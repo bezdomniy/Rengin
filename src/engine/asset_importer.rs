@@ -18,6 +18,7 @@ pub fn import_objs(paths: Vec<&str>) -> Option<BVH> {
     let (models, _materials): (Vec<_>, Vec<_>) = paths
         .into_iter()
         .map(|path| {
+            println!("Loading {:?}", path);
             tobj::load_obj(
                 path,
                 &tobj::LoadOptions {
