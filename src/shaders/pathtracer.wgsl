@@ -32,6 +32,7 @@ struct HitParams {
 
 struct Material {
     colour: vec4<f32>;
+    emissiveness: vec4<f32>;
     ambient: f32;
     diffuse: f32;
     specular: f32;
@@ -86,7 +87,7 @@ struct ObjectParam {
 
 [[block]]
 struct ObjectParams {
-    ObjectParams: [[stride(112)]] array<ObjectParam>;
+    ObjectParams: [[stride(128)]] array<ObjectParam>;
     // ObjectParams: [[stride(96)]] array<ObjectParam>;
 };
 
@@ -119,6 +120,38 @@ let EPSILON:f32 = 0.0001;
 let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
+
+let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio   
+
+fn gold_noise(xy: vec2<f32>, seed: f32) -> f32 {
+    return fract(tan(distance(xy*PHI, xy)*seed)*xy.x);
+}
+
+fn rand(seed_xy: vec2<f32>) -> f32 {
+    return fract(sin(dot(seed_xy ,vec2<f32>(12.9898,78.233))) * 43758.5453);
+}
+
+fn rescale(value: f32, min: f32, max: f32) -> f32 {
+    return (value * (max - min)) + min;
+}
+
+fn linearRand(min: f32, max: f32, seed_xy: vec2<f32>) -> f32 {
+    return rescale(rand(seed_xy),min,max);
+}
+
+fn sphericalRand(radius: f32, seed_xyz: vec3<f32>) -> vec3<f32>
+{
+    // let xy = vec2<f32>(seed_xy);
+
+    let theta: f32 = linearRand(0.0, 6.283185307179586476925286766559,seed_xyz.xy);
+    let phi: f32 = acos(linearRand(-1.0, 1.0,seed_xyz.yz));
+
+    let x: f32 = sin(phi) * cos(theta);
+    let y: f32 = sin(phi) * sin(theta);
+    let z: f32 = cos(phi);
+
+    return vec3<f32>(x,y,z) * radius;
+}
 
 fn rayForPixel(p: vec2<u32>) -> Ray {
     let xOffset: f32 = (f32(p.x) + 0.5) * ubo.camera.pixelSize;
@@ -392,23 +425,7 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: i32) -> HitParam
     return hitParams;
 }
 
-fn isShadowed(point: vec4<f32>, lightPos: vec4<f32>) -> bool
-{
-  let v: vec4<f32> = lightPos - point;
-  let distance: f32 = length(v);
-  let direction: vec4<f32> = normalize(v);
-
-  let intersection: Intersection = intersect(Ray(point,direction));
-
-  if (intersection.closestT > EPSILON && intersection.closestT < distance)
-  {
-    return true;
-  }
-
-  return false;
-}
-
-fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams, shadowed: bool) -> vec4<f32>
+fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams) -> vec4<f32>
 {
   // return material.colour;
   var diffuse: vec4<f32>;
@@ -420,9 +437,6 @@ fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams, shado
 
   let ambient: vec4<f32> = effectiveColour * material.ambient;
   // vec4 ambient = vec4(0.3,0.0,0.0,1.0);
-  if (shadowed) {
-    return ambient;
-  }
 
   let lightv: vec4<f32> = normalize(lightPos - hitParams.overPoint);
 
@@ -504,10 +518,8 @@ fn renderScene(ray: Ray) -> vec4<f32> {
 
         let hitParams: HitParams = getHitParams(ray, intersection, type_enum);
 
-        let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
-        // let shadowed = false;
         color = lighting(ob_params.material, ubo.lightPos,
-                                hitParams, shadowed);
+                                hitParams);
         color.w = 1.0;
 
         // color.g = 0.0;
