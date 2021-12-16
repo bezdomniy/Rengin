@@ -135,6 +135,8 @@ impl RenderApp {
 
         let transform0 = Mat4::from_translation(Vec3::new(2f32, 0f32, 0f32));
         let transform1 = Mat4::from_translation(Vec3::new(-3f32, 1f32, 0f32));
+        let transform2 = Mat4::from_scale(Vec3::new(0.005, 0.005, 0.005)).inverse();
+        let transform3 = Mat4::from_translation(Vec3::new(2f32, -3f32, 0f32));
         // let transform1 = Mat4::IDENTITY;
         // let transform2 = Mat4::IDENTITY;
 
@@ -192,7 +194,7 @@ impl RenderApp {
 
         let object_param2 = ObjectParams::new(
             // transform1,
-            Mat4::from_scale(Vec3::new(0.005, 0.005, 0.005)).inverse(),
+            transform2,
             Material {
                 colour: Vec4::new(0.837, 0.131, 0.114, 1.0),
                 ambient: 0.1,
@@ -216,7 +218,31 @@ impl RenderApp {
                 .unwrap(),
         );
 
-        self.object_params = Some(vec![object_param0, object_param1, object_param2]);
+        let object_param3 = ObjectParams::new(
+            transform3,
+            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
+            Material {
+                colour: Vec4::new(0.831, 0.537, 0.214, 1.0),
+                ambient: 0.1,
+                diffuse: 0.7,
+                specular: 0.3,
+                shininess: 200.0,
+            },
+            1,
+            0,
+        );
+
+        self.object_params = Some(vec![
+            object_param0,
+            object_param1,
+            object_param2,
+            object_param3,
+        ]);
+
+        let n_primitives = 1;
+
+        // let x = &mut self.objects.as_ref().unwrap().n_objects;
+        // *x += 1;
 
         // log::info!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
         // log::info!(
@@ -263,7 +289,7 @@ impl RenderApp {
 
         self.ubo = Some(UBO::new(
             [-4f32, 2f32, 3f32, 1f32],
-            self.objects.as_ref().unwrap().n_objects,
+            self.objects.as_ref().unwrap().len_inner_nodes.len() as u32 + n_primitives,
             camera,
         ));
 

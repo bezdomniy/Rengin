@@ -77,7 +77,6 @@ pub struct BVH {
     pub normal_nodes: Vec<NodeNormal>,
     pub len_inner_nodes: Vec<u32>,
     pub len_leaf_nodes: Vec<u32>,
-    pub n_objects: u32,
 }
 
 impl BVH {
@@ -104,7 +103,6 @@ impl BVH {
             normal_nodes: normal_nodes.into_iter().flatten().collect::<Vec<_>>(),
             len_inner_nodes,
             len_leaf_nodes,
-            n_objects,
         }
     }
 }
