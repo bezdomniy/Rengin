@@ -122,8 +122,8 @@ let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
 let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio 
-let RAYS_PER_PIXEL: u32 = 16u;  
-let RAY_BOUNCES: i32 = 20;
+let RAYS_PER_PIXEL: u32 = 4u;  
+let RAY_BOUNCES: i32 = 10;
 
 fn gold_noise(xy: vec2<f32>, seed: f32) -> f32 {
     return fract(tan(distance(xy*PHI, xy)*seed)*xy.x);
@@ -507,21 +507,6 @@ struct Node {
     emissiveness: vec4<f32>;
 };
 
-var<private> topStack: i32 = -1;
-var<private> stack: [[stride(32)]] array<Node,RAY_BOUNCES>;
-
-
-fn push_stack(node: Node) {
-  topStack = topStack + 1;
-  stack[topStack] = node;
-}
-
-fn pop_stack() -> Node {
-  let ret: Node = stack[topStack];
-  topStack = topStack - 1;
-  return ret;
-}
-
 fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
@@ -533,6 +518,9 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
     var new_ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
     var type_enum = 0;
     // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
+
+    var stack: array<Node,RAY_BOUNCES>;
+    var top_stack = -1;
 
     
     for (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1) {
@@ -561,7 +549,10 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
         //     color = hit_colour;
         // }
 
-        push_stack(Node(hit_colour,ob_params.material.emissiveness));
+        top_stack = top_stack + 1;
+        stack[top_stack] = Node(hit_colour,ob_params.material.emissiveness);
+
+        // push_stack(Node(hit_colour,ob_params.material.emissiveness));
 
         // color = ob_params.material.emissiveness + color * hit_colour;
         // if (color.x == 0.0) {
@@ -577,14 +568,16 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
 
     }
 
-    let node = pop_stack();
+    let node = stack[top_stack];
+    top_stack = top_stack - 1;
     color = node.emissiveness;
 
     loop {
-        if (topStack == -1) {
+        if (top_stack == -1) {
             break;
         }
-        let node = pop_stack();
+        let node = stack[top_stack];
+        top_stack = top_stack - 1;
         color = node.emissiveness + color * node.hit_colour;
 
     }

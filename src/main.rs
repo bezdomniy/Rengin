@@ -50,12 +50,12 @@ use engine::rt_primitives::{
 use crate::engine::rt_primitives::PtMaterial;
 use crate::renderer::wgpu_utils::RenginWgpu;
 
-static WIDTH: u32 = 800;
-static HEIGHT: u32 = 600;
+static WIDTH: u32 = 400;
+static HEIGHT: u32 = 300;
 static WORKGROUP_SIZE: [u32; 3] = [4, 4, 1];
 
 static FRAMERATE: f64 = 30.0;
-static RAYS_PER_PIXEL: u32 = 16;
+static RAYS_PER_PIXEL: u32 = 4;
 
 struct GameState {
     pub camera_angle_y: f32,
@@ -136,6 +136,7 @@ impl RenderApp {
         // .transpose();
 
         let rotate90_x = Mat4::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), 1.5708);
+        let rotate90_z = Mat4::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), 1.5708);
 
         let transform0 = Mat4::from_translation(Vec3::new(2f32, 0f32, 0f32));
         let transform1 = Mat4::from_translation(Vec3::new(-3f32, 1f32, 0f32));
@@ -143,6 +144,9 @@ impl RenderApp {
         let transform3 = Mat4::from_translation(Vec3::new(2f32, -3f32, 0f32));
         let transform4 = Mat4::from_translation(Vec3::new(0f32, 1.5f32, 0f32));
         let transform5 = rotate90_x * Mat4::from_translation(Vec3::new(0f32, 0f32, 3f32));
+        let transform6 = rotate90_z * Mat4::from_translation(Vec3::new(-6f32, 0f32, 0f32));
+        let transform7 = rotate90_z * Mat4::from_translation(Vec3::new(6f32, 0f32, 0f32));
+        let transform8 = Mat4::from_translation(Vec3::new(0f32, -7f32, 0f32));
         // let transform4 = Mat4::IDENTITY;
         // let transform2 = Mat4::IDENTITY;
 
@@ -272,6 +276,51 @@ impl RenderApp {
             0,
         );
 
+        let object_param6 = ObjectParams::new(
+            transform6,
+            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
+            PtMaterial {
+                colour: Vec4::new(0.231, 0.537, 0.831, 1.0),
+                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                ambient: 0.1,
+                diffuse: 0.7,
+                specular: 0.3,
+                shininess: 200.0,
+            },
+            2,
+            0,
+        );
+
+        let object_param7 = ObjectParams::new(
+            transform7,
+            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
+            PtMaterial {
+                colour: Vec4::new(0.231, 0.537, 0.831, 1.0),
+                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                ambient: 0.1,
+                diffuse: 0.7,
+                specular: 0.3,
+                shininess: 200.0,
+            },
+            2,
+            0,
+        );
+
+        let object_param8 = ObjectParams::new(
+            transform8,
+            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
+            PtMaterial {
+                colour: Vec4::new(0.231, 0.537, 0.831, 1.0),
+                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                ambient: 0.1,
+                diffuse: 0.7,
+                specular: 0.3,
+                shininess: 200.0,
+            },
+            2,
+            0,
+        );
+
         self.object_params = Some(vec![
             object_param0,
             object_param1,
@@ -279,9 +328,12 @@ impl RenderApp {
             object_param3,
             object_param4,
             object_param5,
+            object_param6,
+            object_param7,
+            object_param8,
         ]);
 
-        let n_primitives = 3;
+        let n_primitives = 6;
 
         // let x = &mut self.objects.as_ref().unwrap().n_objects;
         // *x += 1;
