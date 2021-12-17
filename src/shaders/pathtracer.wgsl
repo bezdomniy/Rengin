@@ -121,7 +121,9 @@ let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
-let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio   
+let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio 
+let RAYS_PER_PIXEL: u32 = 16u;  
+let RAY_BOUNCES: i32 = 20;
 
 fn gold_noise(xy: vec2<f32>, seed: f32) -> f32 {
     return fract(tan(distance(xy*PHI, xy)*seed)*xy.x);
@@ -144,7 +146,7 @@ fn sphericalRand(radius: f32, seed_xyz: vec3<f32>) -> vec3<f32>
     // let xy = vec2<f32>(seed_xy);
 
     let theta: f32 = linearRand(0.0, 6.283185307179586476925286766559,seed_xyz.xy);
-    let phi: f32 = acos(linearRand(-1.0, 1.0,seed_xyz.yz));
+    let phi: f32 = acos(linearRand(-1.0, 1.0,seed_xyz.zy));
 
     let x: f32 = sin(phi) * cos(theta);
     let y: f32 = sin(phi) * sin(theta);
@@ -153,9 +155,18 @@ fn sphericalRand(radius: f32, seed_xyz: vec3<f32>) -> vec3<f32>
     return vec3<f32>(x,y,z) * radius;
 }
 
-fn rayForPixel(p: vec2<u32>) -> Ray {
-    let xOffset: f32 = (f32(p.x) + 0.5) * ubo.camera.pixelSize;
-    let yOffset: f32 = (f32(p.y) + 0.5) * ubo.camera.pixelSize;
+fn rayForPixel(p: vec2<u32>, sqrt_rays_per_pixel: u32, current_ray_index: u32, half_sub_pixel_size: f32) -> Ray {
+    
+    let sub_pixel_row_number: u32 = current_ray_index / sqrt_rays_per_pixel;
+    let sub_pixel_col_number: u32 = current_ray_index % sqrt_rays_per_pixel;
+    let sub_pixel_x_offset: f32 = half_sub_pixel_size * f32(sub_pixel_col_number);
+    let sub_pixel_y_offset: f32 = half_sub_pixel_size * f32(sub_pixel_row_number);
+
+    let xOffset: f32 = (f32(p.x) + sub_pixel_x_offset) * ubo.camera.pixelSize;
+    let yOffset: f32 = (f32(p.y) + sub_pixel_y_offset) * ubo.camera.pixelSize;
+
+    // let xOffset: f32 = (f32(p.x) / 0.5) * ubo.camera.pixelSize;
+    // let yOffset: f32 = (f32(p.y) / 0.5) * ubo.camera.pixelSize;
 
     let worldX: f32 = ubo.camera.halfWidth - xOffset;
     let worldY: f32 = ubo.camera.halfHeight - yOffset;
@@ -206,7 +217,7 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
     return true;
 }
 
-fn triangleIntersect(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -> Intersection {
+fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -> Intersection {
     let triangle = leaf_nodes.LeafNodes[triangleIdx];
     var uv: vec2<f32> = vec2<f32>(0.0);
     let e1: vec3<f32> = triangle.point2 - triangle.point1;
@@ -274,7 +285,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
             idx = idx + 1;
             if (leaf_node) {
                 for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1 + leaf_offset; primIdx < current_node.idx2 + leaf_offset; primIdx = primIdx + 1u) {
-                    let next_intersection = triangleIntersect(ray, primIdx, ret);
+                    let next_intersection = intersectTriangle(ray, primIdx, ret);
 
                     if ((next_intersection.closestT < inIntersection.closestT)  && (next_intersection.closestT > EPSILON)) {
                         ret = next_intersection;
@@ -311,11 +322,28 @@ fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: i32) -> In
     let t2 = (-b + sqrt(discriminant)) / (2.0 * a);
 
     if (t1 < ret.closestT || t2 < ret.closestT) {
-        if (t1 < t2) {
+        if (t1 < t2 && t1 > EPSILON) {
             return Intersection(vec2<f32>(0.0),0,t1,u32(object_id));
         }
         
-        return Intersection(vec2<f32>(0.0),0,t2,u32(object_id));
+        if (t2 > EPSILON) {
+            return Intersection(vec2<f32>(0.0),0,t2,u32(object_id));
+        }
+    }
+    return ret;
+}
+
+fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: i32) -> Intersection {
+    var ret: Intersection = inIntersection;
+
+    if (abs(ray.rayD.y) < EPSILON) {
+        return ret;
+    }
+
+    let t: f32 = -ray.rayO.y / ray.rayD.y;
+
+    if (t < ret.closestT && t > EPSILON) {
+        return Intersection(vec2<f32>(0.0),0,t,u32(object_id));
     }
     return ret;
 }
@@ -345,6 +373,9 @@ fn intersect(ray: Ray) -> Intersection {
             if (type_enum == 1) { //Sphere
                 ret = intersectSphere(nRay,ret, i);
             }
+            elseif (type_enum == 2) { //Plane
+                ret = intersectPlane(nRay,ret, i);
+            }
         }
 
     }
@@ -365,23 +396,17 @@ fn normalToWorld(normal: vec4<f32>, object_id: u32) -> vec4<f32>
 }
 
 fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4<f32> {
-    // var n: vec4<f32> = vec4<f32>(0.0);
-    // let objectPoint: vec4<f32> = object_params.ObjectParams[0].inverse_transform * point; // World to object
-
-    // if (typeEnum == 0) {
-    //     n = objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
-    // }
-    // elseif (typeEnum == 1) {
-    //     n = vec4<f32>(0.0,1.0,0.0,0.0);
-    // }
     if (typeEnum == 0) {
         let normal: Normal = normal_nodes.Normals[intersection.id];
         return normalToWorld((normal.normal2 * intersection.uv.x + normal.normal3 * intersection.uv.y + normal.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
         // n.w = 0.0;
     }
-     elseif (typeEnum == 1) {
+     elseif (typeEnum == 1) { //Sphere
         let objectPoint = object_params.ObjectParams[intersection.model_id].inverse_transform * point;
         return objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+     elseif (typeEnum == 2) { //Plane
+        return normalToWorld(vec4<f32>(0.0, 1.0, 0.0, 0.0),intersection.model_id);
     }
     return vec4<f32>(0.0);
 }
@@ -472,72 +497,126 @@ fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams) -> ve
   return (ambient + diffuse + specular);
 }
 
+// let MAX_STACK_SIZE:i32 = 25;
+// var topStack: i32 = -1;
+// var<private> stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
 
-fn renderScene(ray: Ray) -> vec4<f32> {
+
+struct Node {
+    hit_colour: vec4<f32>;
+    emissiveness: vec4<f32>;
+};
+
+var<private> topStack: i32 = -1;
+var<private> stack: [[stride(32)]] array<Node,RAY_BOUNCES>;
+
+
+fn push_stack(node: Node) {
+  topStack = topStack + 1;
+  stack[topStack] = node;
+}
+
+fn pop_stack() -> Node {
+  let ret: Node = stack[topStack];
+  topStack = topStack - 1;
+  return ret;
+}
+
+fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
     var uv: vec2<f32>;
     var t: f32 = MAXLEN;
 
-    // Get intersected object ID
-    var intersection: Intersection = intersect(ray);
+    // var ray: Ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
+
+    var new_ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
+    var type_enum = 0;
+    // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
+
     
-    if (intersection.closestT >= MAXLEN || intersection.id == -1)
-    {
-        // color = vec4<f32>(0.0,0.0,1.0,1.0);
-        return color;
-    }
-    
-    // vec4 pos = rayO + t * rayD;
-    // vec4 lightVec = normalize(ubo.lightPos - pos);       
-    // vec3 normal;
+    for (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1) {
+        // Get intersected object ID
+        let intersection = intersect(new_ray);
+        
+        if (intersection.closestT >= MAXLEN || intersection.id == -1)
+        {
+            break;
+        }
 
-    // if (intersection.id >= 0) {
-    //   for (int i = 0; i < arrayLength(shapes); i++)
-    //   {
-    //     if (objectID == i)
-    //     {
-    //       HitParams hitParams = getHitParams(rayO, rayD, t, shapes[i].inverseTransform, shapes[i].typeEnum, shapes[i].data[3], shapes[i].data[4], shapes[i].data[5], uv);
-
-    //       bool shadowed = isShadowed(hitParams.overPoint, ubo.lightPos);
-    //       color = lighting(shapes[i].material, ubo.lightPos,
-    //                               hitParams, shadowed);
-    //       // color = vec4(1.0,0.0,0.0,1.0);
-    //     }
-    //   }
-    //     color = vec4<f32>(1.0,0.0,0.0,1.0);
-    // }
-
-    // else {
-    if (intersection.id != -1) {
+        // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
-        var type_enum = 0;
+        type_enum = 0;
         if (ob_params.len_leaf_nodes == 0) {
             type_enum = ob_params.len_inner_nodes;
         }
 
-        let hitParams: HitParams = getHitParams(ray, intersection, type_enum);
+        let hitParams: HitParams = getHitParams(new_ray, intersection, type_enum);
+        let scatterTarget: vec4<f32> = hitParams.normalv + vec4<f32>(sphericalRand(1.0,new_ray.rayD.xyz), 0.0);
+        new_ray = Ray(hitParams.overPoint, scatterTarget);
 
-        color = lighting(ob_params.material, ubo.lightPos,
-                                hitParams);
-        color.w = 1.0;
+        let hit_colour = ob_params.material.colour;
 
-        // color.g = 0.0;
-        // color.g = 1.0;
-        // color.g = 0.0;
-        // color = vec4<f32>(0.0,1.0,0.0,1.0);
+        // if (bounce_idx == 0) {
+        //     color = hit_colour;
+        // }
+
+        push_stack(Node(hit_colour,ob_params.material.emissiveness));
+
+        // color = ob_params.material.emissiveness + color * hit_colour;
+        // if (color.x == 0.0) {
+        //     color = hit_colour;
+        // }
+        // else {
+        //     color = color * hit_colour;
+        // }
+        
+
+        // return hit->shapePtr->getMaterial()->emissiveness + hitColour * pathColourAt(newRay, world, intersections, remaining - 1);
+
+
     }
+
+    let node = pop_stack();
+    color = node.emissiveness;
+
+    loop {
+        if (topStack == -1) {
+            break;
+        }
+        let node = pop_stack();
+        color = node.emissiveness + color * node.hit_colour;
+
+    }
+
+    
+    // color.w = 1.0;
+
+    let scale = 1.0 / f32(RAYS_PER_PIXEL);
+    color.r = clamp(sqrt(scale * color.r), 0.0, 0.999);
+    color.g = clamp(sqrt(scale * color.g), 0.0, 0.999);
+    color.b = clamp(sqrt(scale * color.b), 0.0, 0.999);
+    color.a = clamp(sqrt(scale * color.a), 0.0, 0.999);
+    
     
     return color;
 }
 
-[[stage(compute), workgroup_size(8, 8)]]
+[[stage(compute), workgroup_size(4, 4)]]
 fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
         ) {
-    let ray: Ray = rayForPixel(global_invocation_id.xy);
-    let color: vec4<f32> = renderScene(ray);
+
+    let sqrt_rays_per_pixel: u32 = u32(sqrt(f32(RAYS_PER_PIXEL)));
+    let pixel: vec2<u32> = global_invocation_id.xy / sqrt_rays_per_pixel;
+
+    let current_ray_idx: u32 = (global_invocation_id.x % sqrt_rays_per_pixel) + (sqrt_rays_per_pixel * (global_invocation_id.y % sqrt_rays_per_pixel));
+    let half_sub_pixel_size = 1.0 / f32(sqrt_rays_per_pixel) / 2.0;
+
+    
+
+    let color: vec4<f32> = renderScene(pixel,current_ray_idx,sqrt_rays_per_pixel,half_sub_pixel_size);
 
     // var color: vec4<f32> = vec4<f32>(0.0,1.0,0.0,1.0);
 
@@ -551,5 +630,5 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
     //     color = vec4<f32>(vec3<f32>(local_invocation_id.xyz)/255.0,1.0);
     // }
 
-    textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+    textureStore(imageData, vec2<i32>(pixel), color);
 }

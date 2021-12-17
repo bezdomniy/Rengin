@@ -10,6 +10,17 @@ pub struct Material {
     pub shininess: f32,
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PtMaterial {
+    pub colour: Vec4,
+    pub emissiveness: Vec4,
+    pub ambient: f32,
+    pub diffuse: f32,
+    pub specular: f32,
+    pub shininess: f32,
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct Primitive {
     pub points: Mat3,
@@ -20,7 +31,7 @@ pub struct Primitive {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ObjectParams {
     pub inverse_transform: Mat4,
-    pub material: Material,
+    pub material: PtMaterial,
     pub len_inner_nodes: u32,
     pub len_leaf_nodes: u32,
     _padding: [u32; 2],
@@ -29,7 +40,7 @@ pub struct ObjectParams {
 impl ObjectParams {
     pub fn new(
         inverse_transform: Mat4,
-        material: Material,
+        material: PtMaterial,
         len_inner_nodes: u32,
         len_leaf_nodes: u32,
     ) -> Self {

@@ -32,6 +32,7 @@ struct HitParams {
 
 struct Material {
     colour: vec4<f32>;
+    emissiveness: vec4<f32>;
     ambient: f32;
     diffuse: f32;
     specular: f32;
@@ -86,7 +87,7 @@ struct ObjectParam {
 
 [[block]]
 struct ObjectParams {
-    ObjectParams: [[stride(112)]] array<ObjectParam>;
+    ObjectParams: [[stride(128)]] array<ObjectParam>;
     // ObjectParams: [[stride(96)]] array<ObjectParam>;
 };
 
@@ -173,7 +174,7 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
     return true;
 }
 
-fn triangleIntersect(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -> Intersection {
+fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -> Intersection {
     let triangle = leaf_nodes.LeafNodes[triangleIdx];
     var uv: vec2<f32> = vec2<f32>(0.0);
     let e1: vec3<f32> = triangle.point2 - triangle.point1;
@@ -241,7 +242,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
             idx = idx + 1;
             if (leaf_node) {
                 for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1 + leaf_offset; primIdx < current_node.idx2 + leaf_offset; primIdx = primIdx + 1u) {
-                    let next_intersection = triangleIntersect(ray, primIdx, ret);
+                    let next_intersection = intersectTriangle(ray, primIdx, ret);
 
                     if ((next_intersection.closestT < inIntersection.closestT)  && (next_intersection.closestT > EPSILON)) {
                         ret = next_intersection;
@@ -278,11 +279,28 @@ fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: i32) -> In
     let t2 = (-b + sqrt(discriminant)) / (2.0 * a);
 
     if (t1 < ret.closestT || t2 < ret.closestT) {
-        if (t1 < t2) {
+        if (t1 < t2 && t1 > EPSILON) {
             return Intersection(vec2<f32>(0.0),0,t1,u32(object_id));
         }
         
-        return Intersection(vec2<f32>(0.0),0,t2,u32(object_id));
+        if (t2 > EPSILON) {
+            return Intersection(vec2<f32>(0.0),0,t2,u32(object_id));
+        }
+    }
+    return ret;
+}
+
+fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: i32) -> Intersection {
+    var ret: Intersection = inIntersection;
+
+    if (abs(ray.rayD.y) < EPSILON) {
+        return ret;
+    }
+
+    let t: f32 = -ray.rayO.y / ray.rayD.y;
+
+    if (t < ret.closestT && t > EPSILON) {
+        return Intersection(vec2<f32>(0.0),0,t,u32(object_id));
     }
     return ret;
 }
@@ -312,6 +330,9 @@ fn intersect(ray: Ray) -> Intersection {
             if (type_enum == 1) { //Sphere
                 ret = intersectSphere(nRay,ret, i);
             }
+            elseif (type_enum == 2) { //Plane
+                ret = intersectPlane(nRay,ret, i);
+            }
         }
 
     }
@@ -332,23 +353,17 @@ fn normalToWorld(normal: vec4<f32>, object_id: u32) -> vec4<f32>
 }
 
 fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4<f32> {
-    // var n: vec4<f32> = vec4<f32>(0.0);
-    // let objectPoint: vec4<f32> = object_params.ObjectParams[0].inverse_transform * point; // World to object
-
-    // if (typeEnum == 0) {
-    //     n = objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
-    // }
-    // elseif (typeEnum == 1) {
-    //     n = vec4<f32>(0.0,1.0,0.0,0.0);
-    // }
     if (typeEnum == 0) {
         let normal: Normal = normal_nodes.Normals[intersection.id];
         return normalToWorld((normal.normal2 * intersection.uv.x + normal.normal3 * intersection.uv.y + normal.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
         // n.w = 0.0;
     }
-     elseif (typeEnum == 1) {
+     elseif (typeEnum == 1) { //Sphere
         let objectPoint = object_params.ObjectParams[intersection.model_id].inverse_transform * point;
         return objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+     elseif (typeEnum == 2) { //Plane
+        return normalToWorld(vec4<f32>(0.0, 1.0, 0.0, 0.0),intersection.model_id);
     }
     return vec4<f32>(0.0);
 }
@@ -496,6 +511,7 @@ fn renderScene(ray: Ray) -> vec4<f32> {
 
     // else {
     if (intersection.id != -1) {
+        // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
         var type_enum = 0;
         if (ob_params.len_leaf_nodes == 0) {
