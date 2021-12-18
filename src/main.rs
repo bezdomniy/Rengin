@@ -50,12 +50,12 @@ use engine::rt_primitives::{
 use crate::engine::rt_primitives::PtMaterial;
 use crate::renderer::wgpu_utils::RenginWgpu;
 
-static WIDTH: u32 = 400;
-static HEIGHT: u32 = 300;
+static WIDTH: u32 = 800;
+static HEIGHT: u32 = 600;
 static WORKGROUP_SIZE: [u32; 3] = [4, 4, 1];
 
-static FRAMERATE: f64 = 30.0;
-static RAYS_PER_PIXEL: u32 = 4;
+static FRAMERATE: f64 = 5.0;
+static RAYS_PER_PIXEL: u32 = 32;
 
 struct GameState {
     pub camera_angle_y: f32,
@@ -141,7 +141,7 @@ impl RenderApp {
         let transform0 = Mat4::from_translation(Vec3::new(2f32, 0f32, 0f32));
         let transform1 = Mat4::from_translation(Vec3::new(-3f32, 1f32, 0f32));
         let transform2 = Mat4::from_scale(Vec3::new(0.005, 0.005, 0.005)).inverse();
-        let transform3 = Mat4::from_translation(Vec3::new(2f32, -3f32, 0f32));
+        let transform3 = Mat4::from_translation(Vec3::new(3f32, -3f32, -1f32));
         let transform4 = Mat4::from_translation(Vec3::new(0f32, 1.5f32, 0f32));
         let transform5 = rotate90_x * Mat4::from_translation(Vec3::new(0f32, 0f32, 3f32));
         let transform6 = rotate90_z * Mat4::from_translation(Vec3::new(-6f32, 0f32, 0f32));
@@ -236,7 +236,7 @@ impl RenderApp {
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
             PtMaterial {
                 colour: Vec4::new(0.831, 0.537, 0.214, 1.0),
-                emissiveness: Vec4::new(7.0, 7.0, 7.0, 1.0),
+                emissiveness: Vec4::new(7.0, 7.0, 7.0, 7.0),
                 ambient: 0.1,
                 diffuse: 0.7,
                 specular: 0.3,
@@ -384,8 +384,11 @@ impl RenderApp {
         self.ubo = Some(UBO::new(
             [-4f32, 2f32, 3f32, 1f32],
             self.objects.as_ref().unwrap().len_inner_nodes.len() as u32 + n_primitives,
+            (RAYS_PER_PIXEL as f32).sqrt() as u32,
             camera,
         ));
+
+        println!("ubo: {:?}", self.ubo);
 
         // log::info!("ubo:{:?},", ubo);
         now = Instant::now();
@@ -547,7 +550,7 @@ impl RenderApp {
                         binding: 0,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            access: wgpu::StorageTextureAccess::ReadWrite,
                             format: wgpu::TextureFormat::Rgba8Unorm,
                             view_dimension: wgpu::TextureViewDimension::D2,
                         },
@@ -713,7 +716,14 @@ impl RenderApp {
                 fragment: Some(wgpu::FragmentState {
                     module: self.shaders.as_ref().unwrap().get("frag").as_ref().unwrap(),
                     entry_point: "main",
-                    targets: &[self.renderer.config.format.into()],
+                    targets: &[wgpu::ColorTargetState {
+                        format: self.renderer.config.format,
+                        // TODO: change subpixel to blending, rather than doing it in shader
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        // blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }],
+                    // targets: &[self.renderer.config.format.into()],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
@@ -839,6 +849,7 @@ impl RenderApp {
                             game_state.camera_up,
                         );
                         *something_changed = true;
+                        ubo.subpixel_idx = 0;
                     }
                 }
             }
@@ -867,6 +878,7 @@ impl RenderApp {
                             game_state.camera_up,
                         );
                         *something_changed = true;
+                        ubo.subpixel_idx = 0;
                     }
                 }
                 _ => {}
@@ -907,13 +919,22 @@ impl RenderApp {
                     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                     let time_since_last_frame = last_update_inst.elapsed();
 
-                    if something_changed
+                    if (something_changed
+                        || self.ubo.as_ref().unwrap().subpixel_idx < RAYS_PER_PIXEL)
                         && time_since_last_frame >= target_frametime
                         && (!left_mouse_down || self.renderer.continous_motion)
                     {
-                        something_changed = false;
+                        println!("Drawing ray index: {}", self.ubo.unwrap().subpixel_idx);
+
                         self.renderer.window.request_redraw();
+
+                        // if let Some(ref mut x) = self.ubo {
+                        //     x.subpixel_idx += 1;
+                        // }
+
                         println!("render time: {:?}", time_since_last_frame);
+                        something_changed = false;
+
                         last_update_inst = Instant::now();
                     } else {
                         *control_flow = ControlFlow::WaitUntil(
@@ -1166,8 +1187,8 @@ impl RenderApp {
                         cpass.set_pipeline(self.compute_pipeline.as_ref().unwrap());
                         cpass.set_bind_group(0, self.compute_bind_group.as_ref().unwrap(), &[]);
                         cpass.dispatch(
-                            (self.renderer.config.width * RAYS_PER_PIXEL) / WORKGROUP_SIZE[0],
-                            (self.renderer.config.height * RAYS_PER_PIXEL) / WORKGROUP_SIZE[1],
+                            self.renderer.config.width / WORKGROUP_SIZE[0],
+                            self.renderer.config.height / WORKGROUP_SIZE[1],
                             WORKGROUP_SIZE[2],
                         );
                     }
@@ -1187,6 +1208,10 @@ impl RenderApp {
 
                     self.renderer.queue.submit(Some(command_encoder.finish()));
                     frame.present();
+
+                    if let Some(ref mut x) = self.ubo {
+                        x.subpixel_idx += 1;
+                    }
                 }
                 _ => {}
             }

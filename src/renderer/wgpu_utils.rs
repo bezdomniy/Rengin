@@ -65,6 +65,7 @@ impl RenginWgpu {
         let optional_features = {
             wgpu::Features::UNSIZED_BINDING_ARRAY
                 | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
+                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
                 | wgpu::Features::PUSH_CONSTANTS
         };
         let required_features = { wgpu::Features::TEXTURE_BINDING_ARRAY };

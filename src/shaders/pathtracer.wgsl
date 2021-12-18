@@ -52,6 +52,8 @@ struct UBO {
     lightPos: vec4<f32>;
     camera: Camera;
     n_objects: i32;
+    subpixel_idx: u32;
+    sqrt_rays_per_pixel: u32;
     // max_inner_node_idx: i32;
     // max_leaf_node_idx: i32;
     // padding: array<u32,2>;
@@ -104,7 +106,7 @@ struct Intersection {
 };
 
 [[group(0), binding(0)]]
-var imageData: texture_storage_2d<rgba8unorm,write>;
+var imageData: texture_storage_2d<rgba8unorm,read_write>;
 [[group(0), binding(1)]]
 var<uniform> ubo: UBO;
 [[group(0), binding(2)]]
@@ -122,31 +124,32 @@ let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
 let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio 
-let RAYS_PER_PIXEL: u32 = 4u;  
-let RAY_BOUNCES: i32 = 10;
+// let RAYS_PER_PIXEL: u32 = 4u;  
+let RAY_BOUNCES: i32 = 4;
 
 fn gold_noise(xy: vec2<f32>, seed: f32) -> f32 {
     return fract(tan(distance(xy*PHI, xy)*seed)*xy.x);
 }
 
-fn rand(seed_xy: vec2<f32>) -> f32 {
-    return fract(sin(dot(seed_xy ,vec2<f32>(12.9898,78.233))) * 43758.5453);
+fn rand(xy: vec2<f32>, seed: f32) -> f32 {
+    return fract(sin(dot(xy +seed,vec2<f32>(12.9898,78.233))) * 43758.5453+seed);
 }
 
 fn rescale(value: f32, min: f32, max: f32) -> f32 {
     return (value * (max - min)) + min;
 }
 
-fn linearRand(min: f32, max: f32, seed_xy: vec2<f32>) -> f32 {
-    return rescale(rand(seed_xy),min,max);
+fn linearRand(min: f32, max: f32, xy: vec2<f32>, seed: f32) -> f32 {
+    return rescale(rand(xy,seed),min,max);
+    // return rescale(gold_noise(xy,seed),min,max);
 }
 
-fn sphericalRand(radius: f32, seed_xyz: vec3<f32>) -> vec3<f32>
+fn sphericalRand(radius: f32, xyz: vec3<f32>, seed: f32) -> vec3<f32>
 {
     // let xy = vec2<f32>(seed_xy);
 
-    let theta: f32 = linearRand(0.0, 6.283185307179586476925286766559,seed_xyz.xy);
-    let phi: f32 = acos(linearRand(-1.0, 1.0,seed_xyz.zy));
+    let theta: f32 = linearRand(0.0, 6.283185307179586476925286766559,xyz.xy,seed);
+    let phi: f32 = acos(linearRand(-1.0, 1.0,xyz.yz,seed));
 
     let x: f32 = sin(phi) * cos(theta);
     let y: f32 = sin(phi) * sin(theta);
@@ -507,7 +510,12 @@ struct Node {
     emissiveness: vec4<f32>;
 };
 
-fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
+struct RenderReturn {
+    color: vec4<f32>;
+    intersection_found: bool;
+};
+
+fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> RenderReturn {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
     var uv: vec2<f32>;
@@ -522,6 +530,8 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
     var stack: array<Node,RAY_BOUNCES>;
     var top_stack = -1;
 
+    var intersection_found = false;
+
     
     for (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1) {
         // Get intersected object ID
@@ -532,6 +542,8 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
             break;
         }
 
+        intersection_found = true;
+
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
         type_enum = 0;
@@ -540,7 +552,7 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
         }
 
         let hitParams: HitParams = getHitParams(new_ray, intersection, type_enum);
-        let scatterTarget: vec4<f32> = hitParams.normalv + vec4<f32>(sphericalRand(1.0,new_ray.rayD.xyz), 0.0);
+        let scatterTarget: vec4<f32> = hitParams.normalv + vec4<f32>(sphericalRand(1.0,new_ray.rayD.xyz,f32(ubo.subpixel_idx)), 0.0);
         new_ray = Ray(hitParams.overPoint, scatterTarget);
 
         let hit_colour = ob_params.material.colour;
@@ -581,18 +593,10 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
         color = node.emissiveness + color * node.hit_colour;
 
     }
-
+ 
+    return RenderReturn(color, intersection_found);
     
-    // color.w = 1.0;
-
-    let scale = 1.0 / f32(RAYS_PER_PIXEL);
-    color.r = clamp(sqrt(scale * color.r), 0.0, 0.999);
-    color.g = clamp(sqrt(scale * color.g), 0.0, 0.999);
-    color.b = clamp(sqrt(scale * color.b), 0.0, 0.999);
-    color.a = clamp(sqrt(scale * color.a), 0.0, 0.999);
-    
-    
-    return color;
+    // return (color,intersection.id);
 }
 
 [[stage(compute), workgroup_size(4, 4)]]
@@ -601,27 +605,40 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
         ) {
 
-    let sqrt_rays_per_pixel: u32 = u32(sqrt(f32(RAYS_PER_PIXEL)));
-    let pixel: vec2<u32> = global_invocation_id.xy / sqrt_rays_per_pixel;
+    var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
+    if (ubo.subpixel_idx > 0u) {
+        let inUV = vec2<i32>(i32(global_invocation_id.x) ,i32(global_invocation_id.y) );
+        color = textureLoad(imageData,inUV);
+    }
 
-    let current_ray_idx: u32 = (global_invocation_id.x % sqrt_rays_per_pixel) + (sqrt_rays_per_pixel * (global_invocation_id.y % sqrt_rays_per_pixel));
-    let half_sub_pixel_size = 1.0 / f32(sqrt_rays_per_pixel) / 2.0;
+    let half_sub_pixel_size = 1.0 / f32(ubo.sqrt_rays_per_pixel) / 2.0;
+    let render_ret: RenderReturn = renderScene(global_invocation_id.xy,ubo.subpixel_idx,ubo.sqrt_rays_per_pixel,half_sub_pixel_size);
+
+    let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
+
+    color = (color * (1.0 - scale)) + (render_ret.color * scale);
+
+    color.r = clamp(color.r,0.0,0.999);
+    color.g = clamp(color.g,0.0,0.999);
+    color.b = clamp(color.b,0.0,0.999);
+    color.a = clamp(color.a,0.0,0.999);
+
+
+    // var color: vec4<f32> = vec4<f32>(f32(ubo.subpixel_idx)/4.0,0.0,0.0,1.0);
+    // var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
+
 
     
-
-    let color: vec4<f32> = renderScene(pixel,current_ray_idx,sqrt_rays_per_pixel,half_sub_pixel_size);
-
-    // var color: vec4<f32> = vec4<f32>(0.0,1.0,0.0,1.0);
-
-    // if (workgroup_id.x == u32(4) && workgroup_id.y == u32(4)) {
-    //     color = vec4<f32>(vec3<f32>(local_invocation_id.xyz)/255.0,1.0);
+    // if (ubo.subpixel_idx == 1u) {
+    //     color = color + vec4<f32>(1.0,0.0,0.0,1.0);
+    // }
+    // elseif (ubo.subpixel_idx == 2u) {
+    //     color = color + vec4<f32>(0.0,1.0,0.0,1.0);
+    // }
+    // elseif (ubo.subpixel_idx == 3u) {
+    //     color = color + vec4<f32>(0.0,0.0,1.0,1.0);
     // }
 
-    // var color: vec4<f32> = vec4<f32>(f32(workgroup_id.x % 2u),f32(workgroup_id.y % 2u),0.0,1.0);
-
-    // if (workgroup_id.x == u32(4) && workgroup_id.y == u32(4)) {
-    //     color = vec4<f32>(vec3<f32>(local_invocation_id.xyz)/255.0,1.0);
-    // }
-
-    textureStore(imageData, vec2<i32>(pixel), color);
+// Does this just overwrite the pixel?
+    textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }

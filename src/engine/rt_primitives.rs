@@ -143,17 +143,30 @@ pub struct UBO {
     light_pos: Vec4,
     pub camera: Camera,
     n_objects: u32,
-    _padding: [u32; 3],
+    pub subpixel_idx: u32,
+    sqrt_rays_per_pixel: u32,
+    _padding: [u32; 1],
 }
 
 impl UBO {
-    pub fn new(light_pos: [f32; 4], n_objects: u32, camera: Camera) -> UBO {
+    pub fn new(
+        light_pos: [f32; 4],
+        n_objects: u32,
+        sqrt_rays_per_pixel: u32,
+        camera: Camera,
+    ) -> UBO {
         UBO {
             light_pos: const_vec4!(light_pos),
             camera,
             n_objects,
-            _padding: [0; 3],
+            subpixel_idx: 0,
+            sqrt_rays_per_pixel,
+            _padding: [0; 1],
         }
+    }
+
+    pub fn set_ray_idx(&mut self, idx: &u32) {
+        self.subpixel_idx = *idx;
     }
 }
 
