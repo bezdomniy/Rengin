@@ -47,7 +47,6 @@ struct Camera {
     width: i32;
 };
 
-[[block]]
 struct UBO {
     lightPos: vec4<f32>;
     camera: Camera;
@@ -59,23 +58,15 @@ struct UBO {
     // padding: array<u32,2>;
 };
 
-// [[block]]
-// struct BVH {
-//     InnerNodes: [[stride(32)]] array<NodeInner>;
-//     LeafNodes: [[stride(128)]] array<NodeLeaf>;
-// };
 
-[[block]]
 struct InnerNodes {
     InnerNodes: [[stride(32)]] array<NodeInner>;
 };
 
-[[block]]
 struct LeafNodes {
     LeafNodes: [[stride(48)]] array<NodeLeaf>;
 };
 
-[[block]]
 struct Normals {
     Normals: [[stride(48)]] array<Normal>;
 };
@@ -87,7 +78,6 @@ struct ObjectParam {
     len_leaf_nodes:i32;
 };
 
-[[block]]
 struct ObjectParams {
     ObjectParams: [[stride(128)]] array<ObjectParam>;
     // ObjectParams: [[stride(96)]] array<ObjectParam>;
@@ -125,7 +115,7 @@ let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
 let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio 
 // let RAYS_PER_PIXEL: u32 = 4u;  
-let RAY_BOUNCES: i32 = 4;
+let RAY_BOUNCES: i32 = 5;
 
 fn gold_noise(xy: vec2<f32>, seed: f32) -> f32 {
     return fract(tan(distance(xy*PHI, xy)*seed)*xy.x);
@@ -297,7 +287,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
             }
             
         }
-        elseif (leaf_node) {
+        else if (leaf_node) {
             idx = idx + 1;
         }
         else {
@@ -376,7 +366,7 @@ fn intersect(ray: Ray) -> Intersection {
             if (type_enum == 1) { //Sphere
                 ret = intersectSphere(nRay,ret, i);
             }
-            elseif (type_enum == 2) { //Plane
+            else if (type_enum == 2) { //Plane
                 ret = intersectPlane(nRay,ret, i);
             }
         }
@@ -404,11 +394,11 @@ fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4
         return normalToWorld((normal.normal2 * intersection.uv.x + normal.normal3 * intersection.uv.y + normal.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
         // n.w = 0.0;
     }
-     elseif (typeEnum == 1) { //Sphere
+     else if (typeEnum == 1) { //Sphere
         let objectPoint = object_params.ObjectParams[intersection.model_id].inverse_transform * point;
         return objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
-     elseif (typeEnum == 2) { //Plane
+     else if (typeEnum == 2) { //Plane
         return normalToWorld(vec4<f32>(0.0, 1.0, 0.0, 0.0),intersection.model_id);
     }
     return vec4<f32>(0.0);
@@ -632,10 +622,10 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
     // if (ubo.subpixel_idx == 1u) {
     //     color = color + vec4<f32>(1.0,0.0,0.0,1.0);
     // }
-    // elseif (ubo.subpixel_idx == 2u) {
+    // else if (ubo.subpixel_idx == 2u) {
     //     color = color + vec4<f32>(0.0,1.0,0.0,1.0);
     // }
-    // elseif (ubo.subpixel_idx == 3u) {
+    // else if (ubo.subpixel_idx == 3u) {
     //     color = color + vec4<f32>(0.0,0.0,1.0,1.0);
     // }
 

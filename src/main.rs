@@ -43,9 +43,7 @@ use glam::{Mat4, Vec3, Vec4};
 
 use engine::asset_importer::import_objs;
 
-use engine::rt_primitives::{
-    Camera, Material, NodeInner, NodeLeaf, NodeNormal, ObjectParams, BVH, UBO,
-};
+use engine::rt_primitives::{Camera, NodeInner, NodeLeaf, NodeNormal, ObjectParams, BVH, UBO};
 
 use crate::engine::rt_primitives::PtMaterial;
 use crate::renderer::wgpu_utils::RenginWgpu;
@@ -56,6 +54,9 @@ static WORKGROUP_SIZE: [u32; 3] = [4, 4, 1];
 
 static FRAMERATE: f64 = 5.0;
 static RAYS_PER_PIXEL: u32 = 32;
+
+//TODO: try doing passes over parts of the image instead of whole at a time
+//      that way you can maintain framerate
 
 struct GameState {
     pub camera_angle_y: f32,
@@ -662,10 +663,7 @@ impl RenderApp {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler {
-                            comparison: false,
-                            filtering: true,
-                        },
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
                 ],
@@ -708,6 +706,7 @@ impl RenderApp {
             &wgpu::RenderPipelineDescriptor {
                 label: None,
                 layout: Some(&render_pipeline_layout),
+                multiview: None,
                 vertex: wgpu::VertexState {
                     module: self.shaders.as_ref().unwrap().get("vert").as_ref().unwrap(),
                     entry_point: "main",
@@ -848,8 +847,8 @@ impl RenderApp {
                             game_state.camera_centre,
                             game_state.camera_up,
                         );
-                        *something_changed = true;
                         ubo.subpixel_idx = 0;
+                        *something_changed = true;
                     }
                 }
             }
@@ -877,8 +876,8 @@ impl RenderApp {
                             game_state.camera_centre,
                             game_state.camera_up,
                         );
-                        *something_changed = true;
                         ubo.subpixel_idx = 0;
+                        *something_changed = true;
                     }
                 }
                 _ => {}
