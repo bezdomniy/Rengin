@@ -22,12 +22,12 @@ struct NodeInner {
 
 
 struct HitParams {
-    point: vec4<f32>;
-    normalv: vec4<f32>;
-    eyev: vec4<f32>;
-    reflectv: vec4<f32>;
-    overPoint: vec4<f32>;
-    underPoint: vec4<f32>;
+    point: vec3<f32>;
+    normalv: vec3<f32>;
+    eyev: vec3<f32>;
+    reflectv: vec3<f32>;
+    overPoint: vec3<f32>;
+    underPoint: vec3<f32>;
     front_face: bool;
 };
 
@@ -53,7 +53,8 @@ struct Camera {
 
 
 struct UBO {
-    lightPos: vec4<f32>;
+    lightPos: vec3<f32>;
+    _padding: u32;
     camera: Camera;
     n_objects: i32;
     subpixel_idx: u32;
@@ -90,6 +91,7 @@ struct ObjectParam {
     material: Material;
     len_inner_nodes:i32;
     len_leaf_nodes:i32;
+    is_light: u32;
 };
 
 
@@ -99,8 +101,10 @@ struct ObjectParams {
 };
 
 struct Ray {
-    rayO: vec4<f32>;
-    rayD: vec4<f32>;
+    rayO: vec3<f32>;
+    x: u32;
+    rayD: vec3<f32>;
+    y: u32;
 };
 
 struct Intersection {
@@ -139,7 +143,7 @@ fn rand2(xy: vec2<f32>,seed:f32) -> f32
     let v = 0.152;
     let pos = (xy * v + ubo.rnd_seed * 1500. + 50.0);
 
-	var p3 = fract(vec3<f32>(pos.xyx) * 0.1031);
+    var p3 = fract(vec3<f32>(pos.xyx) * 0.1031);
     p3 = p3 + dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
 }
@@ -164,7 +168,7 @@ fn rayForPixel(p: vec2<u32>, sqrt_rays_per_pixel: u32, current_ray_index: u32, h
 
     let rayO: vec4<f32> = ubo.camera.inverseTransform * vec4<f32>(0.0, 0.0, 0.0, 1.0);
 
-    return Ray(rayO, normalize(pixel - rayO));
+    return Ray(rayO.xyz, p.x, normalize(pixel - rayO).xyz,p.y);
 }
 
 
@@ -212,21 +216,21 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -
     let e1: vec3<f32> = triangle.point2 - triangle.point1;
     let e2: vec3<f32> = triangle.point3 - triangle.point1;
 
-    let dirCrossE2: vec3<f32> = cross(ray.rayD.xyz, e2);
+    let dirCrossE2: vec3<f32> = cross(ray.rayD, e2);
     let det: f32 = dot(e1, dirCrossE2);
     // if (abs(det) < EPSILON) {
     //     return Intersection(inIntersection.uv,inIntersection.id,-1.0);
     // }
 
     let f: f32 = 1.0 / det;
-    let p1ToOrigin: vec3<f32> = (ray.rayO.xyz - triangle.point1);
+    let p1ToOrigin: vec3<f32> = (ray.rayO - triangle.point1);
     uv.x = f * dot(p1ToOrigin, dirCrossE2);
     // if (uv.x < 0.0 || uv.x > 1.0) {
     //   return Intersection(inIntersection.uv,inIntersection.id,-1.0);
     // }
 
     let originCrossE1: vec3<f32>  = cross(p1ToOrigin, e1);
-    uv.y = f * dot(ray.rayD.xyz, originCrossE1);
+    uv.y = f * dot(ray.rayD, originCrossE1);
     // uv.y =1.0;
 
     // if (uv.y < 0.0 || (uv.x + uv.y) > 1.0) {
@@ -297,7 +301,7 @@ fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: i32) -> In
     // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
     var ret: Intersection = inIntersection;
 
-    let sphereToRay = ray.rayO - vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    let sphereToRay = ray.rayO;
     let a = dot(ray.rayD, ray.rayD);
     let b = 2.0 * dot(ray.rayD, sphereToRay);
     let c = dot(sphereToRay, sphereToRay) - 1.0;
@@ -348,7 +352,7 @@ fn intersect(ray: Ray) -> Intersection {
     // TODO: fix loop range - get number of objects
     for (var i: i32 = 0; i < ubo.n_objects; i = i+1) {
         let ob_params = object_params.ObjectParams[i];
-        let nRay: Ray = Ray(ob_params.inverse_transform * ray.rayO, ob_params.inverse_transform * ray.rayD);
+        let nRay: Ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO,1.0)).xyz, ray.x, (ob_params.inverse_transform * vec4<f32>(ray.rayD,0.0)).xyz, ray.y);
 
         if (ob_params.len_leaf_nodes > 0) {
             // Triangle mesh
@@ -375,29 +379,29 @@ fn intersect(ray: Ray) -> Intersection {
     return ret;
 }
 
-fn normalToWorld(normal: vec4<f32>, object_id: u32) -> vec4<f32>
+fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
 {
-    let ret: vec4<f32> = normalize(vec4<f32>((transpose(object_params.ObjectParams[object_id].inverse_transform) * normal).xyz,0.0));
+    let ret: vec3<f32> = normalize((transpose(object_params.ObjectParams[object_id].inverse_transform) * vec4<f32>(normal,0.0)).xyz);
     // ret.w = 0.0;
     // ret = normalize(ret);
 
     return ret;
 }
 
-fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4<f32> {
+fn normalAt(point: vec3<f32>, intersection: Intersection, typeEnum: i32) -> vec3<f32> {
     if (typeEnum == 0) {
         let normal: Normal = normal_nodes.Normals[intersection.id];
-        return normalToWorld((normal.normal2 * intersection.uv.x + normal.normal3 * intersection.uv.y + normal.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
+        return normalToWorld((normal.normal2.xyz * intersection.uv.x + normal.normal3.xyz * intersection.uv.y + normal.normal1.xyz * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
         // n.w = 0.0;
     }
      else if (typeEnum == 1) { //Sphere
-        let objectPoint = object_params.ObjectParams[intersection.model_id].inverse_transform * point;
-        return objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(point,1.0)).xyz;
+        return objectPoint;
     }
      else if (typeEnum == 2) { //Plane
-        return normalToWorld(vec4<f32>(0.0, 1.0, 0.0, 0.0),intersection.model_id);
+        return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),intersection.model_id);
     }
-    return vec4<f32>(0.0);
+    return vec3<f32>(0.0);
 }
 
 
@@ -437,13 +441,13 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: i32) -> HitParam
     return hitParams;
 }
 
-fn isShadowed(point: vec4<f32>, lightPos: vec4<f32>) -> bool
+fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
 {
-  let v: vec4<f32> = lightPos - point;
+  let v: vec3<f32> = lightPos - point;
   let distance: f32 = length(v);
-  let direction: vec4<f32> = normalize(v);
+  let direction: vec3<f32> = normalize(v);
 
-  let intersection: Intersection = intersect(Ray(point,direction));
+  let intersection: Intersection = intersect(Ray(point,0u,direction,0u));
 
   if (intersection.closestT > EPSILON && intersection.closestT < distance)
   {
@@ -459,23 +463,23 @@ fn reflectance(cosine:f32, ref_idx: f32) -> f32 {
     return r0 + (1.0-r0)*pow((1.0 - cosine),5.0);
 }
 
-fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams, shadowed: bool) -> vec4<f32>
+fn lighting(material: Material, lightPos: vec3<f32>, hitParams: HitParams, shadowed: bool) -> vec4<f32>
 {
   // return material.colour;
   var diffuse: vec4<f32>;
   var specular: vec4<f32>;
 
-  let intensity: vec4<f32> = vec4<f32>(1.0,1.0,1.0,1.0); // TODO temp placeholder
+  let intensity = vec4<f32>(1.0,1.0,1.0,1.0); // TODO temp placeholder
 
-  let effectiveColour: vec4<f32> = intensity * material.colour; //* light->intensity;
+  let effectiveColour = intensity * material.colour; //* light->intensity;
 
-  let ambient: vec4<f32> = effectiveColour * material.ambient;
+  let ambient = effectiveColour * material.ambient;
   // vec4 ambient = vec4(0.3,0.0,0.0,1.0);
   if (shadowed) {
     return ambient;
   }
 
-  let lightv: vec4<f32> = normalize(lightPos - hitParams.overPoint);
+  let lightv: vec3<f32> = normalize(lightPos - hitParams.overPoint);
 
   let lightDotNormal: f32 = dot(lightv, hitParams.normalv);
   if (lightDotNormal < 0.0)
@@ -491,8 +495,8 @@ fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams, shado
     // reflect_dot_eye represents the cosine of the angle between the
     // reflection vector and the eye vector. A negative number means the
     // light reflects away from the eye.​
-    let reflectv: vec4<f32> = reflect(-lightv, hitParams.normalv);
-    let reflectDotEye: f32 = dot(reflectv, hitParams.eyev);
+    let reflectv = reflect(-lightv, hitParams.normalv);
+    let reflectDotEye = dot(reflectv, hitParams.eyev);
 
     if (reflectDotEye <= 0.0)
     {
@@ -501,7 +505,7 @@ fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams, shado
     else
     {
       // compute the specular contribution​
-      let factor: f32 = pow(reflectDotEye, material.shininess);
+      let factor = pow(reflectDotEye, material.shininess);
       specular = intensity * material.specular * factor;
     }
   }
@@ -591,11 +595,12 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
                 let cannot_refract = refraction_ratio * sin_theta > 1.0;
                 var direction = vec4<f32>(0.0,0.0,0.0,0.0);
 
-                top_stack = top_stack + 1;
+                
                 if (cannot_refract || reflectance(cos_theta, refraction_ratio) > rand(new_ray.rayD.xy,f32(top_stack)))
                 {
                     if (ob_params.material.reflective > 0.0) {
-                        stack[top_stack] = Ray(hitParams.overPoint, hitParams.reflectv); 
+                        top_stack = top_stack + 1;
+                        stack[top_stack] = Ray(hitParams.overPoint, pixel.x, hitParams.reflectv,pixel.y); 
                     }
                     
                 }
@@ -603,13 +608,15 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
                     let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
                     let r_out_perp =  refraction_ratio * (unit_direction + cos_theta*hitParams.normalv);
                     let r_out_parallel = -sqrt(abs(1.0 - dot(r_out_perp,r_out_perp))) * hitParams.normalv;
-                    stack[top_stack] = Ray(hitParams.underPoint, r_out_perp + r_out_parallel); 
+
+                    top_stack = top_stack + 1;
+                    stack[top_stack] = Ray(hitParams.underPoint,pixel.x, r_out_perp + r_out_parallel,pixel.y); 
                     // direction = refract(unit_direction, rec.normal, refraction_ratio);
                 }
             }
             else if (ob_params.material.reflective > 0.0) {
                 top_stack = top_stack + 1;
-                stack[top_stack] = Ray(hitParams.overPoint, hitParams.reflectv);
+                stack[top_stack] = Ray(hitParams.overPoint,pixel.x, hitParams.reflectv,pixel.y);
             }
 
 

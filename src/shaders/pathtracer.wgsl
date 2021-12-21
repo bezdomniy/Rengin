@@ -22,12 +22,13 @@ struct NodeInner {
 
 
 struct HitParams {
-    point: vec4<f32>;
-    normalv: vec4<f32>;
-    eyev: vec4<f32>;
-    reflectv: vec4<f32>;
-    overPoint: vec4<f32>;
-    underPoint: vec4<f32>;
+    point: vec3<f32>;
+    normalv: vec3<f32>;
+    eyev: vec3<f32>;
+    reflectv: vec3<f32>;
+    overPoint: vec3<f32>;
+    underPoint: vec3<f32>;
+    front_face: bool;
 };
 
 struct Material {
@@ -50,8 +51,10 @@ struct Camera {
     width: i32;
 };
 
+
 struct UBO {
-    lightPos: vec4<f32>;
+    lightPos: vec3<f32>;
+    _padding: u32;
     camera: Camera;
     n_objects: i32;
     subpixel_idx: u32;
@@ -62,14 +65,22 @@ struct UBO {
     // padding: array<u32,2>;
 };
 
+// 
+// struct BVH {
+//     InnerNodes: [[stride(32)]] array<NodeInner>;
+//     LeafNodes: [[stride(128)]] array<NodeLeaf>;
+// };
+
 
 struct InnerNodes {
     InnerNodes: [[stride(32)]] array<NodeInner>;
 };
 
+
 struct LeafNodes {
     LeafNodes: [[stride(48)]] array<NodeLeaf>;
 };
+
 
 struct Normals {
     Normals: [[stride(48)]] array<Normal>;
@@ -83,14 +94,17 @@ struct ObjectParam {
     is_light: u32;
 };
 
+
 struct ObjectParams {
     ObjectParams: [[stride(144)]] array<ObjectParam>;
     // ObjectParams: [[stride(96)]] array<ObjectParam>;
 };
 
 struct Ray {
-    rayO: vec4<f32>;
-    rayD: vec4<f32>;
+    rayO: vec3<f32>;
+    x: u32;
+    rayD: vec3<f32>;
+    y: u32;
 };
 
 struct Intersection {
@@ -120,7 +134,7 @@ let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
 let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio 
 // let RAYS_PER_PIXEL: u32 = 4u;  
-let RAY_BOUNCES: i32 = 5;
+let RAY_BOUNCES: i32 = 8;
 
 fn gold_noise(xy: vec2<f32>, seed: f32) -> f32 {
     return fract(tan(distance(xy*PHI, xy)*seed)*xy.x);
@@ -193,7 +207,7 @@ fn rayForPixel(p: vec2<u32>, sqrt_rays_per_pixel: u32, current_ray_index: u32, h
 
     let rayO: vec4<f32> = ubo.camera.inverseTransform * vec4<f32>(0.0, 0.0, 0.0, 1.0);
 
-    return Ray(rayO, normalize(pixel - rayO));
+    return Ray(rayO.xyz, p.x, normalize(pixel - rayO).xyz,p.y);
 }
 
 
@@ -241,21 +255,21 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -
     let e1: vec3<f32> = triangle.point2 - triangle.point1;
     let e2: vec3<f32> = triangle.point3 - triangle.point1;
 
-    let dirCrossE2: vec3<f32> = cross(ray.rayD.xyz, e2);
+    let dirCrossE2: vec3<f32> = cross(ray.rayD, e2);
     let det: f32 = dot(e1, dirCrossE2);
     // if (abs(det) < EPSILON) {
     //     return Intersection(inIntersection.uv,inIntersection.id,-1.0);
     // }
 
     let f: f32 = 1.0 / det;
-    let p1ToOrigin: vec3<f32> = (ray.rayO.xyz - triangle.point1);
+    let p1ToOrigin: vec3<f32> = (ray.rayO - triangle.point1);
     uv.x = f * dot(p1ToOrigin, dirCrossE2);
     // if (uv.x < 0.0 || uv.x > 1.0) {
     //   return Intersection(inIntersection.uv,inIntersection.id,-1.0);
     // }
 
     let originCrossE1: vec3<f32>  = cross(p1ToOrigin, e1);
-    uv.y = f * dot(ray.rayD.xyz, originCrossE1);
+    uv.y = f * dot(ray.rayD, originCrossE1);
     // uv.y =1.0;
 
     // if (uv.y < 0.0 || (uv.x + uv.y) > 1.0) {
@@ -326,7 +340,7 @@ fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: i32) -> In
     // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
     var ret: Intersection = inIntersection;
 
-    let sphereToRay = ray.rayO - vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    let sphereToRay = ray.rayO;
     let a = dot(ray.rayD, ray.rayD);
     let b = 2.0 * dot(ray.rayD, sphereToRay);
     let c = dot(sphereToRay, sphereToRay) - 1.0;
@@ -377,7 +391,7 @@ fn intersect(ray: Ray) -> Intersection {
     // TODO: fix loop range - get number of objects
     for (var i: i32 = 0; i < ubo.n_objects; i = i+1) {
         let ob_params = object_params.ObjectParams[i];
-        let nRay: Ray = Ray(ob_params.inverse_transform * ray.rayO, ob_params.inverse_transform * ray.rayD);
+        let nRay: Ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO,1.0)).xyz, ray.x, (ob_params.inverse_transform * vec4<f32>(ray.rayD,0.0)).xyz, ray.y);
 
         if (ob_params.len_leaf_nodes > 0) {
             // Triangle mesh
@@ -404,29 +418,29 @@ fn intersect(ray: Ray) -> Intersection {
     return ret;
 }
 
-fn normalToWorld(normal: vec4<f32>, object_id: u32) -> vec4<f32>
+fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
 {
-    let ret: vec4<f32> = normalize(vec4<f32>((transpose(object_params.ObjectParams[object_id].inverse_transform) * normal).xyz,0.0));
+    let ret: vec3<f32> = normalize((transpose(object_params.ObjectParams[object_id].inverse_transform) * vec4<f32>(normal,0.0)).xyz);
     // ret.w = 0.0;
     // ret = normalize(ret);
 
     return ret;
 }
 
-fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4<f32> {
+fn normalAt(point: vec3<f32>, intersection: Intersection, typeEnum: i32) -> vec3<f32> {
     if (typeEnum == 0) {
         let normal: Normal = normal_nodes.Normals[intersection.id];
-        return normalToWorld((normal.normal2 * intersection.uv.x + normal.normal3 * intersection.uv.y + normal.normal1 * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
+        return normalToWorld((normal.normal2.xyz * intersection.uv.x + normal.normal3.xyz * intersection.uv.y + normal.normal1.xyz * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
         // n.w = 0.0;
     }
      else if (typeEnum == 1) { //Sphere
-        let objectPoint = object_params.ObjectParams[intersection.model_id].inverse_transform * point;
-        return objectPoint - vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(point,1.0)).xyz;
+        return objectPoint;
     }
      else if (typeEnum == 2) { //Plane
-        return normalToWorld(vec4<f32>(0.0, 1.0, 0.0, 0.0),intersection.model_id);
+        return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),intersection.model_id);
     }
-    return vec4<f32>(0.0);
+    return vec3<f32>(0.0);
 }
 
 
@@ -457,60 +471,36 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: i32) -> HitParam
     hitParams.underPoint =
         hitParams.point - hitParams.normalv * EPSILON;
 
+    // get_refractive_index_from_to(intersections, intersection, comps);
+    hitParams.front_face = dot(ray.rayD, hitParams.normalv) < 0.0;
+    if (!hitParams.front_face) {
+        hitParams.normalv = -hitParams.normalv;
+    }
+
     return hitParams;
 }
 
-fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams) -> vec4<f32>
+fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
 {
-  // return material.colour;
-  var diffuse: vec4<f32>;
-  var specular: vec4<f32>;
+  let v: vec3<f32> = lightPos - point;
+  let distance: f32 = length(v);
+  let direction: vec3<f32> = normalize(v);
 
-  let intensity: vec4<f32> = vec4<f32>(1.0,1.0,1.0,1.0); // TODO temp placeholder
+  let intersection: Intersection = intersect(Ray(point,0u,direction,0u));
 
-  let effectiveColour: vec4<f32> = intensity * material.colour; //* light->intensity;
-
-  let ambient: vec4<f32> = effectiveColour * material.ambient;
-  // vec4 ambient = vec4(0.3,0.0,0.0,1.0);
-
-  let lightv: vec4<f32> = normalize(lightPos - hitParams.overPoint);
-
-  let lightDotNormal: f32 = dot(lightv, hitParams.normalv);
-  if (lightDotNormal < 0.0)
+  if (intersection.closestT > EPSILON && intersection.closestT < distance)
   {
-    diffuse = vec4<f32>(0.0, 0.0, 0.0,1.0);
-    specular = vec4<f32>(0.0, 0.0, 0.0,1.0);
-  }
-  else
-  {
-    // compute the diffuse contribution​
-    diffuse = effectiveColour * material.diffuse * lightDotNormal;
-
-    // reflect_dot_eye represents the cosine of the angle between the
-    // reflection vector and the eye vector. A negative number means the
-    // light reflects away from the eye.​
-    let reflectv: vec4<f32> = reflect(-lightv, hitParams.normalv);
-    let reflectDotEye: f32 = dot(reflectv, hitParams.eyev);
-
-    if (reflectDotEye <= 0.0)
-    {
-      specular = vec4<f32>(0.0, 0.0, 0.0,1.0);
-    }
-    else
-    {
-      // compute the specular contribution​
-      let factor: f32 = pow(reflectDotEye, material.shininess);
-      specular = intensity * material.specular * factor;
-    }
+    return true;
   }
 
-  return (ambient + diffuse + specular);
+  return false;
 }
 
-// let MAX_STACK_SIZE:i32 = 25;
-// var topStack: i32 = -1;
-// var<private> stack: [[stride(8)]] array<Node,MAX_STACK_SIZE>;
-
+fn reflectance(cosine:f32, ref_idx: f32) -> f32 {
+    // Use Schlick's approximation for reflectance.
+    let r0 = ((1.0-ref_idx) / (1.0+ref_idx))*2.0;
+    return r0 + (1.0-r0)*pow((1.0 - cosine),5.0);
+}
 
 struct Node {
     hit_colour: vec4<f32>;
@@ -561,15 +551,15 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
         }
 
         let hitParams: HitParams = getHitParams(new_ray, intersection, type_enum);
-        // var scatterTarget: vec4<f32> = hitParams.normalv + vec4<f32>(hemisphericalRand(1.0,hitParams.normalv.xyz,new_ray.rayD.xyz,ubo.rnd_seed), 0.0);
-        var scatterTarget: vec4<f32> = hitParams.normalv + vec4<f32>(sphericalRand(1.0,new_ray.rayD.xyz,f32(ubo.subpixel_idx)), 0.0);
+        // var scatterTarget: vec4<f32> = hitParams.normalv + hemisphericalRand(1.0,hitParams.normalv.xyz,new_ray.rayD.xyz,ubo.rnd_seed);
+        var scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.rayD.xyz,f32(ubo.subpixel_idx));
 
         if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON )
         {
             scatterTarget = hitParams.normalv;
         }
 
-        new_ray = Ray(hitParams.overPoint, scatterTarget);
+        new_ray = Ray(hitParams.overPoint, pixel.x, scatterTarget, pixel.y);
 
         let hit_colour = ob_params.material.colour;
 
@@ -602,24 +592,13 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
 
 }
 
-fn random_float(seed: u32) -> f32 {
-    var x = seed;
-    x = x ^ (x >> 13u);
-    x = x ^ (x << 17u);
-    x = x ^ (x >> 5u);
-    // *seed = x;
-    let float_bits = (x & 0x007FFFFFu) | 0x3F800000u;
-    let float = unpack2x16float(float_bits).x;
-    return float - 1.0;
-}
 
-
-
-[[stage(compute), workgroup_size(16, 16)]]
+[[stage(compute), workgroup_size(8, 8)]]
 fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
-        ) {
+        ) 
+{
 
     var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
     if (ubo.subpixel_idx > 0u) {
@@ -638,37 +617,7 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
     color.g = clamp(color.g,0.0,0.999);
     color.b = clamp(color.b,0.0,0.999);
     color.a = clamp(color.a,0.0,0.999);
-
-
-    // var color: vec4<f32> = vec4<f32>(f32(ubo.subpixel_idx)/4.0,0.0,0.0,1.0);
-
-    // let r = rand(vec2<f32>(f32(global_invocation_id.xy.x),f32(global_invocation_id.xy.y)), ubo.rnd_seed);
-
-    // let seed = u32(ubo.rnd_seed);
-    // let seed = global_invocation_id.x*global_invocation_id.y*u32(ubo.rnd_seed*10.0);
-    // let r = random_float(seed);
-
-    // let v = 0.152;
-    // let pos = (vec2<f32>(global_invocation_id.xy) * v + ubo.rnd_seed * 1500. + 50.0);
-
-    // let r = rand2(vec2<f32>(global_invocation_id.xy),ubo.rnd_seed);
-    // var col = vec3<f32>(r,r,r);
-
-    // col = mix(vec3<f32>(.4, 0.0, 0.0), col, smoothStep(.5, .495, f32(global_invocation_id.xy.x)) + smoothStep(.5, .505, f32(global_invocation_id.xy.x)));
     
-    // let color = vec4<f32>(col.x,col.y,col.z,1.0);
 
-
-    // if (ubo.subpixel_idx == 1u) {
-    //     color = color + vec4<f32>(1.0,0.0,0.0,1.0);
-    // }
-    // else if (ubo.subpixel_idx == 2u) {
-    //     color = color + vec4<f32>(0.0,1.0,0.0,1.0);
-    // }
-    // else if (ubo.subpixel_idx == 3u) {
-    //     color = color + vec4<f32>(0.0,0.0,1.0,1.0);
-    // }
-
-// Does this just overwrite the pixel?
     textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }
