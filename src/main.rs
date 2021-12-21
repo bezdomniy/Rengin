@@ -50,10 +50,10 @@ use crate::renderer::wgpu_utils::RenginWgpu;
 
 static WIDTH: u32 = 800;
 static HEIGHT: u32 = 600;
-static WORKGROUP_SIZE: [u32; 3] = [4, 4, 1];
+static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
 
-static FRAMERATE: f64 = 5.0;
-static RAYS_PER_PIXEL: u32 = 32;
+static FRAMERATE: f64 = 30.0;
+static RAYS_PER_PIXEL: u32 = 4;
 
 //TODO: try doing passes over parts of the image instead of whole at a time
 //      that way you can maintain framerate
@@ -145,23 +145,26 @@ impl RenderApp {
         let transform3 = Mat4::from_translation(Vec3::new(3f32, -3f32, -1f32));
         let transform4 = Mat4::from_translation(Vec3::new(0f32, 1.5f32, 0f32));
         let transform5 = rotate90_x * Mat4::from_translation(Vec3::new(0f32, 0f32, 3f32));
-        let transform6 = rotate90_z * Mat4::from_translation(Vec3::new(-6f32, 0f32, 0f32));
-        let transform7 = rotate90_z * Mat4::from_translation(Vec3::new(6f32, 0f32, 0f32));
-        let transform8 = Mat4::from_translation(Vec3::new(0f32, -7f32, 0f32));
+        let transform6 = rotate90_z * Mat4::from_translation(Vec3::new(-10f32, 0f32, 0f32));
+        let transform7 = rotate90_z * Mat4::from_translation(Vec3::new(10f32, 0f32, 0f32));
+        let transform8 = Mat4::from_translation(Vec3::new(0f32, -10f32, 0f32));
         // let transform4 = Mat4::IDENTITY;
         // let transform2 = Mat4::IDENTITY;
 
         let object_param0 = ObjectParams::new(
             transform0,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial {
-                colour: Vec4::new(0.831, 0.537, 0.214, 1.0),
-                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                ambient: 0.1,
-                diffuse: 0.7,
-                specular: 0.3,
-                shininess: 200.0,
-            },
+            PtMaterial::new(
+                Vec4::new(0.831, 0.537, 0.214, 1.0),
+                Vec4::new(0.0, 0.0, 0.0, 0.0),
+                0.1,
+                0.7,
+                0.3,
+                200.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
             *self
                 .objects
                 .as_ref()
@@ -176,19 +179,23 @@ impl RenderApp {
                 .len_leaf_nodes
                 .get(0)
                 .unwrap(),
+            0,
         );
 
         let object_param1 = ObjectParams::new(
             transform1,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial {
-                colour: Vec4::new(0.537, 0.831, 0.914, 1.0),
-                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                ambient: 0.1,
-                diffuse: 0.7,
-                specular: 0.3,
-                shininess: 200.0,
-            },
+            PtMaterial::new(
+                Vec4::new(0.537, 0.831, 0.914, 1.0),
+                Vec4::new(0.0, 0.0, 0.0, 0.0),
+                0.1,
+                0.7,
+                0.3,
+                200.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
             *self
                 .objects
                 .as_ref()
@@ -203,19 +210,23 @@ impl RenderApp {
                 .len_leaf_nodes
                 .get(1)
                 .unwrap(),
+            0,
         );
 
         let object_param2 = ObjectParams::new(
             // transform1,
             transform2,
-            PtMaterial {
-                colour: Vec4::new(0.837, 0.131, 0.114, 1.0),
-                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                ambient: 0.1,
-                diffuse: 0.7,
-                specular: 0.3,
-                shininess: 200.0,
-            },
+            PtMaterial::new(
+                Vec4::new(0.837, 0.131, 0.114, 1.0),
+                Vec4::new(0.0, 0.0, 0.0, 0.0),
+                0.1,
+                0.7,
+                0.3,
+                200.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
             *self
                 .objects
                 .as_ref()
@@ -230,95 +241,120 @@ impl RenderApp {
                 .len_leaf_nodes
                 .get(2)
                 .unwrap(),
+            0,
         );
 
         let object_param3 = ObjectParams::new(
             transform3,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial {
-                colour: Vec4::new(0.831, 0.537, 0.214, 1.0),
-                emissiveness: Vec4::new(7.0, 7.0, 7.0, 7.0),
-                ambient: 0.1,
-                diffuse: 0.7,
-                specular: 0.3,
-                shininess: 200.0,
-            },
+            PtMaterial::new(
+                Vec4::new(0.831, 0.537, 0.214, 1.0),
+                Vec4::new(7.0, 7.0, 7.0, 7.0),
+                0.1,
+                0.7,
+                0.3,
+                200.0,
+                1.0,
+                1.0,
+                0.0,
+            ),
             1,
             0,
+            1,
         );
 
         let object_param4 = ObjectParams::new(
             transform4,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial {
-                colour: Vec4::new(0.831, 0.537, 0.214, 1.0),
-                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                ambient: 0.1,
-                diffuse: 0.7,
-                specular: 0.3,
-                shininess: 200.0,
-            },
+            PtMaterial::new(
+                Vec4::new(0.831, 0.537, 0.214, 1.0),
+                Vec4::new(0.0, 0.0, 0.0, 0.0),
+                0.1,
+                0.7,
+                0.3,
+                200.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
             2,
+            0,
             0,
         );
 
         let object_param5 = ObjectParams::new(
             transform5,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial {
-                colour: Vec4::new(0.231, 0.537, 0.831, 1.0),
-                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                ambient: 0.1,
-                diffuse: 0.7,
-                specular: 0.3,
-                shininess: 200.0,
-            },
+            PtMaterial::new(
+                Vec4::new(0.231, 0.537, 0.831, 1.0),
+                Vec4::new(0.0, 0.0, 0.0, 0.0),
+                0.1,
+                0.7,
+                0.3,
+                200.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
             2,
+            0,
             0,
         );
 
         let object_param6 = ObjectParams::new(
             transform6,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial {
-                colour: Vec4::new(0.231, 0.537, 0.831, 1.0),
-                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                ambient: 0.1,
-                diffuse: 0.7,
-                specular: 0.3,
-                shininess: 200.0,
-            },
+            PtMaterial::new(
+                Vec4::new(0.231, 0.537, 0.831, 1.0),
+                Vec4::new(0.0, 0.0, 0.0, 0.0),
+                0.1,
+                0.7,
+                0.3,
+                200.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
             2,
+            0,
             0,
         );
 
         let object_param7 = ObjectParams::new(
             transform7,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial {
-                colour: Vec4::new(0.231, 0.537, 0.831, 1.0),
-                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                ambient: 0.1,
-                diffuse: 0.7,
-                specular: 0.3,
-                shininess: 200.0,
-            },
+            PtMaterial::new(
+                Vec4::new(0.231, 0.537, 0.831, 1.0),
+                Vec4::new(0.0, 0.0, 0.0, 0.0),
+                0.1,
+                0.7,
+                0.3,
+                200.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
             2,
+            0,
             0,
         );
 
         let object_param8 = ObjectParams::new(
             transform8,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial {
-                colour: Vec4::new(0.231, 0.537, 0.831, 1.0),
-                emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                ambient: 0.1,
-                diffuse: 0.7,
-                specular: 0.3,
-                shininess: 200.0,
-            },
+            PtMaterial::new(
+                Vec4::new(0.231, 0.537, 0.831, 1.0),
+                Vec4::new(0.0, 0.0, 0.0, 0.0),
+                0.1,
+                0.7,
+                0.3,
+                200.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
             2,
+            0,
             0,
         );
 
@@ -423,10 +459,6 @@ impl RenderApp {
                 }),
         );
 
-        // self.staging_belt = Some(StagingBelt::new(0x100));
-
-        // let texture_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
-
         self.buffers = Some(self.create_buffers());
         self.create_pipelines();
     }
@@ -438,7 +470,8 @@ impl RenderApp {
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                    "shaders/pathtracer.wgsl" // "shaders/raytracer.wgsl"
+                    // "shaders/pathtracer.wgsl"
+                    "shaders/raytracer.wgsl"
                 ))),
             });
 
@@ -848,6 +881,7 @@ impl RenderApp {
                             game_state.camera_up,
                         );
                         ubo.subpixel_idx = 0;
+                        ubo.update_random_seed();
                         *something_changed = true;
                     }
                 }
@@ -877,6 +911,7 @@ impl RenderApp {
                             game_state.camera_up,
                         );
                         ubo.subpixel_idx = 0;
+                        ubo.update_random_seed();
                         *something_changed = true;
                     }
                 }
@@ -906,6 +941,14 @@ impl RenderApp {
         }
     }
 
+    pub fn update(&mut self) {
+        self.renderer.queue.write_buffer(
+            self.buffers.as_ref().unwrap().get("ubo").unwrap(),
+            0,
+            bytemuck::bytes_of(&self.ubo.unwrap()),
+        );
+    }
+
     pub fn render(mut self, event_loop: EventLoop<()>) {
         let mut last_update_inst = Instant::now();
         let mut left_mouse_down = false;
@@ -914,6 +957,34 @@ impl RenderApp {
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
             match event {
+                Event::MainEventsCleared => {
+                    // // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
+                    //     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
+                    //     let time_since_last_frame = last_update_inst.elapsed();
+
+                    //     if (something_changed
+                    //         || self.ubo.as_ref().unwrap().subpixel_idx < RAYS_PER_PIXEL)
+                    //         && time_since_last_frame >= target_frametime
+                    //         && (!left_mouse_down || self.renderer.continous_motion)
+                    //     {
+                    //         println!("Drawing ray index: {}", self.ubo.unwrap().subpixel_idx);
+
+                    //         self.renderer.window.request_redraw();
+
+                    //         // if let Some(ref mut x) = self.ubo {
+                    //         //     x.subpixel_idx += 1;
+                    //         // }
+
+                    //         println!("render time: {:?}", time_since_last_frame);
+                    //         something_changed = false;
+
+                    //         last_update_inst = Instant::now();
+                    //     } else {
+                    //         *control_flow = ControlFlow::WaitUntil(
+                    //             Instant::now() + target_frametime - time_since_last_frame,
+                    //         );
+                    //     }
+                }
                 Event::RedrawEventsCleared => {
                     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                     let time_since_last_frame = last_update_inst.elapsed();
@@ -924,6 +995,10 @@ impl RenderApp {
                         && (!left_mouse_down || self.renderer.continous_motion)
                     {
                         println!("Drawing ray index: {}", self.ubo.unwrap().subpixel_idx);
+
+                        // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
+                        // self.renderer.instance.poll_all(true);
+                        self.renderer.device.poll(wgpu::Maintain::Wait);
 
                         self.renderer.window.request_redraw();
 
@@ -1121,10 +1196,12 @@ impl RenderApp {
                     }
                 },
                 Event::RedrawRequested(_) => {
+                    // self.renderer.queue.submit(None);
                     // println!("blocking");
                     // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
                     // println!("done");
                     // println!("redrawing");
+                    self.update();
                     let frame = match self.renderer.window_surface.get_current_texture() {
                         Ok(frame) => frame,
                         Err(_) => {
@@ -1161,23 +1238,6 @@ impl RenderApp {
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                    // wgpu::BufferSize::new(mem::size_of::<UBO>() as _)
-
-                    // println!("{}", self.ubo.unwrap().camera.inverse_transform);
-                    let mut staging_belt = StagingBelt::new(0x100);
-                    staging_belt
-                        .write_buffer(
-                            &mut command_encoder,
-                            self.buffers.as_ref().unwrap().get("ubo").unwrap(),
-                            0,
-                            wgpu::BufferSize::new(mem::size_of::<UBO>() as wgpu::BufferAddress)
-                                .unwrap(),
-                            &self.renderer.device,
-                        )
-                        .copy_from_slice(bytemuck::bytes_of(&self.ubo.unwrap()));
-
-                    staging_belt.finish();
-
                     command_encoder.push_debug_group("compute ray trace");
                     {
                         // compute pass
@@ -1205,7 +1265,10 @@ impl RenderApp {
                     }
                     command_encoder.pop_debug_group();
 
-                    self.renderer.queue.submit(Some(command_encoder.finish()));
+                    self.renderer
+                        .queue
+                        .submit(std::iter::once(command_encoder.finish()));
+
                     frame.present();
 
                     if let Some(ref mut x) = self.ubo {

@@ -1,4 +1,5 @@
 use glam::{const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4};
+use rand::Rng;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -8,6 +9,10 @@ pub struct Material {
     pub diffuse: f32,
     pub specular: f32,
     pub shininess: f32,
+    pub reflective: f32,
+    pub transparency: f32,
+    pub refractive_index: f32,
+    _padding: u32,
 }
 
 #[repr(C)]
@@ -19,6 +24,37 @@ pub struct PtMaterial {
     pub diffuse: f32,
     pub specular: f32,
     pub shininess: f32,
+    pub reflective: f32,
+    pub transparency: f32,
+    pub refractive_index: f32,
+    _padding: u32,
+}
+
+impl PtMaterial {
+    pub fn new(
+        colour: Vec4,
+        emissiveness: Vec4,
+        ambient: f32,
+        diffuse: f32,
+        specular: f32,
+        shininess: f32,
+        reflective: f32,
+        transparency: f32,
+        refractive_index: f32,
+    ) -> Self {
+        PtMaterial {
+            colour,
+            emissiveness,
+            ambient,
+            diffuse,
+            specular,
+            shininess,
+            reflective,
+            transparency,
+            refractive_index,
+            _padding: 0,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -34,7 +70,8 @@ pub struct ObjectParams {
     pub material: PtMaterial,
     pub len_inner_nodes: u32,
     pub len_leaf_nodes: u32,
-    _padding: [u32; 2],
+    pub is_light: u32,
+    _padding: [u32; 1],
 }
 
 impl ObjectParams {
@@ -43,13 +80,15 @@ impl ObjectParams {
         material: PtMaterial,
         len_inner_nodes: u32,
         len_leaf_nodes: u32,
+        is_light: u32,
     ) -> Self {
         ObjectParams {
             inverse_transform,
             material,
             len_inner_nodes,
             len_leaf_nodes,
-            _padding: [0u32, 0u32],
+            is_light,
+            _padding: [0u32],
         }
     }
 }
@@ -145,7 +184,8 @@ pub struct UBO {
     n_objects: u32,
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
-    _padding: [u32; 1],
+    rnd_seed: f32,
+    // _padding: [u32; 1],
 }
 
 impl UBO {
@@ -161,12 +201,12 @@ impl UBO {
             n_objects,
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
-            _padding: [0; 1],
+            rnd_seed: rand::thread_rng().gen_range(0.0..1.0),
         }
     }
 
-    pub fn set_ray_idx(&mut self, idx: &u32) {
-        self.subpixel_idx = *idx;
+    pub fn update_random_seed(&mut self) {
+        self.rnd_seed = rand::thread_rng().gen_range(0.0..1.0);
     }
 }
 

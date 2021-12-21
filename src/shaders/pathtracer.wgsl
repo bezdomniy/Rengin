@@ -37,6 +37,9 @@ struct Material {
     diffuse: f32;
     specular: f32;
     shininess: f32;
+    reflective: f32;
+    transparency: f32;
+    refractive_index: f32;
 };
 
 struct Camera {
@@ -53,6 +56,7 @@ struct UBO {
     n_objects: i32;
     subpixel_idx: u32;
     sqrt_rays_per_pixel: u32;
+    rnd_seed: f32;
     // max_inner_node_idx: i32;
     // max_leaf_node_idx: i32;
     // padding: array<u32,2>;
@@ -76,10 +80,11 @@ struct ObjectParam {
     material: Material;
     len_inner_nodes:i32;
     len_leaf_nodes:i32;
+    is_light: u32;
 };
 
 struct ObjectParams {
-    ObjectParams: [[stride(128)]] array<ObjectParam>;
+    ObjectParams: [[stride(144)]] array<ObjectParam>;
     // ObjectParams: [[stride(96)]] array<ObjectParam>;
 };
 
@@ -125,8 +130,19 @@ fn rand(xy: vec2<f32>, seed: f32) -> f32 {
     return fract(sin(dot(xy +seed,vec2<f32>(12.9898,78.233))) * 43758.5453+seed);
 }
 
+fn rand2(xy: vec2<f32>,seed:f32) -> f32
+{
+    let v = 0.152;
+    let pos = (xy * v + ubo.rnd_seed * 1500. + 50.0);
+
+	var p3 = fract(vec3<f32>(pos.xyx) * 0.1031);
+    p3 = p3 + dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
 fn rescale(value: f32, min: f32, max: f32) -> f32 {
     return (value * (max - min)) + min;
+    // return (((value + 1.0) * (max - min)) / 2.0) + min;
 }
 
 fn linearRand(min: f32, max: f32, xy: vec2<f32>, seed: f32) -> f32 {
@@ -146,6 +162,15 @@ fn sphericalRand(radius: f32, xyz: vec3<f32>, seed: f32) -> vec3<f32>
     let z: f32 = cos(phi);
 
     return vec3<f32>(x,y,z) * radius;
+}
+
+fn hemisphericalRand(radius: f32, normal: vec3<f32>, xyz: vec3<f32>, seed: f32) -> vec3<f32>
+{
+    let in_unit_sphere = sphericalRand(radius,xyz,seed);
+    if (dot(in_unit_sphere, normal) > 0.0) { // In the same hemisphere as the normal
+        return in_unit_sphere;
+    }
+    return -in_unit_sphere;
 }
 
 fn rayForPixel(p: vec2<u32>, sqrt_rays_per_pixel: u32, current_ray_index: u32, half_sub_pixel_size: f32) -> Ray {
@@ -404,14 +429,6 @@ fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4
     return vec4<f32>(0.0);
 }
 
-struct HitParams {
-    point: vec4<f32>;
-    normalv: vec4<f32>;
-    eyev: vec4<f32>;
-    reflectv: vec4<f32>;
-    overPoint: vec4<f32>;
-    underPoint: vec4<f32>;
-};
 
 fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: i32) -> HitParams
 {
@@ -500,12 +517,7 @@ struct Node {
     emissiveness: vec4<f32>;
 };
 
-struct RenderReturn {
-    color: vec4<f32>;
-    intersection_found: bool;
-};
-
-fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> RenderReturn {
+fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
     var uv: vec2<f32>;
@@ -520,8 +532,6 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
     var stack: array<Node,RAY_BOUNCES>;
     var top_stack = -1;
 
-    var intersection_found = false;
-
     
     for (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1) {
         // Get intersected object ID
@@ -529,20 +539,36 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
         
         if (intersection.closestT >= MAXLEN || intersection.id == -1)
         {
+            // let unit_direction = normalize(new_ray.rayD);
+            // let t = 0.5*(unit_direction.y + 1.0);
+            // top_stack = top_stack + 1;
+            // stack[top_stack] = Node((1.0-t)*vec4<f32>(1.0, 1.0, 1.0, 1.0) + t*vec4<f32>(0.5, 0.7, 1.0, 1.0),vec4<f32>(0.0,0.0,0.0,0.0));
+
             break;
         }
 
-        intersection_found = true;
-
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
+
+        if (ob_params.is_light != 0u) {
+            top_stack = top_stack + 1;
+            stack[top_stack] = Node(vec4<f32>(0.0,0.0,0.0,0.0),ob_params.material.emissiveness);
+            break;
+        }
         type_enum = 0;
         if (ob_params.len_leaf_nodes == 0) {
             type_enum = ob_params.len_inner_nodes;
         }
 
         let hitParams: HitParams = getHitParams(new_ray, intersection, type_enum);
-        let scatterTarget: vec4<f32> = hitParams.normalv + vec4<f32>(sphericalRand(1.0,new_ray.rayD.xyz,f32(ubo.subpixel_idx)), 0.0);
+        // var scatterTarget: vec4<f32> = hitParams.normalv + vec4<f32>(hemisphericalRand(1.0,hitParams.normalv.xyz,new_ray.rayD.xyz,ubo.rnd_seed), 0.0);
+        var scatterTarget: vec4<f32> = hitParams.normalv + vec4<f32>(sphericalRand(1.0,new_ray.rayD.xyz,f32(ubo.subpixel_idx)), 0.0);
+
+        if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON )
+        {
+            scatterTarget = hitParams.normalv;
+        }
+
         new_ray = Ray(hitParams.overPoint, scatterTarget);
 
         let hit_colour = ob_params.material.colour;
@@ -553,19 +579,6 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
 
         top_stack = top_stack + 1;
         stack[top_stack] = Node(hit_colour,ob_params.material.emissiveness);
-
-        // push_stack(Node(hit_colour,ob_params.material.emissiveness));
-
-        // color = ob_params.material.emissiveness + color * hit_colour;
-        // if (color.x == 0.0) {
-        //     color = hit_colour;
-        // }
-        // else {
-        //     color = color * hit_colour;
-        // }
-        
-
-        // return hit->shapePtr->getMaterial()->emissiveness + hitColour * pathColourAt(newRay, world, intersections, remaining - 1);
 
 
     }
@@ -580,16 +593,29 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
         }
         let node = stack[top_stack];
         top_stack = top_stack - 1;
+        // color = color * node.hit_colour;
         color = node.emissiveness + color * node.hit_colour;
 
     }
  
-    return RenderReturn(color, intersection_found);
-    
-    // return (color,intersection.id);
+    return color;
+
 }
 
-[[stage(compute), workgroup_size(4, 4)]]
+fn random_float(seed: u32) -> f32 {
+    var x = seed;
+    x = x ^ (x >> 13u);
+    x = x ^ (x << 17u);
+    x = x ^ (x >> 5u);
+    // *seed = x;
+    let float_bits = (x & 0x007FFFFFu) | 0x3F800000u;
+    let float = unpack2x16float(float_bits).x;
+    return float - 1.0;
+}
+
+
+
+[[stage(compute), workgroup_size(16, 16)]]
 fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
@@ -602,11 +628,11 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
     }
 
     let half_sub_pixel_size = 1.0 / f32(ubo.sqrt_rays_per_pixel) / 2.0;
-    let render_ret: RenderReturn = renderScene(global_invocation_id.xy,ubo.subpixel_idx,ubo.sqrt_rays_per_pixel,half_sub_pixel_size);
+    let ray_color = renderScene(global_invocation_id.xy,ubo.subpixel_idx,ubo.sqrt_rays_per_pixel,half_sub_pixel_size);
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
-    color = (color * (1.0 - scale)) + (render_ret.color * scale);
+    color = (color * (1.0 - scale)) + (ray_color * scale);
 
     color.r = clamp(color.r,0.0,0.999);
     color.g = clamp(color.g,0.0,0.999);
@@ -615,10 +641,24 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
 
 
     // var color: vec4<f32> = vec4<f32>(f32(ubo.subpixel_idx)/4.0,0.0,0.0,1.0);
-    // var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
 
+    // let r = rand(vec2<f32>(f32(global_invocation_id.xy.x),f32(global_invocation_id.xy.y)), ubo.rnd_seed);
 
+    // let seed = u32(ubo.rnd_seed);
+    // let seed = global_invocation_id.x*global_invocation_id.y*u32(ubo.rnd_seed*10.0);
+    // let r = random_float(seed);
+
+    // let v = 0.152;
+    // let pos = (vec2<f32>(global_invocation_id.xy) * v + ubo.rnd_seed * 1500. + 50.0);
+
+    // let r = rand2(vec2<f32>(global_invocation_id.xy),ubo.rnd_seed);
+    // var col = vec3<f32>(r,r,r);
+
+    // col = mix(vec3<f32>(.4, 0.0, 0.0), col, smoothStep(.5, .495, f32(global_invocation_id.xy.x)) + smoothStep(.5, .505, f32(global_invocation_id.xy.x)));
     
+    // let color = vec4<f32>(col.x,col.y,col.z,1.0);
+
+
     // if (ubo.subpixel_idx == 1u) {
     //     color = color + vec4<f32>(1.0,0.0,0.0,1.0);
     // }

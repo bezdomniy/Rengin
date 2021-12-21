@@ -28,6 +28,7 @@ struct HitParams {
     reflectv: vec4<f32>;
     overPoint: vec4<f32>;
     underPoint: vec4<f32>;
+    front_face: bool;
 };
 
 struct Material {
@@ -37,6 +38,9 @@ struct Material {
     diffuse: f32;
     specular: f32;
     shininess: f32;
+    reflective: f32;
+    transparency: f32;
+    refractive_index: f32;
 };
 
 struct Camera {
@@ -52,6 +56,9 @@ struct UBO {
     lightPos: vec4<f32>;
     camera: Camera;
     n_objects: i32;
+    subpixel_idx: u32;
+    sqrt_rays_per_pixel: u32;
+    rnd_seed: f32;
     // max_inner_node_idx: i32;
     // max_leaf_node_idx: i32;
     // padding: array<u32,2>;
@@ -87,7 +94,7 @@ struct ObjectParam {
 
 
 struct ObjectParams {
-    ObjectParams: [[stride(128)]] array<ObjectParam>;
+    ObjectParams: [[stride(144)]] array<ObjectParam>;
     // ObjectParams: [[stride(96)]] array<ObjectParam>;
 };
 
@@ -120,10 +127,35 @@ let EPSILON:f32 = 0.0001;
 let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
+let RAY_BOUNCES: i32 = 5;
 
-fn rayForPixel(p: vec2<u32>) -> Ray {
-    let xOffset: f32 = (f32(p.x) + 0.5) * ubo.camera.pixelSize;
-    let yOffset: f32 = (f32(p.y) + 0.5) * ubo.camera.pixelSize;
+
+fn rand(xy: vec2<f32>, seed: f32) -> f32 {
+    return fract(sin(dot(xy +seed,vec2<f32>(12.9898,78.233))) * 43758.5453+seed);
+}
+
+fn rand2(xy: vec2<f32>,seed:f32) -> f32
+{
+    let v = 0.152;
+    let pos = (xy * v + ubo.rnd_seed * 1500. + 50.0);
+
+	var p3 = fract(vec3<f32>(pos.xyx) * 0.1031);
+    p3 = p3 + dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+fn rayForPixel(p: vec2<u32>, sqrt_rays_per_pixel: u32, current_ray_index: u32, half_sub_pixel_size: f32) -> Ray {
+    
+    let sub_pixel_row_number: u32 = current_ray_index / sqrt_rays_per_pixel;
+    let sub_pixel_col_number: u32 = current_ray_index % sqrt_rays_per_pixel;
+    let sub_pixel_x_offset: f32 = half_sub_pixel_size * f32(sub_pixel_col_number);
+    let sub_pixel_y_offset: f32 = half_sub_pixel_size * f32(sub_pixel_row_number);
+
+    let xOffset: f32 = (f32(p.x) + sub_pixel_x_offset) * ubo.camera.pixelSize;
+    let yOffset: f32 = (f32(p.y) + sub_pixel_y_offset) * ubo.camera.pixelSize;
+
+    // let xOffset: f32 = (f32(p.x) / 0.5) * ubo.camera.pixelSize;
+    // let yOffset: f32 = (f32(p.y) / 0.5) * ubo.camera.pixelSize;
 
     let worldX: f32 = ubo.camera.halfWidth - xOffset;
     let worldY: f32 = ubo.camera.halfHeight - yOffset;
@@ -368,14 +400,6 @@ fn normalAt(point: vec4<f32>, intersection: Intersection, typeEnum: i32) -> vec4
     return vec4<f32>(0.0);
 }
 
-struct HitParams {
-    point: vec4<f32>;
-    normalv: vec4<f32>;
-    eyev: vec4<f32>;
-    reflectv: vec4<f32>;
-    overPoint: vec4<f32>;
-    underPoint: vec4<f32>;
-};
 
 fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: i32) -> HitParams
 {
@@ -404,6 +428,12 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: i32) -> HitParam
     hitParams.underPoint =
         hitParams.point - hitParams.normalv * EPSILON;
 
+    // get_refractive_index_from_to(intersections, intersection, comps);
+    hitParams.front_face = dot(ray.rayD, hitParams.normalv) < 0.0;
+    if (!hitParams.front_face) {
+        hitParams.normalv = -hitParams.normalv;
+    }
+
     return hitParams;
 }
 
@@ -421,6 +451,12 @@ fn isShadowed(point: vec4<f32>, lightPos: vec4<f32>) -> bool
   }
 
   return false;
+}
+
+fn reflectance(cosine:f32, ref_idx: f32) -> f32 {
+    // Use Schlick's approximation for reflectance.
+    let r0 = ((1.0-ref_idx) / (1.0+ref_idx))*2.0;
+    return r0 + (1.0-r0)*pow((1.0 - cosine),5.0);
 }
 
 fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams, shadowed: bool) -> vec4<f32>
@@ -473,87 +509,153 @@ fn lighting(material: Material, lightPos: vec4<f32>, hitParams: HitParams, shado
   return (ambient + diffuse + specular);
 }
 
-
-fn renderScene(ray: Ray) -> vec4<f32> {
+fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
     var uv: vec2<f32>;
     var t: f32 = MAXLEN;
 
-    // Get intersected object ID
-    var intersection: Intersection = intersect(ray);
+    // var ray: Ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
+
+    let init_ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
+    var type_enum = 0;
+    // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
+
+    var stack: array<Ray,RAY_BOUNCES>;
+    var top_stack = -1;
+
+    top_stack = top_stack + 1;
+    stack[top_stack] = init_ray;
+
+
+// (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1)
     
-    if (intersection.closestT >= MAXLEN || intersection.id == -1)
-    {
-        // color = vec4<f32>(0.0,0.0,1.0,1.0);
-        return color;
-    }
-    
-    // vec4 pos = rayO + t * rayD;
-    // vec4 lightVec = normalize(ubo.lightPos - pos);       
-    // vec3 normal;
+    loop  {
+        if (top_stack < 0) { break }
 
-    // if (intersection.id >= 0) {
-    //   for (int i = 0; i < arrayLength(shapes); i++)
-    //   {
-    //     if (objectID == i)
-    //     {
-    //       HitParams hitParams = getHitParams(rayO, rayD, t, shapes[i].inverseTransform, shapes[i].typeEnum, shapes[i].data[3], shapes[i].data[4], shapes[i].data[5], uv);
+        let new_ray = stack[top_stack];
+        top_stack = top_stack - 1;
+        // Get intersected object ID
+        let intersection = intersect(new_ray);
+        
+        if (intersection.closestT >= MAXLEN || intersection.id == -1)
+        {
+            // let unit_direction = normalize(new_ray.rayD);
+            // let t = 0.5*(unit_direction.y + 1.0);
+            // top_stack = top_stack + 1;
+            // stack[top_stack] = (1.0-t)*vec4<f32>(1.0, 1.0, 1.0, 1.0) + t*vec4<f32>(0.5, 0.7, 1.0, 1.0);
 
-    //       bool shadowed = isShadowed(hitParams.overPoint, ubo.lightPos);
-    //       color = lighting(shapes[i].material, ubo.lightPos,
-    //                               hitParams, shadowed);
-    //       // color = vec4(1.0,0.0,0.0,1.0);
-    //     }
-    //   }
-    //     color = vec4<f32>(1.0,0.0,0.0,1.0);
-    // }
+            break;
+        }
 
-    // else {
-    if (intersection.id != -1) {
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
-        var type_enum = 0;
+
+        type_enum = 0;
         if (ob_params.len_leaf_nodes == 0) {
             type_enum = ob_params.len_inner_nodes;
         }
 
-        let hitParams: HitParams = getHitParams(ray, intersection, type_enum);
-
+        let hitParams: HitParams = getHitParams(new_ray, intersection, type_enum);
         let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
         // let shadowed = false;
-        color = lighting(ob_params.material, ubo.lightPos,
+        color = color + lighting(ob_params.material, ubo.lightPos,
                                 hitParams, shadowed);
-        color.w = 1.0;
 
-        // color.g = 0.0;
-        // color.g = 1.0;
-        // color.g = 0.0;
-        // color = vec4<f32>(0.0,1.0,0.0,1.0);
+        // if (ob_params.material.reflective > 0.0) {
+        //     top_stack = top_stack + 1;
+        //     stack[top_stack] = Ray(hitParams.overPoint, hitParams.reflectv);
+        // }
+
+        if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
+            if (ob_params.material.transparency > 0.0 && ob_params.material.refractive_index >= 1.0) {
+                var refraction_ratio = ob_params.material.refractive_index;
+                if (hitParams.front_face) {
+                    refraction_ratio=1.0/refraction_ratio;
+                }
+                // let cosI = dot(hitParams.eyev, hitParams.normalv);
+                // let sin2T = (refraction_ratio * refraction_ratio) * (1.0 - (cosI * cosI));
+
+                // if (sin2T <= 1.0)
+                // {
+                //     let cosT = sqrt(1.0 - sin2T);
+                //     let direction = hitParams.normalv * ((refraction_ratio * cosI) - cosT) - (hitParams.eyev * refraction_ratio);
+                //     top_stack = top_stack + 1;
+                //     stack[top_stack] = Ray(hitParams.underPoint, direction);
+                // }
+
+                let unit_direction = normalize(new_ray.rayD);
+                let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
+                let sin_theta = sqrt(1.0 - cos_theta*cos_theta);
+
+                let cannot_refract = refraction_ratio * sin_theta > 1.0;
+                var direction = vec4<f32>(0.0,0.0,0.0,0.0);
+
+                top_stack = top_stack + 1;
+                if (cannot_refract || reflectance(cos_theta, refraction_ratio) > rand(new_ray.rayD.xy,f32(top_stack)))
+                {
+                    if (ob_params.material.reflective > 0.0) {
+                        stack[top_stack] = Ray(hitParams.overPoint, hitParams.reflectv); 
+                    }
+                    
+                }
+                else {
+                    let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
+                    let r_out_perp =  refraction_ratio * (unit_direction + cos_theta*hitParams.normalv);
+                    let r_out_parallel = -sqrt(abs(1.0 - dot(r_out_perp,r_out_perp))) * hitParams.normalv;
+                    stack[top_stack] = Ray(hitParams.underPoint, r_out_perp + r_out_parallel); 
+                    // direction = refract(unit_direction, rec.normal, refraction_ratio);
+                }
+            }
+            else if (ob_params.material.reflective > 0.0) {
+                top_stack = top_stack + 1;
+                stack[top_stack] = Ray(hitParams.overPoint, hitParams.reflectv);
+            }
+
+
+
+        }
+
+        // new_ray = Ray(hitParams.overPoint, new_ray.rayD);
+
+        // let hit_colour = ob_params.material.colour;
+
+        // top_stack = top_stack + 1;
+        // stack[top_stack] = hit_colour;
+
+
     }
-    
+ 
     return color;
+
 }
+
 
 [[stage(compute), workgroup_size(8, 8)]]
 fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
-        ) {
-    let ray: Ray = rayForPixel(global_invocation_id.xy);
-    let color: vec4<f32> = renderScene(ray);
+        ) 
+{
 
-    // var color: vec4<f32> = vec4<f32>(0.0,1.0,0.0,1.0);
+    var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
+    if (ubo.subpixel_idx > 0u) {
+        let inUV = vec2<i32>(i32(global_invocation_id.x) ,i32(global_invocation_id.y) );
+        color = textureLoad(imageData,inUV);
+    }
 
-    // if (workgroup_id.x == u32(4) && workgroup_id.y == u32(4)) {
-    //     color = vec4<f32>(vec3<f32>(local_invocation_id.xyz)/255.0,1.0);
-    // }
+    let half_sub_pixel_size = 1.0 / f32(ubo.sqrt_rays_per_pixel) / 2.0;
+    let ray_color = renderScene(global_invocation_id.xy,ubo.subpixel_idx,ubo.sqrt_rays_per_pixel,half_sub_pixel_size);
 
-    // var color: vec4<f32> = vec4<f32>(f32(workgroup_id.x % 2u),f32(workgroup_id.y % 2u),0.0,1.0);
+    let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
-    // if (workgroup_id.x == u32(4) && workgroup_id.y == u32(4)) {
-    //     color = vec4<f32>(vec3<f32>(local_invocation_id.xyz)/255.0,1.0);
-    // }
+    color = (color * (1.0 - scale)) + (ray_color * scale);
+
+    color.r = clamp(color.r,0.0,0.999);
+    color.g = clamp(color.g,0.0,0.999);
+    color.b = clamp(color.b,0.0,0.999);
+    color.a = clamp(color.a,0.0,0.999);
+    
 
     textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }
