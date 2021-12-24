@@ -112,6 +112,7 @@ struct Light {
 struct Shape {
     add: String,
     args: Option<[f32; 3]>,
+    file: Option<String>,
     material: Option<Material>,
     transform: Option<Vec<Transform>>,
     children: Option<Vec<Shape>>,
@@ -179,7 +180,7 @@ mod tests {
     // use super::Scene;
     #[test]
     fn load_scene() {
-        let scene = Scene::new("./assets/scenes/skybox.yaml");
+        let scene = Scene::new("./assets/scenes/model2.yaml");
 
         // let x = scene[0].is_sequence()
         println!("{:#?}", scene);
