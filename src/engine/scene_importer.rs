@@ -20,6 +20,7 @@ struct Scene {
 
 #[derive(Debug)]
 struct Texture {
+    path: String,
     data: ImageBuffer<Rgba<u8>, Vec<u8>>,
 }
 
@@ -28,7 +29,10 @@ impl Texture {
         let img = image::open(file_path).unwrap();
         let buf = img.to_rgba8();
 
-        Texture { data: buf }
+        Texture {
+            path: file_path.to_string(),
+            data: buf,
+        }
     }
 }
 
@@ -164,6 +168,7 @@ struct MaterialDefinition {
     pattern: Option<Pattern>,
 }
 
+// TODO
 #[derive(Debug, Deserialize)]
 struct Pattern {}
 
@@ -174,7 +179,7 @@ mod tests {
     // use super::Scene;
     #[test]
     fn load_scene() {
-        let scene = Scene::new("./assets/scenes/groups.yaml");
+        let scene = Scene::new("./assets/scenes/skybox.yaml");
 
         // let x = scene[0].is_sequence()
         println!("{:#?}", scene);
