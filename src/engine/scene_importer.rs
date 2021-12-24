@@ -1,179 +1,147 @@
-extern crate yaml_rust;
-use std::{collections::HashMap, default, ops::Deref};
-use yaml_rust::{Yaml, YamlLoader};
+use serde::Deserialize;
+use std::collections::HashMap;
 
-use crate::engine::rt_primitives::Camera;
-
-#[derive(Debug)]
-enum ShapeType {
-    Sphere,
-    Plane,
-    Model(&'static str),
-    Group,
-    Camera,
-    Light,
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Command {
+    Add(Add),
+    Define(Define),
+    Fail(serde_yaml::Value),
 }
 
-#[derive(Debug)]
-struct ShapeDefinition<'a> {
-    shape_type: ShapeType,
-    parameters: &'a ParameterDefinition<'a>,
-    children: Option<Vec<&'a ShapeDefinition<'a>>>,
+#[derive(Debug, Deserialize)]
+struct Define {
+    define: String,
+    extend: Option<String>,
+    value: DefineValue,
 }
 
-// impl<'a> Default for ShapeDefinition<'a> {
-//     fn default() -> Self {
-//         ShapeDefinition {
-//             shape_type: ShapeType::Sphere,
-//             parameters: &ParameterDefinition::default(),
-//             children: None,
-//         }
-//     }
-// }
-
-#[derive(Default, Debug, Clone)]
-struct ParameterDefinition<'a> {
-    material: Option<MaterialDefinition>,
-    transform: Option<TransformDefinition>,
-    args: Option<Vec<f32>>,
-    file_path: Option<&'static str>,
-    light_definition: Option<LightDefinition>,
-    camera_defintion: Option<CameraDefinition>,
-    extends: Option<&'a ParameterDefinition<'a>>,
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum DefineValue {
+    Shape(Shape),
+    MaterialDefinition(MaterialDefinition),
+    TransformDefinition(Vec<Transform>),
+    Fail(serde_yaml::Value),
 }
 
-#[derive(Default, Debug, Clone)]
-struct MaterialDefinition {}
+#[derive(Debug, Deserialize)]
+// #[serde(tag = "add")]
+#[serde(untagged)]
+// #[serde(rename_all(deserialize = "camelCase"))]
+enum Add {
+    Camera(Camera),
+    Light(Light),
+    Shape(Shape),
+}
 
-#[derive(Default, Debug, Clone)]
-struct TransformDefinition {}
-
-#[derive(Default, Debug, Clone)]
-struct CameraDefinition {
+#[derive(Debug, Deserialize)]
+#[serde(rename_all(deserialize = "kebab-case"))]
+struct Camera {
     width: u32,
     height: u32,
+    // #[serde(rename(deserialize = "field-of-view"))]
     field_of_view: f32,
     from: [f32; 3],
     to: [f32; 3],
     up: [f32; 3],
 }
 
-#[derive(Default, Debug, Clone)]
-struct LightDefinition {
+#[derive(Debug, Deserialize)]
+struct Light {
     at: [f32; 3],
     intensity: [f32; 3],
 }
 
-#[derive(Default, Debug)]
-struct Scene<'a> {
-    shape_definitions: HashMap<&'static str, ShapeDefinition<'a>>,
-    parameter_definitions: HashMap<&'static str, ParameterDefinition<'a>>,
-    shapes: Vec<&'a ShapeDefinition<'a>>,
+#[derive(Debug, Deserialize)]
+struct Shape {
+    add: String,
+    args: Option<[f32; 3]>,
+    material: Option<Material>,
+    transform: Option<Vec<Transform>>,
+    children: Option<Vec<Shape>>,
 }
 
-impl<'a> Scene<'a> {
-    pub fn new(path: &str) -> Self {
-        // append hash to key if using in an add statement to deferentiate without explictly naming
-        let mut shape_definitions: HashMap<&str, ShapeDefinition> = HashMap::default();
-        let mut parameter_definitions: HashMap<&str, ParameterDefinition> = HashMap::default();
-        let mut shapes: Vec<&ShapeDefinition> = vec![];
-
-        let scene_str = std::fs::read_to_string(path).expect("Unable to read file");
-        let scene_yaml = &YamlLoader::load_from_str(&scene_str).unwrap()[0];
-
-        for item_yaml in scene_yaml.as_vec().unwrap() {
-            let item = item_yaml.as_hash().unwrap();
-            let (item_key, item_value) = item.front().unwrap();
-            match item_key.as_str() {
-                Some("add") => {
-                    // let mut shape_def = ShapeDefinition {
-                    //     ..Default::default()
-                    // };
-
-                    // let mut param_def = ParameterDefinition::default();
-
-                    match item_value.as_str() {
-                        Some("camera") => {
-                            let mut definition = CameraDefinition {
-                                ..Default::default()
-                            };
-
-                            for (k, v) in item.iter().skip(1) {
-                                println!("{:?} {:?}", k, v);
-                                match k.as_str() {
-                                    Some("width") => definition.width = v.as_i64().unwrap() as u32,
-                                    Some("height") => {
-                                        definition.height = v.as_i64().unwrap() as u32
-                                    }
-                                    Some("field-of-view") => {
-                                        definition.field_of_view = v.as_f64().unwrap() as f32
-                                    }
-                                    Some("from") => definition.from = Scene::yaml_to_arr3(v),
-                                    Some("to") => definition.to = Scene::yaml_to_arr3(v),
-                                    Some("up") => definition.up = Scene::yaml_to_arr3(v),
-                                    _ => {}
-                                }
-                            }
-
-                            parameter_definitions.insert(
-                                "camera",
-                                ParameterDefinition {
-                                    camera_defintion: Some(definition),
-                                    ..Default::default()
-                                },
-                            );
-
-                            // let params = ParameterDefinition {camera_defintion}
-                            println!("camera");
-                        }
-                        Some("light") => {
-                            println!("light");
-                        }
-                        Some(_) => {
-                            println!("Other str");
-                        }
-                        _ => {
-                            println!("Other ??");
-                        }
-                    }
-                }
-                Some("define") => {}
-                _ => {}
-            }
-        }
-
-        Scene {
-            shape_definitions,
-            parameter_definitions,
-            shapes,
-        }
-    }
-
-    fn yaml_to_arr3(yaml: &Yaml) -> [f32; 3] {
-        yaml.as_vec()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .fold([0.0, 0.0, 0.0], |acc, (i, v)| {
-                let mut new = acc;
-                new[i] = v.as_f64().unwrap_or_else(|| v.as_i64().unwrap() as f64) as f32;
-                new
-            })
-    }
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Material {
+    MaterialDefinition(MaterialDefinition),
+    MaterialReference(String),
 }
+
+// #[derive(Debug, Deserialize)]
+// #[serde(untagged)]
+// enum Transform {
+//     TransformDefinition(Vec<TransformElement>),
+//     TransformReference(String),
+// }
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Transform {
+    Vector(VectorTransform),
+    Scalar(ScalarTransform),
+    Reference(String),
+}
+
+#[derive(Debug, Deserialize)]
+struct ScalarTransform {
+    name: String,
+    value: f32,
+}
+
+#[derive(Debug, Deserialize)]
+struct VectorTransform {
+    name: String,
+    value1: f32,
+    value2: f32,
+    value3: f32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all(deserialize = "kebab-case"))]
+struct MaterialDefinition {
+    color: Option<[f32; 3]>,
+    ambient: Option<f32>,
+    diffuse: Option<f32>,
+    specular: Option<f32>,
+    shininess: Option<f32>,
+    emissiveness: Option<[f32; 3]>,
+    reflective: Option<f32>,
+    transparency: Option<f32>,
+    refractive_index: Option<f32>,
+    pattern: Option<Pattern>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Pattern {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Scene, ShapeDefinition};
+    use crate::engine::scene_importer::Command;
+
+    // use super::Scene;
     #[test]
     fn load_scene() {
-        let scene = Scene::new("./assets/scenes/test.yaml");
+        use std::fs::File;
+        use std::path::Path;
 
-        println!("{:?}", scene);
+        // Create a path to the desired file
+        let path = Path::new("./assets/scenes/groups.yaml");
+        let display = path.display();
 
-        // let mut shape_def = ShapeDefinition {
-        //     ..Default::default()
-        // };
+        // Open the path in read-only mode, returns `io::Result<File>`
+        let f = match File::open(&path) {
+            Err(why) => panic!("couldn't open {}: {}", display, why),
+            Ok(file) => file,
+        };
+        // let f = fs::read("./assets/scenes/test.yaml").unwrap;
+        // let scene: Vec<serde_yaml::Value> = serde_yaml::from_reader(f).unwrap();
+        let scene: Vec<Command> = serde_yaml::from_reader(f).unwrap();
+
+        // let x = scene[0].is_sequence()
+        println!("{:#?}", scene);
+
         assert_eq!(2 + 2, 4);
     }
 }
