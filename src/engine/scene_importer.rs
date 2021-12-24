@@ -1,5 +1,7 @@
+use super::super::BVH;
+use image::{ImageBuffer, Rgba};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::{fs::File, path::Path};
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -7,6 +9,55 @@ enum Command {
     Add(Add),
     Define(Define),
     Fail(serde_yaml::Value),
+}
+
+#[derive(Debug)]
+struct Scene {
+    commands: Vec<Command>,
+    bvh: Option<BVH>,
+    textures: Option<Vec<Texture>>,
+}
+
+#[derive(Debug)]
+struct Texture {
+    data: ImageBuffer<Rgba<u8>, Vec<u8>>,
+}
+
+impl Texture {
+    pub fn new(file_path: &str) -> Self {
+        let img = image::open(file_path).unwrap();
+        let buf = img.to_rgba8();
+
+        Texture { data: buf }
+    }
+}
+
+impl Scene {
+    pub fn new(file_path: &str) -> Self {
+        let path = Path::new(file_path);
+        let display = path.display();
+
+        // Open the path in read-only mode, returns `io::Result<File>`
+        let f = match File::open(&path) {
+            Err(why) => panic!("couldn't open {}: {}", display, why),
+            Ok(file) => file,
+        };
+        // let scene: Vec<serde_yaml::Value> = serde_yaml::from_reader(f).unwrap();
+
+        Scene {
+            commands: serde_yaml::from_reader(f).expect("Failed to load scene description."),
+            bvh: None,
+            textures: None,
+        }
+    }
+
+    fn validate(&self) {
+        todo!();
+    }
+
+    fn load_assets(&self) {
+        todo!();
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,26 +169,12 @@ struct Pattern {}
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::scene_importer::Command;
+    use crate::engine::scene_importer::Scene;
 
     // use super::Scene;
     #[test]
     fn load_scene() {
-        use std::fs::File;
-        use std::path::Path;
-
-        // Create a path to the desired file
-        let path = Path::new("./assets/scenes/groups.yaml");
-        let display = path.display();
-
-        // Open the path in read-only mode, returns `io::Result<File>`
-        let f = match File::open(&path) {
-            Err(why) => panic!("couldn't open {}: {}", display, why),
-            Ok(file) => file,
-        };
-        // let f = fs::read("./assets/scenes/test.yaml").unwrap;
-        // let scene: Vec<serde_yaml::Value> = serde_yaml::from_reader(f).unwrap();
-        let scene: Vec<Command> = serde_yaml::from_reader(f).unwrap();
+        let scene = Scene::new("./assets/scenes/groups.yaml");
 
         // let x = scene[0].is_sequence()
         println!("{:#?}", scene);

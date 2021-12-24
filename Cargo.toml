@@ -24,6 +24,11 @@ env_logger = "0.8"
 log = "0.4"
 bytemuck = { version = "1.7.2", features = [ "derive" ] }
 rand = "0.8.4"
+yaml-rust = "0.4"
+linked-hash-map = "0.5.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.8"
+image = "0.23"
 #renderdoc = "0.10.1"
 
 [profile.release] 
