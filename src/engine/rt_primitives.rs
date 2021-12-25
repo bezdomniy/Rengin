@@ -1,4 +1,4 @@
-use glam::{const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4};
+use glam::{const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4, Vec4Swizzles};
 use rand::Rng;
 
 #[repr(C)]
@@ -76,14 +76,14 @@ pub struct ObjectParams {
 
 impl ObjectParams {
     pub fn new(
-        inverse_transform: Mat4,
+        transform: Mat4,
         material: PtMaterial,
         len_inner_nodes: u32,
         len_leaf_nodes: u32,
         is_light: u32,
     ) -> Self {
         ObjectParams {
-            inverse_transform,
+            inverse_transform: transform.inverse(),
             material,
             len_inner_nodes,
             len_leaf_nodes,
@@ -157,12 +157,73 @@ impl BVH {
     }
 }
 
-// #[repr(C)]
-// pub struct Shape {
-//     tlas_offset: u32,
-//     blas_offset: u32,
-//     type_enum: u32,
-// }
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Ray {
+    origin: Vec3,
+    x: u32,
+    direction: Vec3,
+    y: u32,
+}
+
+impl Ray {
+    pub fn new(x: u32, y: u32, ray_index: u32, sqrt_rays_per_pixel: u32, camera: &Camera) -> Self {
+        let half_sub_pixel_size = 1.0 / (sqrt_rays_per_pixel as f32) / 2.0;
+
+        let sub_pixel_row_number: u32 = ray_index / sqrt_rays_per_pixel;
+        let sub_pixel_col_number: u32 = ray_index % sqrt_rays_per_pixel;
+        let sub_pixel_x_offset: f32 = half_sub_pixel_size * (sub_pixel_col_number as f32);
+        let sub_pixel_y_offset: f32 = half_sub_pixel_size * (sub_pixel_row_number as f32);
+
+        let x_offset: f32 = ((x as f32) + sub_pixel_x_offset) * camera.pixel_size;
+        let y_offset: f32 = ((y as f32) + sub_pixel_y_offset) * camera.pixel_size;
+
+        let world_x: f32 = camera.half_width - x_offset;
+        let world_y: f32 = camera.half_height - y_offset;
+
+        let pixel = camera.inverse_transform * Vec4::new(world_x, world_y, -1.0, 1.0);
+
+        let ray_o = camera.inverse_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
+
+        Ray {
+            origin: ray_o.xyz(),
+            x,
+            direction: (pixel - ray_o).xyz(),
+            y,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct Rays {
+    pub data: Vec<Ray>,
+}
+
+// TODO: implement sorting before output to gpu buffer
+impl Rays {
+    pub fn new(width: u32, height: u32) -> Self {
+        let mut rays = Rays {
+            data: vec![
+                Ray {
+                    direction: Vec3::new(0.0, 0.0, 0.0),
+                    x: 0,
+                    origin: Vec3::new(0.0, 0.0, 0.0),
+                    y: 0
+                };
+                (width * height) as usize
+            ],
+        };
+
+        // for x in 0..width {
+        //     for y in 0..height {
+        //         data.
+        //     }
+        // }
+
+        rays
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -360,6 +421,3 @@ impl NodeInner {
         return o;
     }
 }
-
-// TODO: need buffers containing: TLASes, BLASes, Materials, u32 pairs for shape offsets into tlas and blas buffers,
-// u32 for enum of shape types to allow NodeBLAS to store different types of shapes

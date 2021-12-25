@@ -42,6 +42,7 @@ use std::mem;
 use glam::{Mat4, Vec3, Vec4};
 
 use engine::asset_importer::import_objs;
+use engine::scene_importer::Scene;
 
 use engine::rt_primitives::{Camera, NodeInner, NodeLeaf, NodeNormal, ObjectParams, BVH, UBO};
 
@@ -52,8 +53,8 @@ static WIDTH: u32 = 800;
 static HEIGHT: u32 = 600;
 static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
 
-static FRAMERATE: f64 = 30.0;
-static RAYS_PER_PIXEL: u32 = 4;
+static FRAMERATE: f64 = 60.0;
+static RAYS_PER_PIXEL: u32 = 16;
 
 //TODO: try doing passes over parts of the image instead of whole at a time
 //      that way you can maintain framerate
@@ -76,7 +77,7 @@ struct RenderApp {
     render_bind_group_layout: Option<BindGroupLayout>,
     render_bind_group: Option<BindGroup>,
     sampler: Option<Sampler>,
-    objects: Option<BVH>,
+    scene: Option<Scene>,
     buffers: Option<HashMap<&'static str, Buffer>>,
     texture: Option<Texture>,
     object_params: Option<Vec<ObjectParams>>,
@@ -104,7 +105,7 @@ impl RenderApp {
             render_bind_group_layout: None,
             render_bind_group: None,
             sampler: None,
-            objects: None,
+            scene: None,
             buffers: None,
             texture: None,
             object_params: None,
@@ -114,15 +115,17 @@ impl RenderApp {
         // RenderApp::init(&self, model_path)
     }
 
-    fn init(&mut self, model_path: &str) {
+    fn init(&mut self, scene_path: &str) {
         let mut now = Instant::now();
         log::info!("Loading models...");
         // self.objects = import_objs(vec![model_path, model_path]);
-        self.objects = import_objs(vec![
-            "./assets/models/suzanne.obj",
-            model_path,
-            "./assets/models/lucy.obj",
-        ]);
+        // self.objects = import_objs(vec![
+        //     "./assets/models/suzanne.obj".to_string(),
+        //     model_path.to_string(),
+        //     "./assets/models/lucy.obj".to_string(),
+        // ]);
+
+        self.scene = Some(Scene::new(scene_path));
         log::info!(
             "Finished loading models in {} millis.",
             now.elapsed().as_millis()
@@ -139,15 +142,16 @@ impl RenderApp {
         let rotate90_x = Mat4::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), 1.5708);
         let rotate90_z = Mat4::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), 1.5708);
 
-        let transform0 = Mat4::from_translation(Vec3::new(2f32, 0f32, 0f32));
-        let transform1 = Mat4::from_translation(Vec3::new(-3f32, 1f32, 0f32));
-        let transform2 = Mat4::from_scale(Vec3::new(0.005, 0.005, 0.005)).inverse();
-        let transform3 = Mat4::from_translation(Vec3::new(3f32, -3f32, -1f32));
-        let transform4 = Mat4::from_translation(Vec3::new(0f32, 1.5f32, 0f32));
-        let transform5 = rotate90_x * Mat4::from_translation(Vec3::new(0f32, 0f32, 3f32));
-        let transform6 = rotate90_z * Mat4::from_translation(Vec3::new(-10f32, 0f32, 0f32));
-        let transform7 = rotate90_z * Mat4::from_translation(Vec3::new(10f32, 0f32, 0f32));
-        let transform8 = Mat4::from_translation(Vec3::new(0f32, -10f32, 0f32));
+        let transform0 = Mat4::from_translation(Vec3::new(-2f32, 0f32, 0f32));
+        let transform1 = Mat4::from_translation(Vec3::new(3f32, -1f32, 0f32));
+        let transform2 = Mat4::from_scale(Vec3::new(0.005, 0.005, 0.005));
+        let transform3 = Mat4::from_translation(Vec3::new(-3f32, 3f32, 1f32))
+            * Mat4::from_scale(Vec3::new(0.2, 1.0, 1.0));
+        let transform4 = Mat4::from_translation(Vec3::new(0f32, -1.5f32, 0f32));
+        let transform5 = Mat4::from_translation(Vec3::new(0f32, 0f32, -3f32)) * rotate90_x;
+        let transform6 = Mat4::from_translation(Vec3::new(10f32, 0f32, 0f32)) * rotate90_z;
+        let transform7 = Mat4::from_translation(Vec3::new(-10f32, 0f32, 0f32)) * rotate90_z;
+        let transform8 = Mat4::from_translation(Vec3::new(0f32, 10f32, 0f32));
         // let transform4 = Mat4::IDENTITY;
         // let transform2 = Mat4::IDENTITY;
 
@@ -166,14 +170,20 @@ impl RenderApp {
                 0.0,
             ),
             *self
-                .objects
+                .scene
+                .as_ref()
+                .unwrap()
+                .bvh
                 .as_ref()
                 .unwrap()
                 .len_inner_nodes
                 .get(0)
                 .unwrap(),
             *self
-                .objects
+                .scene
+                .as_ref()
+                .unwrap()
+                .bvh
                 .as_ref()
                 .unwrap()
                 .len_leaf_nodes
@@ -197,14 +207,20 @@ impl RenderApp {
                 0.0,
             ),
             *self
-                .objects
+                .scene
+                .as_ref()
+                .unwrap()
+                .bvh
                 .as_ref()
                 .unwrap()
                 .len_inner_nodes
                 .get(1)
                 .unwrap(),
             *self
-                .objects
+                .scene
+                .as_ref()
+                .unwrap()
+                .bvh
                 .as_ref()
                 .unwrap()
                 .len_leaf_nodes
@@ -223,19 +239,25 @@ impl RenderApp {
                 0.7,
                 0.3,
                 200.0,
-                0.0,
+                1.0,
                 0.0,
                 0.0,
             ),
             *self
-                .objects
+                .scene
+                .as_ref()
+                .unwrap()
+                .bvh
                 .as_ref()
                 .unwrap()
                 .len_inner_nodes
                 .get(2)
                 .unwrap(),
             *self
-                .objects
+                .scene
+                .as_ref()
+                .unwrap()
+                .bvh
                 .as_ref()
                 .unwrap()
                 .len_leaf_nodes
@@ -256,7 +278,7 @@ impl RenderApp {
                 200.0,
                 1.0,
                 1.0,
-                0.0,
+                1.5,
             ),
             1,
             0,
@@ -420,7 +442,15 @@ impl RenderApp {
 
         self.ubo = Some(UBO::new(
             [-4f32, 2f32, 3f32, 1f32],
-            self.objects.as_ref().unwrap().len_inner_nodes.len() as u32 + n_primitives,
+            self.scene
+                .as_ref()
+                .unwrap()
+                .bvh
+                .as_ref()
+                .unwrap()
+                .len_inner_nodes
+                .len() as u32
+                + n_primitives,
             (RAYS_PER_PIXEL as f32).sqrt() as u32,
             camera,
         ));
@@ -530,7 +560,16 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("TLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&self.objects.as_ref().unwrap().inner_nodes),
+                contents: bytemuck::cast_slice(
+                    &self
+                        .scene
+                        .as_ref()
+                        .unwrap()
+                        .bvh
+                        .as_ref()
+                        .unwrap()
+                        .inner_nodes,
+                ),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -539,7 +578,16 @@ impl RenderApp {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("BLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&self.objects.as_ref().unwrap().leaf_nodes),
+                contents: bytemuck::cast_slice(
+                    &self
+                        .scene
+                        .as_ref()
+                        .unwrap()
+                        .bvh
+                        .as_ref()
+                        .unwrap()
+                        .leaf_nodes,
+                ),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -548,7 +596,16 @@ impl RenderApp {
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("normals storage Buffer"),
-                    contents: bytemuck::cast_slice(&self.objects.as_ref().unwrap().normal_nodes),
+                    contents: bytemuck::cast_slice(
+                        &self
+                            .scene
+                            .as_ref()
+                            .unwrap()
+                            .bvh
+                            .as_ref()
+                            .unwrap()
+                            .normal_nodes,
+                    ),
                     usage: wgpu::BufferUsages::STORAGE,
                 });
 
@@ -560,6 +617,17 @@ impl RenderApp {
                 contents: bytemuck::cast_slice(&self.object_params.as_ref().unwrap()),
                 usage: wgpu::BufferUsages::STORAGE,
             });
+
+        // let rays = ..self.render.camera
+
+        // let buf_rays = self
+        //     .renderer
+        //     .device
+        //     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //         label: Some("Ray Buffer"),
+        //         contents: bytemuck::cast_slice(&self.rays.as_ref().unwrap()),
+        //         usage: wgpu::BufferUsages::STORAGE,
+        //     });
 
         log::info!(
             "Finshed loading buffers in {} millis",
@@ -577,91 +645,117 @@ impl RenderApp {
     }
 
     fn create_pipelines(&mut self) {
-        self.compute_bind_group_layout = Some(self.renderer.device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::ReadWrite,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            view_dimension: wgpu::TextureViewDimension::D2,
+        self.compute_bind_group_layout = Some(
+            self.renderer
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::StorageTexture {
+                                access: wgpu::StorageTextureAccess::ReadWrite,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (self.objects.as_ref().unwrap().inner_nodes.len()
-                                    * mem::size_of::<NodeInner>())
-                                    as _,
-                            ),
-                            // min_binding_size: None,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: wgpu::BufferSize::new(
+                                    (self
+                                        .scene
+                                        .as_ref()
+                                        .unwrap()
+                                        .bvh
+                                        .as_ref()
+                                        .unwrap()
+                                        .inner_nodes
+                                        .len()
+                                        * mem::size_of::<NodeInner>())
+                                        as _,
+                                ),
+                                // min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (self.objects.as_ref().unwrap().leaf_nodes.len()
-                                    * mem::size_of::<NodeLeaf>())
-                                    as _,
-                            ),
-                            // min_binding_size: None,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: wgpu::BufferSize::new(
+                                    (self
+                                        .scene
+                                        .as_ref()
+                                        .unwrap()
+                                        .bvh
+                                        .as_ref()
+                                        .unwrap()
+                                        .leaf_nodes
+                                        .len()
+                                        * mem::size_of::<NodeLeaf>())
+                                        as _,
+                                ),
+                                // min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (self.objects.as_ref().unwrap().normal_nodes.len()
-                                    * mem::size_of::<NodeNormal>())
-                                    as _,
-                            ),
-                            // min_binding_size: None,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: wgpu::BufferSize::new(
+                                    (self
+                                        .scene
+                                        .as_ref()
+                                        .unwrap()
+                                        .bvh
+                                        .as_ref()
+                                        .unwrap()
+                                        .normal_nodes
+                                        .len()
+                                        * mem::size_of::<NodeNormal>())
+                                        as _,
+                                ),
+                                // min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            // min_binding_size: None,
-                            min_binding_size: wgpu::BufferSize::new(
-                                mem::size_of::<ObjectParams>() as _
-                            ),
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                // min_binding_size: None,
+                                min_binding_size: wgpu::BufferSize::new(
+                                    mem::size_of::<ObjectParams>() as _,
+                                ),
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                ],
-                label: None,
-            },
-        ));
+                    ],
+                    label: None,
+                }),
+        );
         let compute_pipeline_layout =
             self.renderer
                 .device
@@ -1285,7 +1379,7 @@ fn main() {
     env_logger::init();
     let args: Vec<String> = env::args().collect();
 
-    let model_path = &args[1];
+    let scene_path = &args[1];
     // let objects = import_obj(model_path);
     // let (tlas, blas) = objects.as_ref().unwrap().get(0).unwrap();
 
@@ -1333,7 +1427,7 @@ fn main() {
 
     let event_loop = EventLoop::new();
     let mut app = RenderApp::new(&event_loop, args[2].parse::<bool>().unwrap());
-    app.init(model_path);
+    app.init(scene_path);
 
     // let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();
     // renderdoc_api.start_frame_capture(std::ptr::null(), std::ptr::null());

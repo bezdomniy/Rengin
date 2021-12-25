@@ -1,4 +1,5 @@
 use super::super::BVH;
+use super::asset_importer::import_objs;
 use image::{ImageBuffer, Rgba};
 use serde::Deserialize;
 use std::{fs::File, path::Path};
@@ -8,13 +9,13 @@ use std::{fs::File, path::Path};
 enum Command {
     Add(Add),
     Define(Define),
-    Fail(serde_yaml::Value),
+    // Fail(serde_yaml::Value),
 }
 
 #[derive(Debug)]
-struct Scene {
+pub struct Scene {
     commands: Vec<Command>,
-    bvh: Option<BVH>,
+    pub bvh: Option<BVH>,
     textures: Option<Vec<Texture>>,
 }
 
@@ -48,19 +49,60 @@ impl Scene {
         };
         // let scene: Vec<serde_yaml::Value> = serde_yaml::from_reader(f).unwrap();
 
-        Scene {
-            commands: serde_yaml::from_reader(f).expect("Failed to load scene description."),
-            bvh: None,
+        let commands: Vec<Command> =
+            serde_yaml::from_reader(f).expect("Failed to load scene description.");
+        let bvh = Scene::load_assets(&commands);
+
+        let scene = Scene {
+            commands,
+            bvh,
             textures: None,
-        }
+        };
+
+        // scene.load_assets();
+
+        scene
     }
 
     fn validate(&self) {
         todo!();
     }
 
-    fn load_assets(&self) {
-        todo!();
+    fn load_textures(commands: &Vec<Command>) -> Option<Vec<Texture>> {
+        todo!()
+    }
+
+    fn load_assets(commands: &Vec<Command>) -> Option<BVH> {
+        let mut obj_paths: Vec<String> = vec![];
+        for command in commands {
+            match command {
+                Command::Add(add_command) => match add_command {
+                    Add::Shape(shape) => Scene::_load_assets(shape, &mut obj_paths),
+                    _ => {}
+                },
+                Command::Define(define_command) => {
+                    match &define_command.value {
+                        DefineValue::Shape(shape) => Scene::_load_assets(&shape, &mut obj_paths),
+                        _ => {}
+                    };
+                }
+            };
+        }
+        println!("{:#?}", obj_paths);
+
+        import_objs(obj_paths)
+        // todo!();
+    }
+
+    fn _load_assets(curr_shape: &Shape, accum: &mut Vec<String>) {
+        if curr_shape.file.is_some() {
+            accum.push(curr_shape.file.as_ref().unwrap().clone());
+        }
+        if curr_shape.children.is_some() {
+            for child in curr_shape.children.as_ref().unwrap() {
+                Scene::_load_assets(child, accum);
+            }
+        }
     }
 }
 
@@ -77,7 +119,7 @@ enum DefineValue {
     Shape(Shape),
     MaterialDefinition(MaterialDefinition),
     TransformDefinition(Vec<Transform>),
-    Fail(serde_yaml::Value),
+    // Fail(serde_yaml::Value),
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,7 +225,7 @@ mod tests {
         let scene = Scene::new("./assets/scenes/model2.yaml");
 
         // let x = scene[0].is_sequence()
-        println!("{:#?}", scene);
+        // println!("{:#?}", scene);
 
         assert_eq!(2 + 2, 4);
     }

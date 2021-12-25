@@ -1,10 +1,10 @@
-use crate::engine::rt_primitives::{NodeInner, NodeLeaf, NodeNormal, Primitive, BVH};
+use super::rt_primitives::{NodeInner, NodeLeaf, NodeNormal, Primitive, BVH};
 use glam::{const_mat3, const_vec3};
 use tobj;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
 
-pub fn import_objs(paths: Vec<&str>) -> Option<BVH> {
+pub fn import_objs(paths: Vec<String>) -> Option<BVH> {
     // let (models, _materials) = tobj::load_obj(
     //     path,
     //     &tobj::LoadOptions {
