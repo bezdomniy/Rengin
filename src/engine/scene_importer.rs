@@ -296,6 +296,10 @@ impl Scene {
         }
         println!("{:#?}", model_paths);
 
+        // TODO: this approach doesn't fully work,
+        //       it can't handle multiple instances of same model
+        //       Make it only load each instance of model once, and
+        //       handle drawing it multiple times
         let bvh = import_objs(model_paths);
 
         for (object_param, len_inners, len_leafs) in izip!(
