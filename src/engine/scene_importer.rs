@@ -6,7 +6,7 @@ use itertools::izip;
 use serde::Deserialize;
 use std::{fs::File, path::Path};
 
-static BUILTIN_SHAPES: [&'static str; 5] = ["camera", "light", "plane", "sphere", "group"];
+static BUILTIN_SHAPES: [&'static str; 5] = ["camera", "light", "sphere", "plane", "group"];
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -278,7 +278,7 @@ impl Scene {
                         camera = Some(add_camera.clone());
                     }
                     Add::Shape(add_shape) => {
-                        Scene::_get_model_params(
+                        Scene::_get_object_params(
                             add_shape,
                             &mut object_params,
                             &mut model_paths,
@@ -299,7 +299,11 @@ impl Scene {
         let bvh = import_objs(model_paths);
 
         for (object_param, len_inners, len_leafs) in izip!(
-            &mut object_params,
+            // Skip if object type already set
+            object_params
+                .iter_mut()
+                .filter(|x| { x.len_inner_nodes == 0 }),
+            // &mut object_params,
             &bvh.as_ref().unwrap().len_inner_nodes,
             &bvh.as_ref().unwrap().len_leaf_nodes,
         ) {
@@ -312,23 +316,14 @@ impl Scene {
         return (camera, Some(lights), Some(object_params), bvh);
     }
 
-    // I think all bvh object params have to be at the start of the vec
-    fn _get_object_params(
-        curr_shape: &ShapeValue,
-        accum: &mut Vec<ObjectParams>,
-        commands: &Vec<Command>,
-    ) {
-        todo!()
-    }
-
     fn get_inverse_transform(vec_transforms: &Vec<TransformValue>) -> Mat4 {
         let mut transform = Mat4::IDENTITY;
         for t in vec_transforms {
             transform *= match t {
                 TransformValue::Scalar(s) => match s.name.as_str() {
                     "rotate-x" => Mat4::from_rotation_x(s.value),
-                    "rotate_y" => Mat4::from_rotation_y(s.value),
-                    "rotate_z" => Mat4::from_rotation_z(s.value),
+                    "rotate-y" => Mat4::from_rotation_y(s.value),
+                    "rotate-z" => Mat4::from_rotation_z(s.value),
                     _ => Mat4::IDENTITY,
                 },
                 TransformValue::Vector(v) => match v.name.as_str() {
@@ -342,15 +337,22 @@ impl Scene {
         transform.inverse()
     }
 
-    // fn get_material(materialValue: &MaterialValue, material: &Material) -> Material {
-    //     materialValue.set_material(material)
-    //     // match materialValue {
-    //     //     MaterialValue::Definition(mat_def) => Material::default(),
-    //     //     MaterialValue::Reference(mat_ref) => Material::default(),
-    //     // }
-    // }
+    fn _set_primitive_type(type_name: &String, object_param: &mut ObjectParams) {
+        match type_name.as_str() {
+            "sphere" => {
+                object_param.len_inner_nodes = 1;
+            }
+            "plane" => {
+                object_param.len_inner_nodes = 2;
+            }
+            "group" => {
+                object_param.len_inner_nodes = 9;
+            }
+            _ => {}
+        }
+    }
 
-    fn _get_model_params(
+    fn _get_object_params(
         curr_shape: &ShapeValue,
         accum_object_params: &mut Vec<ObjectParams>,
         accum_model_paths: &mut Vec<String>,
@@ -358,6 +360,8 @@ impl Scene {
     ) {
         let mut object_param: ObjectParams = ObjectParams::default();
         let mut model_path_found: bool = true;
+
+        let is_model: bool = !BUILTIN_SHAPES.contains(&curr_shape.add.as_str());
 
         // if !BUILTIN_SHAPES.contains(&curr_shape.add.as_str()) {
         // model_path_found = false;
@@ -368,13 +372,15 @@ impl Scene {
                     if define_command.define == curr_shape.add {
                         match &define_command.value {
                             DefineValue::ShapeDefinition(defined_shape) => {
-                                if !BUILTIN_SHAPES.contains(&curr_shape.add.as_str()) {
+                                if is_model {
                                     model_path_found = false;
                                     if defined_shape.file.is_some() {
                                         accum_model_paths
                                             .push(defined_shape.file.as_ref().unwrap().clone());
                                         model_path_found = true;
                                     }
+                                } else {
+                                    Scene::_set_primitive_type(&curr_shape.add, &mut object_param);
                                 }
                                 if defined_shape.transform.is_some() {
                                     object_param.inverse_transform = Scene::get_inverse_transform(
@@ -414,6 +420,10 @@ impl Scene {
             panic!("Model definition does not contain file path.");
         }
 
+        if !is_model {
+            Scene::_set_primitive_type(&curr_shape.add, &mut object_param);
+        }
+
         if curr_shape.transform.is_some() {
             object_param.inverse_transform =
                 Scene::get_inverse_transform(curr_shape.transform.as_ref().unwrap().clone());
@@ -431,7 +441,7 @@ impl Scene {
 
         if curr_shape.children.is_some() {
             for child in curr_shape.children.as_ref().unwrap() {
-                Scene::_get_model_params(child, accum_object_params, accum_model_paths, commands);
+                Scene::_get_object_params(child, accum_object_params, accum_model_paths, commands);
             }
         }
     }

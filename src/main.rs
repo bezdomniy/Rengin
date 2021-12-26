@@ -126,12 +126,6 @@ impl RenderApp {
     fn init(&mut self, scene_path: &str) {
         let mut now = Instant::now();
         log::info!("Loading models...");
-        // self.objects = import_objs(vec![model_path, model_path]);
-        // self.objects = import_objs(vec![
-        //     "./assets/models/suzanne.obj".to_string(),
-        //     model_path.to_string(),
-        //     "./assets/models/lucy.obj".to_string(),
-        // ]);
 
         self.scene = Some(Scene::new(scene_path));
         log::info!(
@@ -139,280 +133,17 @@ impl RenderApp {
             now.elapsed().as_millis()
         );
 
-        // let transform1 = Mat4::from_cols_array_2d(&[
-        //     [1f32, 0f32, 0f32, 2f32],
-        //     [0f32, 1f32, 0f32, 0f32],
-        //     [0f32, 0f32, 1f32, 0f32],
-        //     [0f32, 0f32, 0f32, 1f32],
-        // ])
-        // .transpose();
-
-        let rotate90_x = Mat4::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), 1.5708);
-        let rotate90_z = Mat4::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), 1.5708);
-
-        let transform0 = Mat4::from_translation(Vec3::new(-2f32, 0f32, 0f32));
-        let transform1 = Mat4::from_translation(Vec3::new(3f32, -1f32, 0f32));
-        let transform2 = Mat4::from_scale(Vec3::new(0.005, 0.005, 0.005));
-        let transform3 = Mat4::from_translation(Vec3::new(-3f32, 3f32, 1f32))
-            * Mat4::from_scale(Vec3::new(0.2, 1.0, 1.0));
-        let transform4 = Mat4::from_translation(Vec3::new(0f32, -1.5f32, 0f32));
-        let transform5 = Mat4::from_translation(Vec3::new(0f32, 0f32, -3f32)) * rotate90_x;
-        let transform6 = Mat4::from_translation(Vec3::new(10f32, 0f32, 0f32)) * rotate90_z;
-        let transform7 = Mat4::from_translation(Vec3::new(-10f32, 0f32, 0f32)) * rotate90_z;
-        let transform8 = Mat4::from_translation(Vec3::new(0f32, 10f32, 0f32));
-        // let transform4 = Mat4::IDENTITY;
-        // let transform2 = Mat4::IDENTITY;
-
-        // let object_param0 = ObjectParams::new(
-        //     transform0,
-        //     // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-        //     Material::new(
-        //         Vec4::new(0.831, 0.537, 0.214, 1.0),
-        //         Vec4::new(0.0, 0.0, 0.0, 0.0),
-        //         0.1,
-        //         0.7,
-        //         0.3,
-        //         200.0,
-        //         0.0,
-        //         0.0,
-        //         0.0,
-        //     ),
-        //     *self
-        //         .scene
-        //         .as_ref()
-        //         .unwrap()
-        //         .bvh
-        //         .as_ref()
-        //         .unwrap()
-        //         .len_inner_nodes
-        //         .get(0)
-        //         .unwrap(),
-        //     *self
-        //         .scene
-        //         .as_ref()
-        //         .unwrap()
-        //         .bvh
-        //         .as_ref()
-        //         .unwrap()
-        //         .len_leaf_nodes
-        //         .get(0)
-        //         .unwrap(),
-        //     0,
-        // );
-
-        // let object_param1 = ObjectParams::new(
-        //     transform1,
-        //     // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-        //     Material::new(
-        //         Vec4::new(0.537, 0.831, 0.914, 1.0),
-        //         Vec4::new(0.0, 0.0, 0.0, 0.0),
-        //         0.1,
-        //         0.7,
-        //         0.3,
-        //         200.0,
-        //         0.0,
-        //         0.0,
-        //         0.0,
-        //     ),
-        //     *self
-        //         .scene
-        //         .as_ref()
-        //         .unwrap()
-        //         .bvh
-        //         .as_ref()
-        //         .unwrap()
-        //         .len_inner_nodes
-        //         .get(1)
-        //         .unwrap(),
-        //     *self
-        //         .scene
-        //         .as_ref()
-        //         .unwrap()
-        //         .bvh
-        //         .as_ref()
-        //         .unwrap()
-        //         .len_leaf_nodes
-        //         .get(1)
-        //         .unwrap(),
-        //     0,
-        // );
-
-        // let object_param2 = ObjectParams::new(
-        //     // transform1,
-        //     transform2,
-        //     Material::new(
-        //         Vec4::new(0.837, 0.131, 0.114, 1.0),
-        //         Vec4::new(0.0, 0.0, 0.0, 0.0),
-        //         0.1,
-        //         0.7,
-        //         0.3,
-        //         200.0,
-        //         1.0,
-        //         0.0,
-        //         0.0,
-        //     ),
-        //     *self
-        //         .scene
-        //         .as_ref()
-        //         .unwrap()
-        //         .bvh
-        //         .as_ref()
-        //         .unwrap()
-        //         .len_inner_nodes
-        //         .get(2)
-        //         .unwrap(),
-        //     *self
-        //         .scene
-        //         .as_ref()
-        //         .unwrap()
-        //         .bvh
-        //         .as_ref()
-        //         .unwrap()
-        //         .len_leaf_nodes
-        //         .get(2)
-        //         .unwrap(),
-        //     0,
-        // );
-
-        let object_param3 = ObjectParams::new(
-            transform3,
-            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            Material::new(
-                Vec4::new(0.831, 0.537, 0.214, 1.0),
-                Vec4::new(7.0, 7.0, 7.0, 7.0),
-                0.1,
-                0.7,
-                0.3,
-                200.0,
-                1.0,
-                1.0,
-                1.5,
-            ),
-            1,
-            0,
-            1,
+        self.object_params = Some(
+            self.scene
+                .as_ref()
+                .unwrap()
+                .object_params
+                .as_ref()
+                .unwrap()
+                .clone(),
         );
 
-        let object_param4 = ObjectParams::new(
-            transform4,
-            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            Material::new(
-                Vec4::new(0.831, 0.537, 0.214, 1.0),
-                Vec4::new(0.0, 0.0, 0.0, 0.0),
-                0.1,
-                0.7,
-                0.3,
-                200.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-            2,
-            0,
-            0,
-        );
-
-        let object_param5 = ObjectParams::new(
-            transform5,
-            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            Material::new(
-                Vec4::new(0.231, 0.537, 0.831, 1.0),
-                Vec4::new(0.0, 0.0, 0.0, 0.0),
-                0.1,
-                0.7,
-                0.3,
-                200.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-            2,
-            0,
-            0,
-        );
-
-        let object_param6 = ObjectParams::new(
-            transform6,
-            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            Material::new(
-                Vec4::new(0.231, 0.537, 0.831, 1.0),
-                Vec4::new(0.0, 0.0, 0.0, 0.0),
-                0.1,
-                0.7,
-                0.3,
-                200.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-            2,
-            0,
-            0,
-        );
-
-        let object_param7 = ObjectParams::new(
-            transform7,
-            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            Material::new(
-                Vec4::new(0.231, 0.537, 0.831, 1.0),
-                Vec4::new(0.0, 0.0, 0.0, 0.0),
-                0.1,
-                0.7,
-                0.3,
-                200.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-            2,
-            0,
-            0,
-        );
-
-        let object_param8 = ObjectParams::new(
-            transform8,
-            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            Material::new(
-                Vec4::new(0.231, 0.537, 0.831, 1.0),
-                Vec4::new(0.0, 0.0, 0.0, 0.0),
-                0.1,
-                0.7,
-                0.3,
-                200.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-            2,
-            0,
-            0,
-        );
-
-        let mut primitive_object_params = vec![
-            object_param3,
-            object_param4,
-            object_param5,
-            object_param6,
-            object_param7,
-            object_param8,
-        ];
-
-        let n_primitives = primitive_object_params.len() as u32;
-
-        let mut object_params = self
-            .scene
-            .as_ref()
-            .unwrap()
-            .object_params
-            .as_ref()
-            .unwrap()
-            .clone();
-
-        object_params.append(&mut primitive_object_params);
-
-        self.object_params = Some(object_params);
-
-        println!("{:#?}", self.object_params);
+        // println!("{:#?}", self.object_params);
 
         // log::info!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
         // log::info!(
@@ -464,12 +195,10 @@ impl RenderApp {
             self.scene
                 .as_ref()
                 .unwrap()
-                .bvh
+                .object_params
                 .as_ref()
                 .unwrap()
-                .len_inner_nodes
-                .len() as u32
-                + n_primitives,
+                .len() as u32,
             (RAYS_PER_PIXEL as f32).sqrt() as u32,
             camera,
         ));
