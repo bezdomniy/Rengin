@@ -46,7 +46,7 @@ use engine::scene_importer::Scene;
 
 use engine::rt_primitives::{Camera, NodeInner, NodeLeaf, NodeNormal, ObjectParams, BVH, UBO};
 
-use crate::engine::rt_primitives::PtMaterial;
+use crate::engine::rt_primitives::Material;
 use crate::renderer::wgpu_utils::RenginWgpu;
 
 static WIDTH: u32 = 800;
@@ -58,6 +58,14 @@ static RAYS_PER_PIXEL: u32 = 16;
 
 //TODO: try doing passes over parts of the image instead of whole at a time
 //      that way you can maintain framerate
+
+enum RendererType {
+    PathTracer,
+    RayTracer,
+}
+
+// static RENDERER_TYPE: RendererType = RendererType::PathTracer;
+static RENDERER_TYPE: RendererType = RendererType::RayTracer;
 
 struct GameState {
     pub camera_angle_y: f32,
@@ -155,121 +163,121 @@ impl RenderApp {
         // let transform4 = Mat4::IDENTITY;
         // let transform2 = Mat4::IDENTITY;
 
-        let object_param0 = ObjectParams::new(
-            transform0,
-            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial::new(
-                Vec4::new(0.831, 0.537, 0.214, 1.0),
-                Vec4::new(0.0, 0.0, 0.0, 0.0),
-                0.1,
-                0.7,
-                0.3,
-                200.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-            *self
-                .scene
-                .as_ref()
-                .unwrap()
-                .bvh
-                .as_ref()
-                .unwrap()
-                .len_inner_nodes
-                .get(0)
-                .unwrap(),
-            *self
-                .scene
-                .as_ref()
-                .unwrap()
-                .bvh
-                .as_ref()
-                .unwrap()
-                .len_leaf_nodes
-                .get(0)
-                .unwrap(),
-            0,
-        );
+        // let object_param0 = ObjectParams::new(
+        //     transform0,
+        //     // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
+        //     Material::new(
+        //         Vec4::new(0.831, 0.537, 0.214, 1.0),
+        //         Vec4::new(0.0, 0.0, 0.0, 0.0),
+        //         0.1,
+        //         0.7,
+        //         0.3,
+        //         200.0,
+        //         0.0,
+        //         0.0,
+        //         0.0,
+        //     ),
+        //     *self
+        //         .scene
+        //         .as_ref()
+        //         .unwrap()
+        //         .bvh
+        //         .as_ref()
+        //         .unwrap()
+        //         .len_inner_nodes
+        //         .get(0)
+        //         .unwrap(),
+        //     *self
+        //         .scene
+        //         .as_ref()
+        //         .unwrap()
+        //         .bvh
+        //         .as_ref()
+        //         .unwrap()
+        //         .len_leaf_nodes
+        //         .get(0)
+        //         .unwrap(),
+        //     0,
+        // );
 
-        let object_param1 = ObjectParams::new(
-            transform1,
-            // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial::new(
-                Vec4::new(0.537, 0.831, 0.914, 1.0),
-                Vec4::new(0.0, 0.0, 0.0, 0.0),
-                0.1,
-                0.7,
-                0.3,
-                200.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-            *self
-                .scene
-                .as_ref()
-                .unwrap()
-                .bvh
-                .as_ref()
-                .unwrap()
-                .len_inner_nodes
-                .get(1)
-                .unwrap(),
-            *self
-                .scene
-                .as_ref()
-                .unwrap()
-                .bvh
-                .as_ref()
-                .unwrap()
-                .len_leaf_nodes
-                .get(1)
-                .unwrap(),
-            0,
-        );
+        // let object_param1 = ObjectParams::new(
+        //     transform1,
+        //     // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
+        //     Material::new(
+        //         Vec4::new(0.537, 0.831, 0.914, 1.0),
+        //         Vec4::new(0.0, 0.0, 0.0, 0.0),
+        //         0.1,
+        //         0.7,
+        //         0.3,
+        //         200.0,
+        //         0.0,
+        //         0.0,
+        //         0.0,
+        //     ),
+        //     *self
+        //         .scene
+        //         .as_ref()
+        //         .unwrap()
+        //         .bvh
+        //         .as_ref()
+        //         .unwrap()
+        //         .len_inner_nodes
+        //         .get(1)
+        //         .unwrap(),
+        //     *self
+        //         .scene
+        //         .as_ref()
+        //         .unwrap()
+        //         .bvh
+        //         .as_ref()
+        //         .unwrap()
+        //         .len_leaf_nodes
+        //         .get(1)
+        //         .unwrap(),
+        //     0,
+        // );
 
-        let object_param2 = ObjectParams::new(
-            // transform1,
-            transform2,
-            PtMaterial::new(
-                Vec4::new(0.837, 0.131, 0.114, 1.0),
-                Vec4::new(0.0, 0.0, 0.0, 0.0),
-                0.1,
-                0.7,
-                0.3,
-                200.0,
-                1.0,
-                0.0,
-                0.0,
-            ),
-            *self
-                .scene
-                .as_ref()
-                .unwrap()
-                .bvh
-                .as_ref()
-                .unwrap()
-                .len_inner_nodes
-                .get(2)
-                .unwrap(),
-            *self
-                .scene
-                .as_ref()
-                .unwrap()
-                .bvh
-                .as_ref()
-                .unwrap()
-                .len_leaf_nodes
-                .get(2)
-                .unwrap(),
-            0,
-        );
+        // let object_param2 = ObjectParams::new(
+        //     // transform1,
+        //     transform2,
+        //     Material::new(
+        //         Vec4::new(0.837, 0.131, 0.114, 1.0),
+        //         Vec4::new(0.0, 0.0, 0.0, 0.0),
+        //         0.1,
+        //         0.7,
+        //         0.3,
+        //         200.0,
+        //         1.0,
+        //         0.0,
+        //         0.0,
+        //     ),
+        //     *self
+        //         .scene
+        //         .as_ref()
+        //         .unwrap()
+        //         .bvh
+        //         .as_ref()
+        //         .unwrap()
+        //         .len_inner_nodes
+        //         .get(2)
+        //         .unwrap(),
+        //     *self
+        //         .scene
+        //         .as_ref()
+        //         .unwrap()
+        //         .bvh
+        //         .as_ref()
+        //         .unwrap()
+        //         .len_leaf_nodes
+        //         .get(2)
+        //         .unwrap(),
+        //     0,
+        // );
 
         let object_param3 = ObjectParams::new(
             transform3,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial::new(
+            Material::new(
                 Vec4::new(0.831, 0.537, 0.214, 1.0),
                 Vec4::new(7.0, 7.0, 7.0, 7.0),
                 0.1,
@@ -288,7 +296,7 @@ impl RenderApp {
         let object_param4 = ObjectParams::new(
             transform4,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial::new(
+            Material::new(
                 Vec4::new(0.831, 0.537, 0.214, 1.0),
                 Vec4::new(0.0, 0.0, 0.0, 0.0),
                 0.1,
@@ -307,7 +315,7 @@ impl RenderApp {
         let object_param5 = ObjectParams::new(
             transform5,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial::new(
+            Material::new(
                 Vec4::new(0.231, 0.537, 0.831, 1.0),
                 Vec4::new(0.0, 0.0, 0.0, 0.0),
                 0.1,
@@ -326,7 +334,7 @@ impl RenderApp {
         let object_param6 = ObjectParams::new(
             transform6,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial::new(
+            Material::new(
                 Vec4::new(0.231, 0.537, 0.831, 1.0),
                 Vec4::new(0.0, 0.0, 0.0, 0.0),
                 0.1,
@@ -345,7 +353,7 @@ impl RenderApp {
         let object_param7 = ObjectParams::new(
             transform7,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial::new(
+            Material::new(
                 Vec4::new(0.231, 0.537, 0.831, 1.0),
                 Vec4::new(0.0, 0.0, 0.0, 0.0),
                 0.1,
@@ -364,7 +372,7 @@ impl RenderApp {
         let object_param8 = ObjectParams::new(
             transform8,
             // inverse_transform: Mat4::from_scale(Vec3::new(0.004, 0.004, 0.004)).inverse(),
-            PtMaterial::new(
+            Material::new(
                 Vec4::new(0.231, 0.537, 0.831, 1.0),
                 Vec4::new(0.0, 0.0, 0.0, 0.0),
                 0.1,
@@ -380,22 +388,31 @@ impl RenderApp {
             0,
         );
 
-        self.object_params = Some(vec![
-            object_param0,
-            object_param1,
-            object_param2,
+        let mut primitive_object_params = vec![
             object_param3,
             object_param4,
             object_param5,
             object_param6,
             object_param7,
             object_param8,
-        ]);
+        ];
 
-        let n_primitives = 6;
+        let n_primitives = primitive_object_params.len() as u32;
 
-        // let x = &mut self.objects.as_ref().unwrap().n_objects;
-        // *x += 1;
+        let mut object_params = self
+            .scene
+            .as_ref()
+            .unwrap()
+            .object_params
+            .as_ref()
+            .unwrap()
+            .clone();
+
+        object_params.append(&mut primitive_object_params);
+
+        self.object_params = Some(object_params);
+
+        println!("{:#?}", self.object_params);
 
         // log::info!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
         // log::info!(
@@ -440,8 +457,10 @@ impl RenderApp {
             // 1.0472f32,
         );
 
+        let light_value = self.scene.as_ref().unwrap().lights.as_ref().unwrap()[0].at;
         self.ubo = Some(UBO::new(
-            [-4f32, 2f32, 3f32, 1f32],
+            // [-4f32, 2f32, 3f32, 1f32],
+            [light_value[0], light_value[1], light_value[2], 1.0],
             self.scene
                 .as_ref()
                 .unwrap()
@@ -494,16 +513,28 @@ impl RenderApp {
     }
 
     fn create_shaders(&mut self) -> HashMap<&'static str, ShaderModule> {
-        let cs_module = self
-            .renderer
-            .device
-            .create_shader_module(&wgpu::ShaderModuleDescriptor {
-                label: None,
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                    // "shaders/pathtracer.wgsl"
-                    "shaders/raytracer.wgsl"
-                ))),
-            });
+        let cs_module = match RENDERER_TYPE {
+            RendererType::PathTracer => {
+                self.renderer
+                    .device
+                    .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                        label: None,
+                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                            "shaders/pathtracer.wgsl"
+                        ))),
+                    })
+            }
+            RendererType::RayTracer => {
+                self.renderer
+                    .device
+                    .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                        label: None,
+                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                            "shaders/raytracer.wgsl"
+                        ))),
+                    })
+            }
+        };
 
         let vt_module = self
             .renderer

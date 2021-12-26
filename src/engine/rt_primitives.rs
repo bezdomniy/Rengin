@@ -5,20 +5,6 @@ use rand::Rng;
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Material {
     pub colour: Vec4,
-    pub ambient: f32,
-    pub diffuse: f32,
-    pub specular: f32,
-    pub shininess: f32,
-    pub reflective: f32,
-    pub transparency: f32,
-    pub refractive_index: f32,
-    _padding: u32,
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct PtMaterial {
-    pub colour: Vec4,
     pub emissiveness: Vec4,
     pub ambient: f32,
     pub diffuse: f32,
@@ -30,7 +16,7 @@ pub struct PtMaterial {
     _padding: u32,
 }
 
-impl PtMaterial {
+impl Material {
     pub fn new(
         colour: Vec4,
         emissiveness: Vec4,
@@ -42,7 +28,7 @@ impl PtMaterial {
         transparency: f32,
         refractive_index: f32,
     ) -> Self {
-        PtMaterial {
+        Material {
             colour,
             emissiveness,
             ambient,
@@ -57,6 +43,22 @@ impl PtMaterial {
     }
 }
 
+impl Default for Material {
+    fn default() -> Self {
+        Material {
+            colour: Vec4::new(0.0, 0.0, 0.0, 0.0),
+            emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
+            ambient: 0.1,
+            diffuse: 0.9,
+            specular: 0.9,
+            shininess: 200.0,
+            reflective: 0.0,
+            transparency: 0.0,
+            refractive_index: 1.0,
+            _padding: 0,
+        }
+    }
+}
 #[derive(Debug, Copy, Clone)]
 pub struct Primitive {
     pub points: Mat3,
@@ -64,10 +66,10 @@ pub struct Primitive {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ObjectParams {
     pub inverse_transform: Mat4,
-    pub material: PtMaterial,
+    pub material: Material,
     pub len_inner_nodes: u32,
     pub len_leaf_nodes: u32,
     pub is_light: u32,
@@ -77,7 +79,7 @@ pub struct ObjectParams {
 impl ObjectParams {
     pub fn new(
         transform: Mat4,
-        material: PtMaterial,
+        material: Material,
         len_inner_nodes: u32,
         len_leaf_nodes: u32,
         is_light: u32,
