@@ -1,8 +1,10 @@
-use super::super::BVH;
 use super::asset_importer::import_objs;
+use super::{super::BVH, rt_primitives::ObjectParams};
 use image::{ImageBuffer, Rgba};
 use serde::Deserialize;
 use std::{fs::File, path::Path};
+
+static BUILTIN_SHAPES: [&'static str; 5] = ["camera", "light", "plane", "sphere", "sphere"];
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -72,35 +74,67 @@ impl Scene {
         todo!()
     }
 
+    // I think all bvh object params have to be at the start of the vec
+    fn get_object_params(&self) -> Vec<ObjectParams> {
+        todo!()
+    }
+
+    // TODO: we have to be able to get object params in order of adding to work with bvh in shader
     fn load_assets(commands: &Vec<Command>) -> Option<BVH> {
-        let mut obj_paths: Vec<String> = vec![];
+        let mut add_obj_paths: Vec<String> = vec![];
         for command in commands {
             match command {
                 Command::Add(add_command) => match add_command {
-                    Add::Shape(shape) => Scene::_load_assets(shape, &mut obj_paths),
+                    Add::Shape(shape) => {
+                        Scene::_find_asset_paths(shape, &mut add_obj_paths, commands)
+                    }
                     _ => {}
                 },
-                Command::Define(define_command) => {
-                    match &define_command.value {
-                        DefineValue::Shape(shape) => Scene::_load_assets(&shape, &mut obj_paths),
-                        _ => {}
-                    };
-                }
+                // Command::Define(define_command) => {
+                //     match &define_command.value {
+                //         DefineValue::Shape(shape) => {
+                //             Scene::_find_asset_paths(&shape, &mut define_obj_paths)
+                //         }
+                //         _ => {}
+                //     };
+                // }
+                _ => {}
             };
         }
-        println!("{:#?}", obj_paths);
+        println!("{:#?}", add_obj_paths);
 
-        import_objs(obj_paths)
-        // todo!();
+        import_objs(add_obj_paths)
     }
 
-    fn _load_assets(curr_shape: &Shape, accum: &mut Vec<String>) {
+    fn _find_asset_paths(curr_shape: &Shape, accum: &mut Vec<String>, commands: &Vec<Command>) {
         if curr_shape.file.is_some() {
             accum.push(curr_shape.file.as_ref().unwrap().clone());
+        } else if !BUILTIN_SHAPES.contains(&curr_shape.add.as_str()) {
+            for command in commands {
+                match command {
+                    Command::Define(define_command) => {
+                        // println!("{:?}", define_command);
+                        if define_command.define == curr_shape.add {
+                            match &define_command.value {
+                                DefineValue::Shape(defined_shape) => {
+                                    if defined_shape.file.is_some() {
+                                        accum.push(defined_shape.file.as_ref().unwrap().clone());
+                                    } else {
+                                        // break;
+                                        panic!("Could not find model for added shape.");
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                };
+            }
         }
         if curr_shape.children.is_some() {
             for child in curr_shape.children.as_ref().unwrap() {
-                Scene::_load_assets(child, accum);
+                Scene::_find_asset_paths(child, accum, commands);
             }
         }
     }
@@ -222,7 +256,7 @@ mod tests {
     // use super::Scene;
     #[test]
     fn load_scene() {
-        let scene = Scene::new("./assets/scenes/model2.yaml");
+        let scene = Scene::new("./assets/scenes/model3.yaml");
 
         // let x = scene[0].is_sequence()
         // println!("{:#?}", scene);
