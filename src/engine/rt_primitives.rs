@@ -73,7 +73,7 @@ pub struct ObjectParams {
     pub len_inner_nodes: u32,
     pub len_leaf_nodes: u32,
     pub is_light: u32,
-    _padding: [u32; 1],
+    pub model_type: u32,
 }
 
 impl ObjectParams {
@@ -83,6 +83,7 @@ impl ObjectParams {
         len_inner_nodes: u32,
         len_leaf_nodes: u32,
         is_light: u32,
+        model_type: u32,
     ) -> Self {
         ObjectParams {
             inverse_transform: transform.inverse(),
@@ -90,7 +91,7 @@ impl ObjectParams {
             len_inner_nodes,
             len_leaf_nodes,
             is_light,
-            _padding: [0u32],
+            model_type,
         }
     }
 }

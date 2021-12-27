@@ -2,7 +2,7 @@ use super::asset_importer::import_objs;
 use super::{super::BVH, rt_primitives::Material, rt_primitives::ObjectParams};
 use glam::{Mat4, Vec3, Vec4};
 use image::{ImageBuffer, Rgba};
-use itertools::izip;
+use itertools::{izip, Itertools};
 use serde::Deserialize;
 use std::{fs::File, path::Path};
 
@@ -294,25 +294,28 @@ impl Scene {
                 _ => continue,
             };
         }
+
+        model_paths = model_paths.into_iter().unique().collect();
         println!("{:#?}", model_paths);
 
         // TODO: this approach doesn't fully work,
         //       it can't handle multiple instances of same model
         //       Make it only load each instance of model once, and
         //       handle drawing it multiple times
-        let bvh = import_objs(model_paths);
+        let bvh = import_objs(&model_paths);
 
-        for (object_param, len_inners, len_leafs) in izip!(
-            // Skip if object type already set
-            object_params
-                .iter_mut()
-                .filter(|x| { x.len_inner_nodes == 0 }),
+        for (i, (object_param, len_inners, len_leafs)) in izip!(
+            // TODO: need to filter considering duplicate models too...
+            object_params.iter_mut().filter(|x| { x.model_type >= 10 }),
             // &mut object_params,
             &bvh.as_ref().unwrap().len_inner_nodes,
             &bvh.as_ref().unwrap().len_leaf_nodes,
-        ) {
+        )
+        .enumerate()
+        {
             object_param.len_inner_nodes = *len_inners;
             object_param.len_leaf_nodes = *len_leafs;
+            object_param.model_type += i as u32;
 
             // println!("{:?} {} {}", object_param, len_leafs, len_inners);
         }
@@ -344,13 +347,13 @@ impl Scene {
     fn _set_primitive_type(type_name: &String, object_param: &mut ObjectParams) {
         match type_name.as_str() {
             "sphere" => {
-                object_param.len_inner_nodes = 1;
+                object_param.model_type = 0;
             }
             "plane" => {
-                object_param.len_inner_nodes = 2;
+                object_param.model_type = 1;
             }
             "group" => {
-                object_param.len_inner_nodes = 9;
+                object_param.model_type = 2;
             }
             _ => {}
         }
@@ -383,6 +386,7 @@ impl Scene {
                                             .push(defined_shape.file.as_ref().unwrap().clone());
                                         model_path_found = true;
                                     }
+                                    object_param.model_type = 10;
                                 } else {
                                     Scene::_set_primitive_type(&curr_shape.add, &mut object_param);
                                 }
@@ -420,6 +424,7 @@ impl Scene {
             }
 
             accum_model_paths.push(curr_shape.file.as_ref().unwrap().clone());
+            object_param.model_type = 10;
         } else if !model_path_found {
             panic!("Model definition does not contain file path.");
         }

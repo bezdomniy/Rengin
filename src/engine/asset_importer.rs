@@ -4,7 +4,7 @@ use tobj;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
 
-pub fn import_objs(paths: Vec<String>) -> Option<BVH> {
+pub fn import_objs(paths: &Vec<String>) -> Option<BVH> {
     // let (models, _materials) = tobj::load_obj(
     //     path,
     //     &tobj::LoadOptions {

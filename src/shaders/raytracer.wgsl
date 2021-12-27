@@ -92,6 +92,7 @@ struct ObjectParam {
     len_inner_nodes:i32;
     len_leaf_nodes:i32;
     is_light: u32;
+    model_type: u32;
 };
 
 
@@ -354,21 +355,19 @@ fn intersect(ray: Ray) -> Intersection {
         let ob_params = object_params.ObjectParams[i];
         let nRay: Ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO,1.0)).xyz, ray.x, (ob_params.inverse_transform * vec4<f32>(ray.rayD,0.0)).xyz, ray.y);
 
-        if (ob_params.len_leaf_nodes > 0) {
+
+        if (ob_params.model_type == 0u) { //Sphere
+            ret = intersectSphere(nRay,ret, i);
+        }
+        else if (ob_params.model_type == 1u) { //Plane
+            ret = intersectPlane(nRay,ret, i);
+        }
+        else {
             // Triangle mesh
             max_inner_node_idx = max_inner_node_idx + ob_params.len_inner_nodes;
             ret = intersectInnerNodes(nRay,ret, min_inner_node_idx, max_inner_node_idx, leaf_offset);
             min_inner_node_idx = min_inner_node_idx + ob_params.len_inner_nodes;
             leaf_offset = leaf_offset + u32(ob_params.len_leaf_nodes);
-        }
-        else {
-            let type_enum = ob_params.len_inner_nodes;
-            if (type_enum == 1) { //Sphere
-                ret = intersectSphere(nRay,ret, i);
-            }
-            else if (type_enum == 2) { //Plane
-                ret = intersectPlane(nRay,ret, i);
-            }
         }
 
     }
@@ -388,24 +387,24 @@ fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
     return ret;
 }
 
-fn normalAt(point: vec3<f32>, intersection: Intersection, typeEnum: i32) -> vec3<f32> {
-    if (typeEnum == 0) {
-        let normal: Normal = normal_nodes.Normals[intersection.id];
-        return normalToWorld((normal.normal2.xyz * intersection.uv.x + normal.normal3.xyz * intersection.uv.y + normal.normal1.xyz * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
-        // n.w = 0.0;
-    }
-     else if (typeEnum == 1) { //Sphere
+fn normalAt(point: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32> {
+    if (typeEnum == 0u) { //Sphere
         let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(point,1.0)).xyz;
         return objectPoint;
     }
-     else if (typeEnum == 2) { //Plane
+    else if (typeEnum == 1u) { //Plane
         return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),intersection.model_id);
+    }
+    else { //Model
+        let normal: Normal = normal_nodes.Normals[intersection.id];
+        return normalToWorld((normal.normal2.xyz * intersection.uv.x + normal.normal3.xyz * intersection.uv.y + normal.normal1.xyz * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
+        // n.w = 0.0;
     }
     return vec3<f32>(0.0);
 }
 
 
-fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: i32) -> HitParams
+fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParams
 {
     var hitParams: HitParams;
     hitParams.point =
@@ -586,12 +585,8 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
 
-        type_enum = 0;
-        if (ob_params.len_leaf_nodes == 0) {
-            type_enum = ob_params.len_inner_nodes;
-        }
 
-        let hitParams: HitParams = getHitParams(new_ray.ray, intersection, type_enum);
+        let hitParams: HitParams = getHitParams(new_ray.ray, intersection, ob_params.model_type);
         let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
         // let shadowed = false;
         color = color + lighting(ob_params.material, ubo.lightPos,
