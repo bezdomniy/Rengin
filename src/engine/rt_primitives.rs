@@ -132,6 +132,7 @@ pub struct BVH {
     pub offset_inner_nodes: Vec<u32>,
     pub len_inner_nodes: Vec<u32>,
     pub offset_leaf_nodes: Vec<u32>,
+    pub model_tags: Vec<String>,
 }
 
 impl BVH {
@@ -139,6 +140,7 @@ impl BVH {
         inner_nodes: Vec<Vec<NodeInner>>,
         leaf_nodes: Vec<Vec<NodeLeaf>>,
         normal_nodes: Vec<Vec<NodeNormal>>,
+        model_tags: Vec<String>,
     ) -> Self {
         let len_inner_nodes: Vec<u32> = inner_nodes
             .iter()
@@ -176,7 +178,19 @@ impl BVH {
             offset_inner_nodes,
             len_inner_nodes,
             offset_leaf_nodes,
+            model_tags,
         }
+    }
+
+    pub fn find_model_locations(&self, tag: &String) -> (u32, u32, u32) {
+        println!("### TAG {:?}", tag);
+        let index = self.model_tags.iter().position(|r| r == tag).unwrap();
+
+        (
+            self.offset_inner_nodes[index],
+            self.len_inner_nodes[index],
+            self.offset_leaf_nodes[index],
+        )
     }
 }
 

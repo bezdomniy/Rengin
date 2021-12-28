@@ -3,7 +3,10 @@ use super::{super::BVH, rt_primitives::Material, rt_primitives::ObjectParams};
 use glam::{Mat4, Vec3, Vec4};
 use image::{ImageBuffer, Rgba};
 use itertools::{izip, Itertools};
+use rand::{distributions::Alphanumeric, Rng};
 use serde::Deserialize;
+// use std::collections::HashMap;
+use linked_hash_map::LinkedHashMap;
 use std::{fs::File, path::Path};
 
 static BUILTIN_SHAPES: [&'static str; 5] = ["camera", "light", "sphere", "plane", "group"];
@@ -267,7 +270,7 @@ impl Scene {
         Option<BVH>,
     ) {
         let mut lights: Vec<LightValue> = vec![];
-        let mut object_params: Vec<ObjectParams> = vec![];
+        let mut object_params: LinkedHashMap<(String, String), ObjectParams> = LinkedHashMap::new();
         let mut model_paths: Vec<String> = vec![];
         let mut camera: Option<CameraValue> = None;
 
@@ -304,25 +307,43 @@ impl Scene {
         //       handle drawing it multiple times
         let bvh = import_objs(&model_paths);
 
-        for (i, (object_param, offset_inners, len_inners, offset_leafs)) in izip!(
-            // TODO: need to filter considering duplicate models too...
-            object_params.iter_mut().filter(|x| { x.model_type >= 10 }),
-            // &mut object_params,
-            &bvh.as_ref().unwrap().offset_inner_nodes,
-            &bvh.as_ref().unwrap().len_inner_nodes,
-            &bvh.as_ref().unwrap().offset_leaf_nodes,
-        )
-        .enumerate()
-        {
-            object_param.len_inner_nodes = *len_inners;
-            object_param.offset_inner_nodes = *offset_inners;
-            object_param.offset_leaf_nodes = *offset_leafs;
-            object_param.model_type += i as u32;
+        // for (i, (object_param, offset_inners, len_inners, offset_leafs)) in izip!(
+        //     // TODO: need to filter considering duplicate models too...
+        //     object_params.iter_mut().filter(|x| { x.model_type >= 10 }),
+        //     // &mut object_params,
+        //     &bvh.as_ref().unwrap().offset_inner_nodes,
+        //     &bvh.as_ref().unwrap().len_inner_nodes,
+        //     &bvh.as_ref().unwrap().offset_leaf_nodes,
+        // )
+        // .enumerate()
+        // {
+        //     object_param.len_inner_nodes = *len_inners;
+        //     object_param.offset_inner_nodes = *offset_inners;
+        //     object_param.offset_leaf_nodes = *offset_leafs;
+        //     object_param.model_type += i as u32;
 
-            // println!("{:?} {} {}", object_param, len_leafs, len_inners);
+        //     // println!("{:?} {} {}", object_param, len_leafs, len_inners);
+        // }
+
+        for (i, (obparam_key, obparam_value)) in object_params
+            .iter_mut()
+            .filter(|(_, v)| v.model_type >= 10)
+            .enumerate()
+        {
+            let (inner_offset, inner_len, leaf_offset) =
+                bvh.as_ref().unwrap().find_model_locations(&obparam_key.0);
+            obparam_value.offset_inner_nodes = inner_offset;
+            obparam_value.len_inner_nodes = inner_len;
+            obparam_value.offset_leaf_nodes = leaf_offset;
+            obparam_value.model_type += i as u32;
         }
 
-        return (camera, Some(lights), Some(object_params), bvh);
+        return (
+            camera,
+            Some(lights),
+            Some(object_params.into_iter().map(|(k, v)| v).collect()),
+            bvh,
+        );
     }
 
     fn get_inverse_transform(vec_transforms: &Vec<TransformValue>) -> Mat4 {
@@ -363,12 +384,20 @@ impl Scene {
 
     fn _get_object_params(
         curr_shape: &ShapeValue,
-        accum_object_params: &mut Vec<ObjectParams>,
+        accum_object_params: &mut LinkedHashMap<(String, String), ObjectParams>,
         accum_model_paths: &mut Vec<String>,
         commands: &Vec<Command>,
     ) {
         let mut object_param: ObjectParams = ObjectParams::default();
         let mut model_path_found: bool = true;
+
+        let mut object_map_key = curr_shape.add.clone();
+
+        let hash: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(8)
+            .map(char::from)
+            .collect();
 
         let is_model: bool = !BUILTIN_SHAPES.contains(&curr_shape.add.as_str());
 
@@ -384,8 +413,9 @@ impl Scene {
                                 if is_model {
                                     model_path_found = false;
                                     if defined_shape.file.is_some() {
-                                        accum_model_paths
-                                            .push(defined_shape.file.as_ref().unwrap().clone());
+                                        object_map_key =
+                                            defined_shape.file.as_ref().unwrap().clone();
+                                        accum_model_paths.push(object_map_key.clone());
                                         model_path_found = true;
                                     }
                                     object_param.model_type = 10;
@@ -448,7 +478,7 @@ impl Scene {
                 .set_material(&mut object_param.material, commands);
         }
 
-        accum_object_params.push(object_param);
+        accum_object_params.insert((object_map_key.clone(), hash.clone()), object_param);
 
         if curr_shape.children.is_some() {
             for child in curr_shape.children.as_ref().unwrap() {

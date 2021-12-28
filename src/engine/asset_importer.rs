@@ -4,6 +4,7 @@ use tobj;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
 
+// TODO: move this as constructor for bvh
 pub fn import_objs(paths: &Vec<String>) -> Option<BVH> {
     // let (models, _materials) = tobj::load_obj(
     //     path,
@@ -108,6 +109,7 @@ pub fn import_objs(paths: &Vec<String>) -> Option<BVH> {
         object_inner_nodes,
         object_leaf_nodes,
         object_normal_nodes,
+        paths.clone(),
     ))
 }
 
