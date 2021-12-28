@@ -1,4 +1,5 @@
 use glam::{const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4, Vec4Swizzles};
+use itertools::Itertools;
 use rand::Rng;
 
 #[repr(C)]
@@ -70,9 +71,9 @@ pub struct Primitive {
 pub struct ObjectParams {
     pub inverse_transform: Mat4,
     pub material: Material,
+    pub offset_inner_nodes: u32,
     pub len_inner_nodes: u32,
-    pub len_leaf_nodes: u32,
-    pub is_light: u32,
+    pub offset_leaf_nodes: u32,
     pub model_type: u32,
 }
 
@@ -80,17 +81,17 @@ impl ObjectParams {
     pub fn new(
         transform: Mat4,
         material: Material,
+        offset_inner_nodes: u32,
         len_inner_nodes: u32,
-        len_leaf_nodes: u32,
-        is_light: u32,
+        offset_leaf_nodes: u32,
         model_type: u32,
     ) -> Self {
         ObjectParams {
             inverse_transform: transform.inverse(),
             material,
+            offset_inner_nodes,
             len_inner_nodes,
-            len_leaf_nodes,
-            is_light,
+            offset_leaf_nodes,
             model_type,
         }
     }
@@ -128,8 +129,9 @@ pub struct BVH {
     pub inner_nodes: Vec<NodeInner>,
     pub leaf_nodes: Vec<NodeLeaf>,
     pub normal_nodes: Vec<NodeNormal>,
+    pub offset_inner_nodes: Vec<u32>,
     pub len_inner_nodes: Vec<u32>,
-    pub len_leaf_nodes: Vec<u32>,
+    pub offset_leaf_nodes: Vec<u32>,
 }
 
 impl BVH {
@@ -143,10 +145,27 @@ impl BVH {
             .map(|next_vec| next_vec.len() as u32)
             .collect();
 
-        let len_leaf_nodes: Vec<u32> = leaf_nodes
+        let mut offset_inner_nodes: Vec<u32> = len_inner_nodes
             .iter()
-            .map(|next_vec| next_vec.len() as u32)
+            .scan(0, |acc, next_len| {
+                *acc = *acc + next_len;
+                Some(*acc)
+            })
             .collect();
+
+        offset_inner_nodes.pop();
+        offset_inner_nodes.splice(0..0, [0u32]);
+
+        let mut offset_leaf_nodes: Vec<u32> = leaf_nodes
+            .iter()
+            .scan(0, |acc, next_vec| {
+                *acc = *acc + next_vec.len() as u32;
+                Some(*acc)
+            })
+            .collect();
+
+        offset_leaf_nodes.pop();
+        offset_leaf_nodes.splice(0..0, [0u32]);
 
         let n_objects = inner_nodes.len() as u32;
 
@@ -154,8 +173,9 @@ impl BVH {
             inner_nodes: inner_nodes.into_iter().flatten().collect::<Vec<_>>(),
             leaf_nodes: leaf_nodes.into_iter().flatten().collect::<Vec<_>>(),
             normal_nodes: normal_nodes.into_iter().flatten().collect::<Vec<_>>(),
+            offset_inner_nodes,
             len_inner_nodes,
-            len_leaf_nodes,
+            offset_leaf_nodes,
         }
     }
 }

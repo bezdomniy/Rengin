@@ -89,9 +89,9 @@ struct Normals {
 struct ObjectParam {
     inverse_transform: mat4x4<f32>;
     material: Material;
+    offset_inner_nodes: i32;
     len_inner_nodes:i32;
-    len_leaf_nodes:i32;
-    is_light: u32;
+    offset_leaf_nodes:u32;
     model_type: u32;
 };
 
@@ -346,9 +346,6 @@ fn intersect(ray: Ray) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
-    var min_inner_node_idx = 0;
-    var max_inner_node_idx = 0;
-    var leaf_offset = u32(0);
 
     // TODO: fix loop range - get number of objects
     for (var i: i32 = 0; i < ubo.n_objects; i = i+1) {
@@ -364,10 +361,7 @@ fn intersect(ray: Ray) -> Intersection {
         }
         else {
             // Triangle mesh
-            max_inner_node_idx = max_inner_node_idx + ob_params.len_inner_nodes;
-            ret = intersectInnerNodes(nRay,ret, min_inner_node_idx, max_inner_node_idx, leaf_offset);
-            min_inner_node_idx = min_inner_node_idx + ob_params.len_inner_nodes;
-            leaf_offset = leaf_offset + u32(ob_params.len_leaf_nodes);
+            ret = intersectInnerNodes(nRay,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes);
         }
 
     }
@@ -625,7 +619,6 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
                         top_stack = top_stack + 1;
                         stack[top_stack] = RenderRay (Ray(hitParams.overPoint, pixel.x, hitParams.reflectv,pixel.y),new_ray.bounce_number + 1u,refl); 
                     }
-                    
                 }
                 else {
                     // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
@@ -643,19 +636,7 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
                 top_stack = top_stack + 1;
                 stack[top_stack] = RenderRay (Ray(hitParams.overPoint, pixel.x, hitParams.reflectv,pixel.y),new_ray.bounce_number + 1u,1.0); 
             }
-
-
-
         }
-
-        // new_ray = Ray(hitParams.overPoint, new_ray.rayD);
-
-        // let hit_colour = ob_params.material.colour;
-
-        // top_stack = top_stack + 1;
-        // stack[top_stack] = hit_colour;
-
-
     }
  
     return color;

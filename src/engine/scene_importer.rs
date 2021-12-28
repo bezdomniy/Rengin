@@ -304,17 +304,19 @@ impl Scene {
         //       handle drawing it multiple times
         let bvh = import_objs(&model_paths);
 
-        for (i, (object_param, len_inners, len_leafs)) in izip!(
+        for (i, (object_param, offset_inners, len_inners, offset_leafs)) in izip!(
             // TODO: need to filter considering duplicate models too...
             object_params.iter_mut().filter(|x| { x.model_type >= 10 }),
             // &mut object_params,
+            &bvh.as_ref().unwrap().offset_inner_nodes,
             &bvh.as_ref().unwrap().len_inner_nodes,
-            &bvh.as_ref().unwrap().len_leaf_nodes,
+            &bvh.as_ref().unwrap().offset_leaf_nodes,
         )
         .enumerate()
         {
             object_param.len_inner_nodes = *len_inners;
-            object_param.len_leaf_nodes = *len_leafs;
+            object_param.offset_inner_nodes = *offset_inners;
+            object_param.offset_leaf_nodes = *offset_leafs;
             object_param.model_type += i as u32;
 
             // println!("{:?} {} {}", object_param, len_leafs, len_inners);
