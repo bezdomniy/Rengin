@@ -98,7 +98,7 @@ impl ObjectParams {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct NodeLeaf {
     pub point1: Vec3,
     pub object_id: u32,
@@ -109,12 +109,12 @@ pub struct NodeLeaf {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct NodeNormal {
     pub normals: [Vec4; 3],
 }
 
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct NodeInner {
     pub first: Vec3,
@@ -136,12 +136,28 @@ pub struct BVH {
 }
 
 impl BVH {
+    pub fn empty() -> Self {
+        BVH {
+            inner_nodes: vec![NodeInner::default()],
+            leaf_nodes: vec![NodeLeaf::default()],
+            normal_nodes: vec![NodeNormal::default()],
+            offset_inner_nodes: vec![],
+            len_inner_nodes: vec![],
+            offset_leaf_nodes: vec![],
+            model_tags: vec![],
+        }
+    }
+
     pub fn new(
         inner_nodes: Vec<Vec<NodeInner>>,
         leaf_nodes: Vec<Vec<NodeLeaf>>,
         normal_nodes: Vec<Vec<NodeNormal>>,
         model_tags: Vec<String>,
     ) -> Self {
+        if inner_nodes.len() == 0 {
+            return BVH::empty();
+        }
+
         let len_inner_nodes: Vec<u32> = inner_nodes
             .iter()
             .map(|next_vec| next_vec.len() as u32)

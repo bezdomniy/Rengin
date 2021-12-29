@@ -48,7 +48,7 @@ struct Camera {
     pixelSize: f32;
     halfWidth: f32;
     halfHeight: f32;
-    width: i32;
+    _padding: u32;
 };
 
 

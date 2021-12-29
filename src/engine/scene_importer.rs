@@ -74,13 +74,13 @@ enum Add {
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all(deserialize = "kebab-case"))]
 pub struct CameraValue {
-    width: u32,
-    height: u32,
+    pub width: u32,
+    pub height: u32,
     // #[serde(rename(deserialize = "field-of-view"))]
-    field_of_view: f32,
-    from: [f32; 3],
-    to: [f32; 3],
-    up: [f32; 3],
+    pub field_of_view: f32,
+    pub from: [f32; 3],
+    pub to: [f32; 3],
+    pub up: [f32; 3],
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -225,6 +225,7 @@ impl MaterialValue {
 #[derive(Debug, Deserialize)]
 struct PatternValue {}
 
+// TODO: why are transforms in definition and add not combining properly
 impl Scene {
     pub fn new(file_path: &str) -> Self {
         let path = Path::new(file_path);
@@ -348,7 +349,7 @@ impl Scene {
 
     fn get_inverse_transform(vec_transforms: &Vec<TransformValue>) -> Mat4 {
         let mut transform = Mat4::IDENTITY;
-        for t in vec_transforms {
+        for t in vec_transforms.iter().rev() {
             transform *= match t {
                 TransformValue::Scalar(s) => match s.name.as_str() {
                     "rotate-x" => Mat4::from_rotation_x(s.value),

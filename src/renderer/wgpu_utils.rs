@@ -1,4 +1,13 @@
-use wgpu::{Adapter, Device, Instance, Queue, Surface};
+use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
+
+use crate::{
+    engine::rt_primitives::{NodeInner, NodeLeaf, NodeNormal, ObjectParams, BVH, UBO},
+    RendererType, RENDERER_TYPE,
+};
+use wgpu::{
+    util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device,
+    Instance, Queue, RenderPipeline, Sampler, ShaderModule, Surface, Texture,
+};
 use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::WindowBuilder};
 
 pub struct RenginWgpu {
@@ -6,6 +15,13 @@ pub struct RenginWgpu {
     pub adapter: Adapter,
     pub device: Device,
     pub queue: Queue,
+    pub sampler: Sampler,
+    pub compute_pipeline: Option<ComputePipeline>,
+    pub render_pipeline: Option<RenderPipeline>,
+    pub compute_bind_group_layout: Option<BindGroupLayout>,
+    pub compute_bind_group: Option<BindGroup>,
+    pub render_bind_group_layout: Option<BindGroupLayout>,
+    pub render_bind_group: Option<BindGroup>,
     pub window: winit::window::Window,
     pub window_surface: Surface,
     pub config: wgpu::SurfaceConfiguration,
@@ -23,7 +39,7 @@ impl RenginWgpu {
         workgroup_size: [u32; 3],
         event_loop: &EventLoop<()>,
         continous_motion: bool,
-    ) -> RenginWgpu {
+    ) -> Self {
         let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
         let instance = wgpu::Instance::new(backend);
 
@@ -105,11 +121,20 @@ impl RenginWgpu {
         // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
 
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+
         RenginWgpu {
             instance: instance,
             adapter: adapter,
             device: device,
             queue: queue,
+            compute_bind_group: None,
+            compute_bind_group_layout: None,
+            compute_pipeline: None,
+            render_bind_group: None,
+            render_bind_group_layout: None,
+            render_pipeline: None,
+            sampler,
             window: window,
             window_surface,
             config,
@@ -119,6 +144,359 @@ impl RenginWgpu {
             continous_motion,
             scale_factor,
         }
+    }
+
+    pub fn create_shaders(&self) -> HashMap<&'static str, ShaderModule> {
+        let cs_module = match RENDERER_TYPE {
+            RendererType::PathTracer => {
+                self.device
+                    .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                        label: None,
+                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                            "../shaders/pathtracer.wgsl"
+                        ))),
+                    })
+            }
+            RendererType::RayTracer => {
+                self.device
+                    .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                        label: None,
+                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                            "../shaders/raytracer.wgsl"
+                        ))),
+                    })
+            }
+        };
+
+        let vt_module = self
+            .device
+            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "../shaders/raytracer.vert.wgsl"
+                ))),
+            });
+
+        let fg_module = self
+            .device
+            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "../shaders/raytracer.frag.wgsl"
+                ))),
+            });
+
+        let mut shaders: HashMap<&'static str, ShaderModule> = HashMap::new();
+        shaders.insert("comp", cs_module);
+        shaders.insert("vert", vt_module);
+        shaders.insert("frag", fg_module);
+
+        shaders
+    }
+
+    pub fn create_buffers(
+        &mut self,
+        bvh: &BVH,
+        ubo: &UBO,
+        object_params: &Vec<ObjectParams>,
+    ) -> HashMap<&'static str, Buffer> {
+        let now = Instant::now();
+        log::info!("Creating buffers...");
+
+        // let bvh = self.objects.as_ref().unwrap().get(0).unwrap();
+
+        // for node in dragon_blas {
+        //     println!("{:?}", node.points);
+        // }
+        // for node in dragon_tlas {
+        //     println!("{:?}", node);
+        // }
+
+        let buf_ubo = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("UBO Buffer"),
+                contents: bytemuck::bytes_of(ubo),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
+        let buf_tlas = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("TLAS storage Buffer"),
+                contents: bytemuck::cast_slice(&bvh.inner_nodes),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+
+        let buf_blas = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("BLAS storage Buffer"),
+                contents: bytemuck::cast_slice(&bvh.leaf_nodes),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+
+        let buf_normals = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("normals storage Buffer"),
+                contents: bytemuck::cast_slice(&bvh.normal_nodes),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+
+        let buf_op = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Material storage Buffer"),
+                contents: bytemuck::cast_slice(object_params),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+
+        // let rays = ..self.render.camera
+
+        // let buf_rays = self
+        //     .renderer
+        //     .device
+        //     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //         label: Some("Ray Buffer"),
+        //         contents: bytemuck::cast_slice(&self.rays.as_ref().unwrap()),
+        //         usage: wgpu::BufferUsages::STORAGE,
+        //     });
+
+        log::info!(
+            "Finshed loading buffers in {} millis",
+            now.elapsed().as_millis()
+        );
+
+        let mut buffers: HashMap<&'static str, Buffer> = HashMap::new();
+        buffers.insert("ubo", buf_ubo);
+        buffers.insert("tlas", buf_tlas);
+        buffers.insert("blas", buf_blas);
+        buffers.insert("normals", buf_normals);
+        buffers.insert("object_params", buf_op);
+
+        buffers
+    }
+
+    pub fn create_pipelines(
+        &mut self,
+        buffers: &HashMap<&'static str, Buffer>,
+        shaders: &HashMap<&'static str, ShaderModule>,
+        texture: &Texture,
+        bvh: &BVH,
+    ) {
+        self.compute_bind_group_layout = Some(self.device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::ReadWrite,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (bvh.inner_nodes.len() * mem::size_of::<NodeInner>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (bvh.leaf_nodes.len() * mem::size_of::<NodeLeaf>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (bvh.normal_nodes.len() * mem::size_of::<NodeNormal>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            // min_binding_size: None,
+                            min_binding_size: wgpu::BufferSize::new(
+                                mem::size_of::<ObjectParams>() as _
+                            ),
+                        },
+                        count: None,
+                    },
+                ],
+                label: None,
+            },
+        ));
+
+        let compute_pipeline_layout = Some(self.device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("compute"),
+                bind_group_layouts: &[self.compute_bind_group_layout.as_ref().unwrap()],
+                push_constant_ranges: &[],
+            },
+        ));
+
+        // create render pipeline
+
+        self.render_bind_group_layout = Some(self.device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                label: Some("bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: core::num::NonZeroU32::new(1),
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            },
+        ));
+
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.render_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+            layout: self.render_bind_group_layout.as_ref().unwrap(),
+            label: Some("bind group"),
+        }));
+
+        let render_pipeline_layout = Some(self.device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("render"),
+                bind_group_layouts: &[self.render_bind_group_layout.as_ref().unwrap()],
+                push_constant_ranges: &[],
+            },
+        ));
+
+        self.render_pipeline = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: None,
+                layout: render_pipeline_layout.as_ref(),
+                multiview: None,
+                vertex: wgpu::VertexState {
+                    module: shaders.get("vert").as_ref().unwrap(),
+                    entry_point: "main",
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: shaders.get("frag").as_ref().unwrap(),
+                    entry_point: "main",
+                    targets: &[wgpu::ColorTargetState {
+                        format: self.config.format,
+                        // TODO: change subpixel to blending, rather than doing it in shader
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        // blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }],
+                    // targets: &[self.renderer.config.format.into()],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+            },
+        ));
+
+        self.compute_pipeline = Some(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("Compute pipeline"),
+                layout: compute_pipeline_layout.as_ref(),
+                module: shaders.get("comp").as_ref().unwrap(),
+                entry_point: "main",
+            },
+        ));
+
+        self.compute_bind_group = Some(
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: self.compute_bind_group_layout.as_ref().unwrap(),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: buffers.get("ubo").as_ref().unwrap().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: buffers.get("tlas").as_ref().unwrap().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: buffers.get("blas").as_ref().unwrap().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: buffers.get("normals").as_ref().unwrap().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: buffers
+                            .get("object_params")
+                            .as_ref()
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                ],
+            }),
+        );
     }
 
     // pub fn render(
