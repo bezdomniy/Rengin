@@ -381,6 +381,44 @@ fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: i32) -> Int
     return ret;
 }
 
+fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: i32) -> Intersection {
+    var ret: Intersection = inIntersection;
+
+    var t_min: f32 = NEG_INFINITY;
+    var t_max: f32 = INFINITY;
+    var t0: f32;
+    var t1: f32;
+
+    for (var a: i32 = 0; a < 3; a = a+1)
+    {
+        let invD = 1.0 / ray.rayD[a];
+        t0 = (-1.0 - ray.rayO[a]) * invD;
+        t1 = (1.0 - ray.rayO[a]) * invD;
+        if (invD < 0.0) {
+            let temp = t0;
+            t0 = t1;
+            t1 = temp;
+        }
+        if (t0 > t_min) {
+            t_min = t0;
+        }
+        if (t1 < t_max) {
+            t_max = t1;
+        }
+        if (t_max <= t_min) {
+            return ret;
+        }
+    }
+
+    if (t_min < ret.closestT && t_min > EPSILON) {
+        return Intersection(vec2<f32>(0.0),0,t_min,u32(object_id));
+    }
+    else if (t_max < ret.closestT && t_max > EPSILON) {
+        return Intersection(vec2<f32>(0.0),0,t_max,u32(object_id));
+    }
+    return ret;
+}
+
 fn intersect(ray: Ray) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
@@ -396,10 +434,12 @@ fn intersect(ray: Ray) -> Intersection {
         else if (ob_params.model_type == 1u) { //Plane
             ret = intersectPlane(nRay,ret, i);
         }
+        else if (ob_params.model_type == 2u) { //Cube
+            ret = intersectCube(nRay,ret, i);
+        }
         else {
             // Triangle mesh
             ret = intersectInnerNodes(nRay,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes);
-
         }
 
     }
@@ -426,6 +466,22 @@ fn normalAt(point: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3
     }
     else if (typeEnum == 1u) { //Plane
         return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),intersection.model_id);
+    }
+    else if (typeEnum == 2u) { //Cube
+        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(point,1.0)).xyz;
+        let p1 = abs(objectPoint.x);
+        let p2 = abs(objectPoint.y);
+        let p3 = abs(objectPoint.z);
+        var objectNormal = normalize(vec3<f32>(objectPoint.x, 0.0, 0.0));
+
+        if (p2 > p1 && p2 > p3) {
+            objectNormal = normalize(vec3<f32>(0.0, objectPoint.y, 0.0));
+        }
+        else if (p3 > p1 && p3 > p2) {
+            objectNormal = normalize(vec3<f32>(0.0, 0.0,objectPoint.z));
+        }
+
+        return normalToWorld(objectNormal,intersection.model_id);
     }
     else { //Model
         let normal: Normal = normal_nodes.Normals[intersection.id];
@@ -526,6 +582,8 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
             // top_stack = top_stack + 1;
             // stack[top_stack] = Node((1.0-t)*vec4<f32>(1.0, 1.0, 1.0, 1.0) + t*vec4<f32>(0.5, 0.7, 1.0, 1.0),vec4<f32>(0.0,0.0,0.0,0.0));
 
+            // top_stack = top_stack - 1;
+            // continue
             break;
         }
 

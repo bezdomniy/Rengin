@@ -9,7 +9,7 @@ use serde::Deserialize;
 use linked_hash_map::LinkedHashMap;
 use std::{fs::File, path::Path};
 
-static BUILTIN_SHAPES: [&'static str; 5] = ["camera", "light", "sphere", "plane", "group"];
+static BUILTIN_SHAPES: [&'static str; 6] = ["camera", "light", "sphere", "plane", "cube", "group"];
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -54,12 +54,18 @@ struct Define {
     value: DefineValue,
 }
 
+type TransformDefinition = Vec<TransformValue>;
+
+trait TransformDefinitionMethods {
+    fn set_inverse_transform(&self, transform: &mut Mat4);
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum DefineValue {
     ShapeDefinition(ShapeValue),
     MaterialDefinition(MaterialValue),
-    TransformDefinition(Vec<TransformValue>),
+    TransformDefinition(TransformDefinition),
     // Fail(serde_yaml::Value),
 }
 
@@ -95,7 +101,7 @@ struct ShapeValue {
     args: Option<[f32; 3]>,
     file: Option<String>,
     material: Option<MaterialValue>,
-    transform: Option<Vec<TransformValue>>,
+    transform: Option<TransformDefinition>,
     children: Option<Vec<ShapeValue>>,
 }
 
@@ -143,6 +149,33 @@ struct MaterialDefinition {
     pattern: Option<PatternValue>,
 }
 
+impl TransformDefinitionMethods for TransformDefinition {
+    // pub fn set_transform(&self, transform: &mut , commands: &Vec<Command>) {
+    //     match self {}
+    // }
+
+    fn set_inverse_transform(&self, transform: &mut Mat4) {
+        let mut out_transform = Mat4::IDENTITY;
+        for t in self.iter().rev() {
+            out_transform *= match t {
+                TransformValue::Scalar(s) => match s.name.as_str() {
+                    "rotate-x" => Mat4::from_rotation_x(s.value),
+                    "rotate-y" => Mat4::from_rotation_y(s.value),
+                    "rotate-z" => Mat4::from_rotation_z(s.value),
+                    _ => Mat4::IDENTITY,
+                },
+                TransformValue::Vector(v) => match v.name.as_str() {
+                    "scale" => Mat4::from_scale(Vec3::new(v.value1, v.value2, v.value3)),
+                    "translate" => Mat4::from_translation(Vec3::new(v.value1, v.value2, v.value3)),
+                    _ => Mat4::IDENTITY,
+                },
+                TransformValue::Reference(r) => Mat4::IDENTITY, //TODO
+            };
+        }
+        *transform = out_transform.inverse();
+    }
+}
+
 impl MaterialValue {
     pub fn set_material(&self, material: &mut Material, commands: &Vec<Command>) {
         match self {
@@ -150,12 +183,12 @@ impl MaterialValue {
                 MaterialValue::_set_material(material_def, material);
             }
             MaterialValue::Reference(material_ref) => {
-                MaterialValue::_find_definition_and_set(material_ref, material, commands);
+                MaterialValue::_find_definition_and_set_material(material_ref, material, commands);
             }
         }
     }
 
-    fn _find_definition_and_set(
+    fn _find_definition_and_set_material(
         material_name: &String,
         material: &mut Material,
         commands: &Vec<Command>,
@@ -165,7 +198,7 @@ impl MaterialValue {
                 Command::Define(define_command) => {
                     if define_command.define == *material_name {
                         if define_command.extend.is_some() {
-                            MaterialValue::_find_definition_and_set(
+                            MaterialValue::_find_definition_and_set_material(
                                 define_command.extend.as_ref().unwrap(),
                                 material,
                                 commands,
@@ -347,27 +380,6 @@ impl Scene {
         );
     }
 
-    fn get_inverse_transform(vec_transforms: &Vec<TransformValue>) -> Mat4 {
-        let mut transform = Mat4::IDENTITY;
-        for t in vec_transforms.iter().rev() {
-            transform *= match t {
-                TransformValue::Scalar(s) => match s.name.as_str() {
-                    "rotate-x" => Mat4::from_rotation_x(s.value),
-                    "rotate-y" => Mat4::from_rotation_y(s.value),
-                    "rotate-z" => Mat4::from_rotation_z(s.value),
-                    _ => Mat4::IDENTITY,
-                },
-                TransformValue::Vector(v) => match v.name.as_str() {
-                    "scale" => Mat4::from_scale(Vec3::new(v.value1, v.value2, v.value3)),
-                    "translate" => Mat4::from_translation(Vec3::new(v.value1, v.value2, v.value3)),
-                    _ => Mat4::IDENTITY,
-                },
-                TransformValue::Reference(r) => Mat4::IDENTITY, //TODO
-            };
-        }
-        transform.inverse()
-    }
-
     fn _set_primitive_type(type_name: &String, object_param: &mut ObjectParams) {
         match type_name.as_str() {
             "sphere" => {
@@ -376,8 +388,11 @@ impl Scene {
             "plane" => {
                 object_param.model_type = 1;
             }
-            "group" => {
+            "cube" => {
                 object_param.model_type = 2;
+            }
+            "group" => {
+                object_param.model_type = 3;
             }
             _ => {}
         }
@@ -424,9 +439,12 @@ impl Scene {
                                     Scene::_set_primitive_type(&curr_shape.add, &mut object_param);
                                 }
                                 if defined_shape.transform.is_some() {
-                                    object_param.inverse_transform = Scene::get_inverse_transform(
-                                        defined_shape.transform.as_ref().unwrap().clone(),
-                                    );
+                                    defined_shape
+                                        .transform
+                                        .as_ref()
+                                        .unwrap()
+                                        // .clone()
+                                        .set_inverse_transform(&mut object_param.inverse_transform);
                                     //todo
                                 }
                                 if defined_shape.material.is_some() {
@@ -467,8 +485,12 @@ impl Scene {
         }
 
         if curr_shape.transform.is_some() {
-            object_param.inverse_transform =
-                Scene::get_inverse_transform(curr_shape.transform.as_ref().unwrap().clone());
+            curr_shape
+                .transform
+                .as_ref()
+                .unwrap()
+                // .clone()
+                .set_inverse_transform(&mut object_param.inverse_transform);
             //todo
         }
         if curr_shape.material.is_some() {

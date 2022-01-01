@@ -1,6 +1,17 @@
-use glam::{const_vec3, const_vec4, Mat3, Mat4, Vec3, Vec4, Vec4Swizzles};
+use std::f32::consts::FRAC_PI_2;
+
+use glam::{const_mat4, const_vec3, const_vec4, EulerRot, Mat3, Mat4, Vec3, Vec4, Vec4Swizzles};
 use itertools::Itertools;
 use rand::Rng;
+use wgpu::SurfaceConfiguration;
+
+// pub const OPENGL_TO_WGPU_MATRIX: Mat4 = const_mat4!(
+//     [1.0, 0.0, 0.0, 0.0],
+//     [0.0, 1.0, 0.0, 0.0],
+//     [0.0, 0.0, 0.5, 0.0],
+//     [0.0, 0.0, 0.5, 1.0,]
+// );
+const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -55,7 +66,7 @@ impl Default for Material {
             shininess: 200.0,
             reflective: 0.0,
             transparency: 0.0,
-            refractive_index: 1.0,
+            refractive_index: 0.0,
             _padding: 0,
         }
     }
@@ -199,7 +210,7 @@ impl BVH {
     }
 
     pub fn find_model_locations(&self, tag: &String) -> (u32, u32, u32) {
-        println!("### TAG {:?}", tag);
+        // println!("### TAG {:?}", tag);
         let index = self.model_tags.iter().position(|r| r == tag).unwrap();
 
         (
@@ -220,23 +231,23 @@ pub struct Ray {
 }
 
 impl Ray {
-    pub fn new(x: u32, y: u32, ray_index: u32, sqrt_rays_per_pixel: u32, camera: &Camera) -> Self {
-        let half_sub_pixel_size = 1.0 / (sqrt_rays_per_pixel as f32) / 2.0;
+    pub fn new(x: u32, y: u32, ray_index: u32, ubo: &UBO) -> Self {
+        let half_sub_pixel_size = 1.0 / (ubo.sqrt_rays_per_pixel as f32) / 2.0;
 
-        let sub_pixel_row_number: u32 = ray_index / sqrt_rays_per_pixel;
-        let sub_pixel_col_number: u32 = ray_index % sqrt_rays_per_pixel;
+        let sub_pixel_row_number: u32 = ray_index / ubo.sqrt_rays_per_pixel;
+        let sub_pixel_col_number: u32 = ray_index % ubo.sqrt_rays_per_pixel;
         let sub_pixel_x_offset: f32 = half_sub_pixel_size * (sub_pixel_col_number as f32);
         let sub_pixel_y_offset: f32 = half_sub_pixel_size * (sub_pixel_row_number as f32);
 
-        let x_offset: f32 = ((x as f32) + sub_pixel_x_offset) * camera.pixel_size;
-        let y_offset: f32 = ((y as f32) + sub_pixel_y_offset) * camera.pixel_size;
+        let x_offset: f32 = ((x as f32) + sub_pixel_x_offset) * ubo.pixel_size;
+        let y_offset: f32 = ((y as f32) + sub_pixel_y_offset) * ubo.pixel_size;
 
-        let world_x: f32 = camera.half_width - x_offset;
-        let world_y: f32 = camera.half_height - y_offset;
+        let world_x: f32 = ubo.half_width - x_offset;
+        let world_y: f32 = ubo.half_height - y_offset;
 
-        let pixel = camera.inverse_transform * Vec4::new(world_x, world_y, -1.0, 1.0);
+        let pixel = ubo.inverse_camera_transform * Vec4::new(world_x, world_y, -1.0, 1.0);
 
-        let ray_o = camera.inverse_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
+        let ray_o = ubo.inverse_camera_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
 
         Ray {
             origin: ray_o.xyz(),
@@ -278,15 +289,124 @@ impl Rays {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone)]
 pub struct Camera {
-    pub inverse_transform: Mat4,
-    pub pixel_size: f32,
-    pub half_width: f32,
-    pub half_height: f32,
-    pub width: u32,
-    // pub height: u32,
+    pub position: Vec3,
+    pub centre: Vec3,
+    pub up: Vec3,
+    pub forward: Vec3,
+    pub yaw: f32,
+    pub pitch: f32,
+    move_speed: f32,
+}
+
+impl Camera {
+    pub fn new(p: [f32; 3], c: [f32; 3], u: [f32; 3]) -> Self {
+        let position = const_vec3!(p);
+        let centre = const_vec3!(c);
+        let up = const_vec3!(u);
+
+        let (yaw, pitch) = Camera::get_yaw_pitch(position, centre);
+
+        // let forward = (centre - position).normalize();
+
+        let forward = Vec3::new(
+            yaw.cos() * pitch.cos(),
+            pitch.sin(),
+            yaw.sin() * pitch.cos(),
+        )
+        .normalize();
+
+        // direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+        // direction.y = sin(glm::radians(pitch));
+        // direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+        // cameraFront = glm::normalize(direction);
+
+        // // Keep the camera's angle from going too high/low.
+        // if pitch < -SAFE_FRAC_PI_2 {
+        //     pitch = -SAFE_FRAC_PI_2;
+        // } else if pitch > SAFE_FRAC_PI_2 {
+        //     pitch = SAFE_FRAC_PI_2;
+        // }
+
+        Camera {
+            position,
+            centre,
+            up,
+            forward,
+            yaw,
+            pitch,
+            move_speed: 0.2,
+        }
+    }
+
+    pub fn get_transform(&self) -> Mat4 {
+        Mat4::look_at_rh(self.position, self.position + self.forward, -self.up)
+    }
+
+    pub fn get_inverse_transform(&self) -> Mat4 {
+        self.get_transform().inverse()
+    }
+
+    pub fn rotate(&mut self, d_x: f32, d_y: f32) {
+        self.yaw += d_x.to_radians() * self.move_speed;
+        self.pitch += d_y.to_radians() * self.move_speed;
+
+        if self.pitch < -SAFE_FRAC_PI_2 {
+            self.pitch = -SAFE_FRAC_PI_2;
+        } else if self.pitch > SAFE_FRAC_PI_2 {
+            self.pitch = SAFE_FRAC_PI_2;
+        }
+
+        let forward_mag = self.position.distance(self.centre);
+
+        // println!("{} {}\n{} {}", d_x, d_y, self.yaw, self.pitch);
+
+        self.forward = Vec3::new(
+            self.yaw.cos() * self.pitch.cos(),
+            self.pitch.sin(),
+            self.yaw.sin() * self.pitch.cos(),
+        )
+        .normalize();
+
+        self.centre = self.forward * forward_mag;
+
+        // println!("{:?}", self.forward);
+    }
+
+    pub fn orbit(&mut self, d_x: f32, d_y: f32, config: &SurfaceConfiguration) {
+        self.yaw += d_x as f32;
+        self.pitch += d_y as f32;
+        println!("{} {}\n{} {}", d_x, d_y, self.yaw, self.pitch);
+
+        let norm_x = self.yaw / config.width as f32;
+        let norm_y = self.pitch / config.height as f32;
+        let angle_y = norm_x * 5.0;
+        let angle_xz = -norm_y * 2.0;
+
+        let camera_dist = self.position.distance(self.centre);
+
+        let new_position = [
+            angle_xz.cos() * angle_y.sin() * camera_dist,
+            angle_xz.sin() * camera_dist + self.centre[1],
+            angle_xz.cos() * angle_y.cos() * camera_dist,
+        ];
+
+        self.position = const_vec3!(new_position);
+    }
+
+    pub fn move_forward(&mut self, d: f32) {
+        self.position -= self.forward * d * self.move_speed;
+    }
+
+    fn get_yaw_pitch(position: Vec3, centre: Vec3) -> (f32, f32) {
+        let v = (centre - position).normalize();
+
+        let pitch = -v.y.asin();
+        let yaw = v.z.atan2(v.x);
+
+        (yaw, pitch)
+    }
 }
 
 #[repr(C)]
@@ -294,7 +414,11 @@ pub struct Camera {
 pub struct UBO {
     // Compute shader uniform block object
     light_pos: Vec4,
-    pub camera: Camera,
+    pub inverse_camera_transform: Mat4,
+    pixel_size: f32,
+    half_width: f32,
+    half_height: f32,
+    _padding: u32,
     n_objects: u32,
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
@@ -305,13 +429,32 @@ pub struct UBO {
 impl UBO {
     pub fn new(
         light_pos: [f32; 4],
+        inverse_camera_transform: Mat4,
         n_objects: u32,
+        width: u32,
+        height: u32,
+        fov: f32,
         sqrt_rays_per_pixel: u32,
-        camera: Camera,
     ) -> UBO {
+        let half_view = (fov / 2f32).tan();
+        let aspect = width as f32 / height as f32;
+
+        let mut half_width = half_view;
+        let mut half_height = half_view / aspect;
+
+        if aspect < 1f32 {
+            half_height = half_view;
+            half_width = half_view / aspect;
+        }
+        let pixel_size = (half_width * 2f32) / width as f32;
+
         UBO {
             light_pos: const_vec4!(light_pos),
-            camera,
+            inverse_camera_transform,
+            pixel_size,
+            half_width,
+            half_height,
+            _padding: 0,
             n_objects,
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
@@ -321,50 +464,6 @@ impl UBO {
 
     pub fn update_random_seed(&mut self) {
         self.rnd_seed = rand::thread_rng().gen_range(0.0..1.0);
-    }
-}
-
-impl Camera {
-    pub fn new(
-        position: [f32; 3],
-        centre: [f32; 3],
-        up: [f32; 3],
-        hsize: u32,
-        vsize: u32,
-        fov: f32,
-    ) -> Camera {
-        let inverse_transform =
-            Mat4::look_at_rh(const_vec3!(position), const_vec3!(centre), const_vec3!(up)).inverse();
-        let half_view = (fov / 2f32).tan();
-        let aspect = hsize as f32 / vsize as f32;
-
-        let mut half_width = half_view;
-        let mut half_height = half_view / aspect;
-
-        if aspect < 1f32 {
-            half_height = half_view;
-            half_width = half_view / aspect;
-        }
-        let pixel_size = (half_width * 2f32) / hsize as f32;
-
-        Camera {
-            inverse_transform,
-            half_width: half_width,
-            half_height: half_height,
-            width: hsize,
-            // height: vsize,
-            pixel_size: pixel_size,
-        }
-    }
-
-    pub fn update_position(&mut self, new_position: [f32; 3], centre: [f32; 3], up: [f32; 3]) {
-        self.inverse_transform = Mat4::look_at_rh(
-            const_vec3!(new_position),
-            const_vec3!(centre),
-            const_vec3!(up),
-        )
-        .inverse();
-        // println!("{}", self.inverse_transform);
     }
 }
 

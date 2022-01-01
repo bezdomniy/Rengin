@@ -15,25 +15,17 @@ use winit::event_loop::{ControlFlow, EventLoop};
 
 use std::time::{Duration, Instant};
 
+use engine::scene_importer::Scene;
 use std::collections::HashMap;
 use std::env;
-
-// use core::num;
-
-// use wgpu::BufferUsage;
-use glam::{const_vec3, Mat4};
-
-use engine::scene_importer::Scene;
 
 use crate::renderer::wgpu_utils::RenginWgpu;
 use engine::rt_primitives::{Camera, BVH, UBO};
 
-static WIDTH: u32 = 800;
-static HEIGHT: u32 = 600;
 static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
 
 static FRAMERATE: f64 = 60.0;
-static RAYS_PER_PIXEL: u32 = 16;
+static RAYS_PER_PIXEL: u32 = 8;
 
 //TODO: try doing passes over parts of the image instead of whole at a time
 //      that way you can maintain framerate
@@ -47,27 +39,15 @@ enum RendererType {
 static RENDERER_TYPE: RendererType = RendererType::RayTracer;
 
 struct GameState {
-    pub camera_angle_y: f32,
-    pub camera_angle_xz: f32,
-    pub camera_dist: f32,
-    pub camera_centre: [f32; 3],
-    pub camera_up: [f32; 3],
+    pub camera: Camera,
 }
 
 struct RenderApp {
     renderer: RenginWgpu,
     shaders: HashMap<&'static str, ShaderModule>,
-    // compute_pipeline: Option<ComputePipeline>,
-    // // compute_bind_group_layout: Option<BindGroupLayout>,
-    // compute_bind_group: Option<BindGroup>,
-    // render_pipeline: Option<RenderPipeline>,
-    // render_bind_group_layout: Option<BindGroupLayout>,
-    // render_bind_group: Option<BindGroup>,
-    // sampler: Option<Sampler>,
     scene: Scene,
     buffers: HashMap<&'static str, Buffer>,
     texture: Texture,
-    // object_params: Option<Vec<ObjectParams>>,
     ubo: UBO,
     game_state: GameState,
 }
@@ -91,67 +71,24 @@ impl RenderApp {
             continous_motion,
         ));
 
-        // let object_params = scene.object_params.as_ref().unwrap().clone();
-
-        // println!("{:#?}", self.object_params);
-
-        // log::info!("tlas:{:?}, blas{:?}", dragon_tlas.len(), dragon_blas.len());
-        // log::info!(
-        //     "tlas:{:?}, blas{:?}",
-        //     mem::size_of::<NodeTLAS>(),
-        //     mem::size_of::<NodeBLAS>()
-        // );
-
-        // let camera_position = [-4f32, 2f32, -3f32];
-        // let camera_centre = [0f32, 1f32, 0f32];
-
-        // let camera_angle_y = 0.0;
-        // let camera_angle_xz = 0.0;
-        // let camera_dist = 9.0;
-        // TODO: find out why models are appearing upside-down
-        let camera_centre = scene.camera.as_ref().unwrap().to;
-        let camera_up = scene.camera.as_ref().unwrap().up;
-        let camera_position = scene.camera.as_ref().unwrap().from;
-
-        let transform = Mat4::look_at_rh(
-            const_vec3!(camera_position),
-            const_vec3!(camera_centre),
-            const_vec3!(camera_up),
-        );
-
-        // TODO: fix these
-        let camera_angle_y = transform.row(2)[1].atan2(transform.row(1)[1]);
-        let camera_angle_xz = (-transform.row(3)[1])
-            .atan2((transform.row(3)[2].powf(2.0) + transform.row(3)[3].powf(2.0)).sqrt());
-        let camera_dist = const_vec3!(camera_position).distance(const_vec3!(camera_centre));
-
         let game_state = GameState {
-            camera_angle_xz,
-            camera_angle_y,
-            camera_dist,
-            camera_centre,
-            camera_up,
+            camera: Camera::new(
+                scene.camera.as_ref().unwrap().from,
+                scene.camera.as_ref().unwrap().to,
+                scene.camera.as_ref().unwrap().up,
+            ),
         };
-
-        println!("{} {}", camera_angle_y, camera_angle_xz);
-
-        let camera = Camera::new(
-            camera_position,
-            camera_centre,
-            camera_up,
-            scene.camera.as_ref().unwrap().width,
-            scene.camera.as_ref().unwrap().height,
-            std::f32::consts::FRAC_PI_3,
-            // 1.0472f32,
-        );
 
         let light_value = scene.lights.as_ref().unwrap()[0].at;
         let ubo = UBO::new(
             // [-4f32, 2f32, 3f32, 1f32],
             [light_value[0], light_value[1], light_value[2], 1.0],
+            game_state.camera.get_inverse_transform(),
             scene.object_params.as_ref().unwrap().len() as u32,
+            scene.camera.as_ref().unwrap().width,
+            scene.camera.as_ref().unwrap().height,
+            std::f32::consts::FRAC_PI_3,
             (RAYS_PER_PIXEL as f32).sqrt() as u32,
-            camera,
         );
 
         println!("ubo: {:?}", ubo);
@@ -193,17 +130,9 @@ impl RenderApp {
         Self {
             renderer,
             shaders,
-            // compute_pipeline: None,
-            // compute_bind_group_layout: None,
-            // compute_bind_group: None,
-            // render_pipeline: None,
-            // render_bind_group_layout: None,
-            // render_bind_group: None,
-            // sampler: None,
             scene,
             buffers,
             texture,
-            // object_params: None,
             ubo,
             game_state,
         }
@@ -219,91 +148,38 @@ impl RenderApp {
             DeviceEvent::MouseMotion { delta } => {
                 // println!("x:{}, y:{}", position.x, position.y);
                 if *left_mouse_down {
-                    // let game_state: &mut GameState = self.game_state.as_mut().unwrap();
-                    // println!(
-                    //     "{} {}",
-                    //     game_state.camera_angle_y, game_state.camera_angle_xz
-                    // );
+                    self.game_state
+                        .camera
+                        .rotate(delta.0 as f32, delta.1 as f32);
 
-                    self.game_state.camera_angle_y += delta.0 as f32;
-                    self.game_state.camera_angle_xz += delta.1 as f32;
-
-                    let norm_x = self.game_state.camera_angle_y / self.renderer.config.width as f32;
-                    let norm_y =
-                        self.game_state.camera_angle_xz / self.renderer.config.height as f32;
-                    let angle_y = norm_x * 5.0;
-                    let angle_xz = -norm_y * 2.0;
-
-                    let new_position = [
-                        angle_xz.cos() * angle_y.sin() * self.game_state.camera_dist,
-                        angle_xz.sin() * self.game_state.camera_dist
-                            + self.game_state.camera_centre[1],
-                        angle_xz.cos() * angle_y.cos() * self.game_state.camera_dist,
-                    ];
-
-                    self.ubo.camera.update_position(
-                        new_position,
-                        self.game_state.camera_centre,
-                        self.game_state.camera_up,
-                    );
+                    self.ubo.inverse_camera_transform =
+                        self.game_state.camera.get_inverse_transform();
                     self.ubo.subpixel_idx = 0;
                     self.ubo.update_random_seed();
                     *something_changed = true;
-
-                    // if let Some(ref mut ubo) = self.ubo {
-                    //     // no reference before Some
-                    //     ubo.camera.update_position(
-                    //         new_position,
-                    //         game_state.camera_centre,
-                    //         game_state.camera_up,
-                    //     );
-                    //     ubo.subpixel_idx = 0;
-                    //     ubo.update_random_seed();
-                    //     *something_changed = true;
-                    // }
                 }
             }
             DeviceEvent::MouseWheel { delta } => match delta {
                 MouseScrollDelta::LineDelta(_, y) => {
-                    // println!("{} {}", x, y);
-                    // let game_state: &mut GameState = self.game_state.as_mut().unwrap();
-                    self.game_state.camera_dist -= (y as f32) / 3.;
+                    // println!("y: {}", y);
+                    self.game_state.camera.move_forward(y as f32);
 
-                    let norm_x = self.game_state.camera_angle_y / self.renderer.config.width as f32;
-                    let norm_y =
-                        self.game_state.camera_angle_xz / self.renderer.config.height as f32;
-                    let angle_y = norm_x * 5.0;
-                    let angle_xz = -norm_y * 2.0;
-
-                    let new_position = [
-                        angle_xz.cos() * angle_y.sin() * self.game_state.camera_dist,
-                        angle_xz.sin() * self.game_state.camera_dist
-                            + self.game_state.camera_centre[1],
-                        angle_xz.cos() * angle_y.cos() * self.game_state.camera_dist,
-                    ];
-
-                    self.ubo.camera.update_position(
-                        new_position,
-                        self.game_state.camera_centre,
-                        self.game_state.camera_up,
-                    );
+                    self.ubo.inverse_camera_transform =
+                        self.game_state.camera.get_inverse_transform();
                     self.ubo.subpixel_idx = 0;
                     self.ubo.update_random_seed();
                     *something_changed = true;
-
-                    // if let Some(ref mut ubo) = self.ubo {
-                    //     // no reference before Some
-                    //     ubo.camera.update_position(
-                    //         new_position,
-                    //         game_state.camera_centre,
-                    //         game_state.camera_up,
-                    //     );
-                    //     ubo.subpixel_idx = 0;
-                    //     ubo.update_random_seed();
-                    //     *something_changed = true;
-                    // }
                 }
-                _ => {}
+                MouseScrollDelta::PixelDelta(xy) => {
+                    // println!("pix xy: {:?}", xy);
+                    self.game_state.camera.move_forward(xy.y as f32);
+
+                    self.ubo.inverse_camera_transform =
+                        self.game_state.camera.get_inverse_transform();
+                    self.ubo.subpixel_idx = 0;
+                    self.ubo.update_random_seed();
+                    *something_changed = true;
+                } // _ => {}
             },
             _ => {}
         }
@@ -346,32 +222,6 @@ impl RenderApp {
             *control_flow = ControlFlow::Wait;
             match event {
                 Event::MainEventsCleared => {
-                    // // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
-                    //     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
-                    //     let time_since_last_frame = last_update_inst.elapsed();
-
-                    //     if (something_changed
-                    //         || self.ubo.as_ref().unwrap().subpixel_idx < RAYS_PER_PIXEL)
-                    //         && time_since_last_frame >= target_frametime
-                    //         && (!left_mouse_down || self.renderer.continous_motion)
-                    //     {
-                    //         println!("Drawing ray index: {}", self.ubo.unwrap().subpixel_idx);
-
-                    //         self.renderer.window.request_redraw();
-
-                    //         // if let Some(ref mut x) = self.ubo {
-                    //         //     x.subpixel_idx += 1;
-                    //         // }
-
-                    //         println!("render time: {:?}", time_since_last_frame);
-                    //         something_changed = false;
-
-                    //         last_update_inst = Instant::now();
-                    //     } else {
-                    //         *control_flow = ControlFlow::WaitUntil(
-                    //             Instant::now() + target_frametime - time_since_last_frame,
-                    //         );
-                    //     }
                 }
                 Event::RedrawEventsCleared => {
                     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
@@ -393,7 +243,7 @@ impl RenderApp {
                         //     x.subpixel_idx += 1;
                         // }
 
-                        println!("render time: {:?}", time_since_last_frame);
+                        // println!("render time: {:?}", time_since_last_frame);
                         something_changed = false;
 
                         last_update_inst = Instant::now();
@@ -675,63 +525,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     let scene_path = &args[1];
-    // let objects = import_obj(model_path);
-    // let (tlas, blas) = objects.as_ref().unwrap().get(0).unwrap();
-
-    // let inverseTransform = Mat4::IDENTITY;
-
-    // let camera_angle_y = 0.0;
-    // let camera_angle_xz = 0.0;
-    // let camera_dist = 9.0;
-    // // TODO: find out why models are appearing upside-down
-    // let camera_centre = [0.0, 1.0, 0.0];
-    // let camera_up = [0.0, -1.0, 0.0];
-
-    // let game_state = Some(GameState {
-    //     camera_angle_xz,
-    //     camera_angle_y,
-    //     camera_dist,
-    //     camera_centre,
-    //     camera_up,
-    // });
-
-    // let camera_position = [
-    //     camera_angle_xz.cos() * camera_angle_y.sin() * camera_dist,
-    //     camera_angle_xz.sin() * camera_dist + camera_centre[1],
-    //     -camera_angle_xz.cos() * camera_angle_y.cos() * camera_dist,
-    // ];
-
-    // // println!("{} {}", camera_angle_y, camera_angle_xz);
-
-    // let camera = Camera::new(
-    //     camera_position,
-    //     camera_centre,
-    //     camera_up,
-    //     WIDTH as u32,
-    //     HEIGHT as u32,
-    //     std::f32::consts::FRAC_PI_3,
-    //     // 1.0472f32,
-    // );
-
-    // for x in 0..WIDTH {
-    //     for y in 0..HEIGHT {
-    //         let ray: Ray = rayForPixel(x, y, &camera);
-    //         intersect(ray, inverseTransform, tlas);
-    //     }
-    // }
-
     let event_loop = EventLoop::new();
-    let mut app = RenderApp::new(scene_path, &event_loop, args[2].parse::<bool>().unwrap());
-    // app.init(scene_path);
-
-    // let mut renderdoc_api: RenderDoc<renderdoc::V100> = RenderDoc::new().unwrap();
-    // renderdoc_api.start_frame_capture(std::ptr::null(), std::ptr::null());
+    let app = RenderApp::new(scene_path, &event_loop, args[2].parse::<bool>().unwrap());
     app.render(event_loop);
-
-    // drop(app);
-
-    // log::info!("sleeping...");
-    // thread::sleep(Duration::from_millis(4000));
-    // log::info!("waking.");
-    // renderdoc_api.end_frame_capture(std::ptr::null(), std::ptr::null());
 }
