@@ -57,7 +57,8 @@ struct Define {
 type TransformDefinition = Vec<TransformValue>;
 
 trait TransformDefinitionMethods {
-    fn set_inverse_transform(&self, transform: &mut Mat4);
+    fn set_inverse_transform(&self, transform: &mut Mat4, commands: &Vec<Command>);
+    fn get_transform(transform_name: &String, commands: &Vec<Command>) -> Mat4;
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,7 +155,7 @@ impl TransformDefinitionMethods for TransformDefinition {
     //     match self {}
     // }
 
-    fn set_inverse_transform(&self, transform: &mut Mat4) {
+    fn set_inverse_transform(&self, transform: &mut Mat4, commands: &Vec<Command>) {
         let mut out_transform = Mat4::IDENTITY;
         for t in self.iter().rev() {
             out_transform *= match t {
@@ -169,10 +170,44 @@ impl TransformDefinitionMethods for TransformDefinition {
                     "translate" => Mat4::from_translation(Vec3::new(v.value1, v.value2, v.value3)),
                     _ => Mat4::IDENTITY,
                 },
-                TransformValue::Reference(r) => Mat4::IDENTITY, //TODO
+                TransformValue::Reference(r) => TransformDefinition::get_transform(r, commands), //TODO
             };
         }
         *transform = out_transform.inverse();
+    }
+
+    fn get_transform(transform_name: &String, commands: &Vec<Command>) -> Mat4 {
+        let mut out_transform = Mat4::IDENTITY;
+        for command in commands {
+            match command {
+                Command::Define(define_command) => {
+                    if define_command.define == *transform_name {
+                        if define_command.extend.is_some() {
+                            out_transform *= TransformDefinition::get_transform(
+                                define_command.extend.as_ref().unwrap(),
+                                commands,
+                            );
+                        }
+                        match &define_command.value {
+                            DefineValue::TransformDefinition(transform_def) => {
+                                let mut tranform_val = Mat4::IDENTITY;
+                                transform_def.set_inverse_transform(&mut tranform_val, commands);
+                                out_transform *= tranform_val.inverse();
+                            }
+                            _ => {
+                                panic!("Transform definition found, but has no transform value.");
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    continue;
+                }
+            }
+        }
+        return out_transform;
+        // panic!("Transform definition: {} not found.", transform_name);
+        // todo!()
     }
 }
 
@@ -444,7 +479,10 @@ impl Scene {
                                         .as_ref()
                                         .unwrap()
                                         // .clone()
-                                        .set_inverse_transform(&mut object_param.inverse_transform);
+                                        .set_inverse_transform(
+                                            &mut object_param.inverse_transform,
+                                            commands,
+                                        );
                                     //todo
                                 }
                                 if defined_shape.material.is_some() {
@@ -490,7 +528,7 @@ impl Scene {
                 .as_ref()
                 .unwrap()
                 // .clone()
-                .set_inverse_transform(&mut object_param.inverse_transform);
+                .set_inverse_transform(&mut object_param.inverse_transform, commands);
             //todo
         }
         if curr_shape.material.is_some() {
