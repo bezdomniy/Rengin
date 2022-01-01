@@ -87,7 +87,7 @@ impl RenderApp {
             scene.object_params.as_ref().unwrap().len() as u32,
             scene.camera.as_ref().unwrap().width,
             scene.camera.as_ref().unwrap().height,
-            std::f32::consts::FRAC_PI_3,
+            scene.camera.as_ref().unwrap().field_of_view,
             (RAYS_PER_PIXEL as f32).sqrt() as u32,
         );
 

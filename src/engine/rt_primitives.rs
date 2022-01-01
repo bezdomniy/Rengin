@@ -402,7 +402,7 @@ impl Camera {
     fn get_yaw_pitch(position: Vec3, centre: Vec3) -> (f32, f32) {
         let v = (centre - position).normalize();
 
-        let pitch = -v.y.asin();
+        let pitch = v.y.asin();
         let yaw = v.z.atan2(v.x);
 
         (yaw, pitch)
