@@ -619,19 +619,21 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
 
     }
 
-    let node = stack[top_stack];
-    top_stack = top_stack - 1;
-    color = node.emissiveness;
-
-    loop {
-        if (top_stack == -1) {
-            break;
-        }
+    if (top_stack > -1) {
         let node = stack[top_stack];
         top_stack = top_stack - 1;
-        // color = color * node.hit_colour;
-        color = node.emissiveness + color * node.hit_colour;
+        color = node.emissiveness;
 
+        loop {
+            if (top_stack == -1) {
+                break;
+            }
+            let node = stack[top_stack];
+            top_stack = top_stack - 1;
+            // color = color * node.hit_colour;
+            color = node.emissiveness + color * node.hit_colour;
+
+        }
     }
  
     return color;
