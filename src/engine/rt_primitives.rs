@@ -1,7 +1,6 @@
 use std::f32::consts::FRAC_PI_2;
 
-use glam::{const_mat4, const_vec3, const_vec4, EulerRot, Mat3, Mat4, Vec3, Vec4, Vec4Swizzles};
-use itertools::Itertools;
+use glam::{const_vec3, const_vec4, Mat4, Vec3, Vec4, Vec4Swizzles};
 use rand::Rng;
 use wgpu::SurfaceConfiguration;
 
@@ -71,11 +70,6 @@ impl Default for Material {
         }
     }
 }
-#[derive(Debug, Copy, Clone)]
-pub struct Primitive {
-    pub points: Mat3,
-    pub normals: Mat3,
-}
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -105,119 +99,6 @@ impl ObjectParams {
             offset_leaf_nodes,
             model_type,
         }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct NodeLeaf {
-    pub point1: Vec3,
-    pub object_id: u32,
-    pub point2: Vec3,
-    pub pad1: u32,
-    pub point3: Vec3,
-    pub pad2: u32,
-}
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct NodeNormal {
-    pub normals: [Vec4; 3],
-}
-
-#[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C)]
-pub struct NodeInner {
-    pub first: Vec3,
-    pub skip_ptr_or_prim_idx1: u32,
-    pub second: Vec3,
-    pub prim_idx2: u32,
-}
-
-#[derive(Debug, Default)]
-#[repr(C)]
-pub struct BVH {
-    pub inner_nodes: Vec<NodeInner>,
-    pub leaf_nodes: Vec<NodeLeaf>,
-    pub normal_nodes: Vec<NodeNormal>,
-    pub offset_inner_nodes: Vec<u32>,
-    pub len_inner_nodes: Vec<u32>,
-    pub offset_leaf_nodes: Vec<u32>,
-    pub model_tags: Vec<String>,
-}
-
-impl BVH {
-    pub fn empty() -> Self {
-        BVH {
-            inner_nodes: vec![NodeInner::default()],
-            leaf_nodes: vec![NodeLeaf::default()],
-            normal_nodes: vec![NodeNormal::default()],
-            offset_inner_nodes: vec![],
-            len_inner_nodes: vec![],
-            offset_leaf_nodes: vec![],
-            model_tags: vec![],
-        }
-    }
-
-    pub fn new(
-        inner_nodes: Vec<Vec<NodeInner>>,
-        leaf_nodes: Vec<Vec<NodeLeaf>>,
-        normal_nodes: Vec<Vec<NodeNormal>>,
-        model_tags: Vec<String>,
-    ) -> Self {
-        if inner_nodes.len() == 0 {
-            return BVH::empty();
-        }
-
-        let len_inner_nodes: Vec<u32> = inner_nodes
-            .iter()
-            .map(|next_vec| next_vec.len() as u32)
-            .collect();
-
-        let mut offset_inner_nodes: Vec<u32> = len_inner_nodes
-            .iter()
-            .scan(0, |acc, next_len| {
-                *acc = *acc + next_len;
-                Some(*acc)
-            })
-            .collect();
-
-        offset_inner_nodes.pop();
-        offset_inner_nodes.splice(0..0, [0u32]);
-
-        let mut offset_leaf_nodes: Vec<u32> = leaf_nodes
-            .iter()
-            .scan(0, |acc, next_vec| {
-                *acc = *acc + next_vec.len() as u32;
-                Some(*acc)
-            })
-            .collect();
-
-        offset_leaf_nodes.pop();
-        offset_leaf_nodes.splice(0..0, [0u32]);
-
-        let n_objects = inner_nodes.len() as u32;
-
-        BVH {
-            inner_nodes: inner_nodes.into_iter().flatten().collect::<Vec<_>>(),
-            leaf_nodes: leaf_nodes.into_iter().flatten().collect::<Vec<_>>(),
-            normal_nodes: normal_nodes.into_iter().flatten().collect::<Vec<_>>(),
-            offset_inner_nodes,
-            len_inner_nodes,
-            offset_leaf_nodes,
-            model_tags,
-        }
-    }
-
-    pub fn find_model_locations(&self, tag: &String) -> (u32, u32, u32) {
-        // println!("### TAG {:?}", tag);
-        let index = self.model_tags.iter().position(|r| r == tag).unwrap();
-
-        (
-            self.offset_inner_nodes[index],
-            self.len_inner_nodes[index],
-            self.offset_leaf_nodes[index],
-        )
     }
 }
 
@@ -308,26 +189,12 @@ impl Camera {
 
         let (yaw, pitch) = Camera::get_yaw_pitch(position, centre);
 
-        // let forward = (centre - position).normalize();
-
         let forward = Vec3::new(
             yaw.cos() * pitch.cos(),
             pitch.sin(),
             yaw.sin() * pitch.cos(),
         )
         .normalize();
-
-        // direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-        // direction.y = sin(glm::radians(pitch));
-        // direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-        // cameraFront = glm::normalize(direction);
-
-        // // Keep the camera's angle from going too high/low.
-        // if pitch < -SAFE_FRAC_PI_2 {
-        //     pitch = -SAFE_FRAC_PI_2;
-        // } else if pitch > SAFE_FRAC_PI_2 {
-        //     pitch = SAFE_FRAC_PI_2;
-        // }
 
         Camera {
             position,
@@ -374,7 +241,7 @@ impl Camera {
         // println!("{:?}", self.forward);
     }
 
-    pub fn orbit(&mut self, d_x: f32, d_y: f32, config: &SurfaceConfiguration) {
+    pub fn orbit_centre(&mut self, d_x: f32, d_y: f32, config: &SurfaceConfiguration) {
         self.yaw += d_x as f32;
         self.pitch += d_y as f32;
         println!("{} {}\n{} {}", d_x, d_y, self.yaw, self.pitch);
@@ -464,112 +331,5 @@ impl UBO {
 
     pub fn update_random_seed(&mut self) {
         self.rnd_seed = rand::thread_rng().gen_range(0.0..1.0);
-    }
-}
-
-impl NodeLeaf {
-    pub fn new(v: [f32; 9], object_id: u32) -> Self {
-        NodeLeaf {
-            point1: const_vec3!([v[0], v[1], v[2]]),
-            point2: const_vec3!([v[3], v[4], v[5]]),
-            point3: const_vec3!([v[6], v[7], v[8]]),
-            object_id,
-            pad1: 0,
-            pad2: 0,
-        }
-    }
-}
-
-impl NodeNormal {
-    pub fn new(v: [f32; 9]) -> Self {
-        NodeNormal {
-            normals: [
-                const_vec4!([v[0], v[1], v[2], 0f32]),
-                const_vec4!([v[3], v[4], v[5], 0f32]),
-                const_vec4!([v[6], v[7], v[8], 0f32]),
-            ],
-        }
-    }
-}
-
-impl Primitive {
-    pub fn bounds(&self) -> NodeInner {
-        self.points
-            .to_cols_array_2d()
-            .iter()
-            .fold(NodeInner::empty(), |aabb, p| {
-                aabb.add_point(&const_vec3!(*p))
-            })
-        // .add_point(&Vec3::new(0f32, 0f32, 0f32)) // This slows it down massively, but makes cube work for some reason...
-        // this is an issue with bounding boxes around axis aligned triangles - TODO, figure it out
-    }
-
-    pub fn bounds_centroid(&self) -> Vec3 {
-        let bounds = self.bounds();
-        0.5 * bounds.first + 0.5 * bounds.second
-    }
-}
-
-impl NodeInner {
-    pub fn empty() -> Self {
-        NodeInner {
-            first: const_vec3!([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
-            skip_ptr_or_prim_idx1: 0,
-            second: const_vec3!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
-            prim_idx2: 0,
-        }
-    }
-
-    pub fn merge(&self, other: &NodeInner) -> Self {
-        let min: Vec3 = const_vec3!([
-            f32::min(self.first.x, other.first.x),
-            f32::min(self.first.y, other.first.y),
-            f32::min(self.first.z, other.first.z),
-        ]);
-
-        let max: Vec3 = const_vec3!([
-            f32::max(self.second.x, other.second.x),
-            f32::max(self.second.y, other.second.y),
-            f32::max(self.second.z, other.second.z),
-        ]);
-
-        NodeInner {
-            first: min,
-            skip_ptr_or_prim_idx1: other.skip_ptr_or_prim_idx1,
-            second: max,
-            prim_idx2: other.prim_idx2,
-        }
-    }
-
-    pub fn add_point(&self, point: &Vec3) -> Self {
-        NodeInner {
-            first: self.first.min(*point),
-            skip_ptr_or_prim_idx1: self.skip_ptr_or_prim_idx1,
-            second: self.second.max(*point),
-            prim_idx2: self.prim_idx2,
-        }
-    }
-
-    pub fn diagonal(&self) -> Vec3 {
-        self.second - self.first
-    }
-
-    pub fn surface_area(&self) -> f32 {
-        let d = self.diagonal();
-        2 as f32 * (d.x * d.y + d.x * d.z + d.y * d.z)
-    }
-
-    pub fn offset(&self, point: &Vec3) -> Vec3 {
-        let mut o = *point - self.first;
-        if self.second.x > self.first.x {
-            o.x /= self.second.x - self.first.x
-        }
-        if self.second.y > self.first.y {
-            o.y /= self.second.y - self.first.y
-        }
-        if self.second.z > self.first.z {
-            o.z /= self.second.z - self.first.z
-        };
-        return o;
     }
 }

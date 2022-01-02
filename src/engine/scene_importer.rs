@@ -1,8 +1,8 @@
-use super::asset_importer::import_objs;
-use super::{super::BVH, rt_primitives::Material, rt_primitives::ObjectParams};
+// use super::asset_importer::import_objs;
+use super::{bvh::BVH, rt_primitives::Material, rt_primitives::ObjectParams};
 use glam::{Mat4, Vec3, Vec4};
 use image::{ImageBuffer, Rgba};
-use itertools::{izip, Itertools};
+use itertools::Itertools;
 use rand::{distributions::Alphanumeric, Rng};
 use serde::Deserialize;
 // use std::collections::HashMap;
@@ -170,7 +170,7 @@ impl TransformDefinitionMethods for TransformDefinition {
                     "translate" => Mat4::from_translation(Vec3::new(v.value1, v.value2, v.value3)),
                     _ => Mat4::IDENTITY,
                 },
-                TransformValue::Reference(r) => TransformDefinition::get_transform(r, commands), //TODO
+                TransformValue::Reference(r) => TransformDefinition::get_transform(r, commands),
             };
         }
         *transform = out_transform.inverse();
@@ -206,8 +206,6 @@ impl TransformDefinitionMethods for TransformDefinition {
             }
         }
         return out_transform;
-        // panic!("Transform definition: {} not found.", transform_name);
-        // todo!()
     }
 }
 
@@ -370,29 +368,7 @@ impl Scene {
         model_paths = model_paths.into_iter().unique().collect();
         println!("{:#?}", model_paths);
 
-        // TODO: this approach doesn't fully work,
-        //       it can't handle multiple instances of same model
-        //       Make it only load each instance of model once, and
-        //       handle drawing it multiple times
-        let bvh = import_objs(&model_paths);
-
-        // for (i, (object_param, offset_inners, len_inners, offset_leafs)) in izip!(
-        //     // TODO: need to filter considering duplicate models too...
-        //     object_params.iter_mut().filter(|x| { x.model_type >= 10 }),
-        //     // &mut object_params,
-        //     &bvh.as_ref().unwrap().offset_inner_nodes,
-        //     &bvh.as_ref().unwrap().len_inner_nodes,
-        //     &bvh.as_ref().unwrap().offset_leaf_nodes,
-        // )
-        // .enumerate()
-        // {
-        //     object_param.len_inner_nodes = *len_inners;
-        //     object_param.offset_inner_nodes = *offset_inners;
-        //     object_param.offset_leaf_nodes = *offset_leafs;
-        //     object_param.model_type += i as u32;
-
-        //     // println!("{:?} {} {}", object_param, len_leafs, len_inners);
-        // }
+        let bvh = Some(BVH::new(&model_paths));
 
         for (i, (obparam_key, obparam_value)) in object_params
             .iter_mut()

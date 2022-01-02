@@ -1,7 +1,8 @@
 use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 
 use crate::{
-    engine::rt_primitives::{NodeInner, NodeLeaf, NodeNormal, ObjectParams, BVH, UBO},
+    engine::bvh::{NodeInner, NodeLeaf, NodeNormal, BVH},
+    engine::rt_primitives::{ObjectParams, UBO},
     RendererType, RENDERER_TYPE,
 };
 use wgpu::{

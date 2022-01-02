@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::env;
 
 use crate::renderer::wgpu_utils::RenginWgpu;
-use engine::rt_primitives::{Camera, BVH, UBO};
+use engine::rt_primitives::{Camera, UBO};
 
 static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
 
