@@ -1,18 +1,22 @@
+use std::string;
+
 use tobj;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
 
 use glam::{const_mat3, const_vec3, const_vec4, Mat3, Vec3, Vec4};
 
+use super::rt_primitives::ObjectParams;
+
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct NodeLeaf {
     pub point1: Vec3,
-    pub object_id: u32,
-    pub point2: Vec3,
     pub pad1: u32,
-    pub point3: Vec3,
+    pub point2: Vec3,
     pub pad2: u32,
+    pub point3: Vec3,
+    pub pad3: u32,
 }
 
 #[repr(C)]
@@ -36,41 +40,18 @@ pub struct Primitive {
     pub normals: Mat3,
 }
 
-#[derive(Debug, Default)]
-#[repr(C)]
-pub struct BVH {
-    pub inner_nodes: Vec<NodeInner>,
-    pub leaf_nodes: Vec<NodeLeaf>,
-    pub normal_nodes: Vec<NodeNormal>,
-    pub offset_inner_nodes: Vec<u32>,
-    pub len_inner_nodes: Vec<u32>,
-    pub offset_leaf_nodes: Vec<u32>,
-    pub model_tags: Vec<String>,
-}
+pub struct Primitives(Vec<Vec<Primitive>>);
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
-enum SplitMethod {
-    Middle,
-    EqualCounts,
-    SAH,
-}
-
-impl BVH {
-    pub fn empty() -> Self {
-        BVH {
-            inner_nodes: vec![NodeInner::default()],
-            leaf_nodes: vec![NodeLeaf::default()],
-            normal_nodes: vec![NodeNormal::default()],
-            offset_inner_nodes: vec![],
-            len_inner_nodes: vec![],
-            offset_leaf_nodes: vec![],
-            model_tags: vec![],
-        }
+impl Primitives {
+    pub fn new() -> Self {
+        Primitives { 0: vec![] }
     }
 
-    // TODO: move this as constructor for bvh
-    pub fn new(paths: &Vec<String>) -> Self {
+    pub fn extend_from_object_params(&mut self, object_params: &Vec<ObjectParams>) {
+        todo!()
+    }
+
+    pub fn extend_from_models(&mut self, paths: &Vec<String>) {
         let (models, _materials): (Vec<_>, Vec<_>) = paths
             .into_iter()
             .map(|path| {
@@ -87,13 +68,11 @@ impl BVH {
             })
             .unzip();
 
-        let mut object_inner_nodes: Vec<Vec<NodeInner>> = vec![];
-        let mut object_leaf_nodes: Vec<Vec<NodeLeaf>> = vec![];
-        let mut object_normal_nodes: Vec<Vec<NodeNormal>> = vec![];
-
-        for (i, model) in models.iter().flatten().enumerate() {
+        // TODO: take Vec<Primitives> out to have it's own constructor which is then
+        //       fed in as the constructor for bvh. That way can can add other shapes to it.
+        for model in models.iter().flatten() {
             // println!("{:?}",model.mesh.indices);
-            let mut primitives: Vec<Primitive> = model
+            let primitives: Vec<Primitive> = model
                 .mesh
                 .indices
                 .chunks_exact(3)
@@ -139,33 +118,72 @@ impl BVH {
                 })
                 .collect();
 
-            let bounding_boxes = BVH::build(&mut primitives);
+            self.0.push(primitives);
+        }
+    }
+}
 
-            let (triangles, normals): (Vec<NodeLeaf>, Vec<NodeNormal>) = primitives
+#[derive(Debug, Default)]
+#[repr(C)]
+pub struct BVH {
+    pub inner_nodes: Vec<NodeInner>,
+    pub leaf_nodes: Vec<NodeLeaf>,
+    pub normal_nodes: Vec<NodeNormal>,
+    pub offset_inner_nodes: Vec<u32>,
+    pub len_inner_nodes: Vec<u32>,
+    pub offset_leaf_nodes: Vec<u32>,
+    pub model_tags: Vec<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+enum SplitMethod {
+    Middle,
+    EqualCounts,
+    SAH,
+}
+
+impl BVH {
+    pub fn empty() -> Self {
+        BVH {
+            inner_nodes: vec![NodeInner::default()],
+            leaf_nodes: vec![NodeLeaf::default()],
+            normal_nodes: vec![NodeNormal::default()],
+            offset_inner_nodes: vec![],
+            len_inner_nodes: vec![],
+            offset_leaf_nodes: vec![],
+            model_tags: vec![],
+        }
+    }
+
+    pub fn new(paths: &Vec<String>) -> Self {
+        let mut object_inner_nodes: Vec<Vec<NodeInner>> = vec![];
+        let mut object_leaf_nodes: Vec<Vec<NodeLeaf>> = vec![];
+        let mut object_normal_nodes: Vec<Vec<NodeNormal>> = vec![];
+
+        let mut primitives = Primitives::new();
+        primitives.extend_from_models(paths);
+
+        // TODO: take Vec<Primitives> out to have it's own constructor which is then
+        //       fed in as the constructor for bvh. That way can can add other shapes to it.
+        for next_primitives in primitives.0.iter_mut() {
+            let bounding_boxes = BVH::build(next_primitives);
+
+            let (triangles, normals): (Vec<NodeLeaf>, Vec<NodeNormal>) = next_primitives
                 .into_iter()
                 .map(|primitive| {
                     (
-                        NodeLeaf::new(primitive.points.to_cols_array(), i as u32),
+                        NodeLeaf::new(primitive.points.to_cols_array()),
                         NodeNormal::new(primitive.normals.to_cols_array()),
                     )
                 })
                 .unzip();
-
-            // for t in &triangles {
-            //     println!("{:?}", t);
-            // }
 
             object_inner_nodes.push(bounding_boxes);
             object_leaf_nodes.push(triangles);
             object_normal_nodes.push(normals);
         }
 
-        // Some(BVH::new(
-        //     object_inner_nodes,
-        //     object_leaf_nodes,
-        //     object_normal_nodes,
-        //     paths.clone(),
-        // ))
         if object_inner_nodes.len() == 0 {
             return BVH::empty();
         }
@@ -428,56 +446,6 @@ impl BVH {
         return bounding_boxes.len() as u32;
     }
 
-    // pub fn new(
-    //     inner_nodes: Vec<Vec<NodeInner>>,
-    //     leaf_nodes: Vec<Vec<NodeLeaf>>,
-    //     normal_nodes: Vec<Vec<NodeNormal>>,
-    //     model_tags: Vec<String>,
-    // ) -> Self {
-    // if inner_nodes.len() == 0 {
-    //     return BVH::empty();
-    // }
-
-    // let len_inner_nodes: Vec<u32> = inner_nodes
-    //     .iter()
-    //     .map(|next_vec| next_vec.len() as u32)
-    //     .collect();
-
-    // let mut offset_inner_nodes: Vec<u32> = len_inner_nodes
-    //     .iter()
-    //     .scan(0, |acc, next_len| {
-    //         *acc = *acc + next_len;
-    //         Some(*acc)
-    //     })
-    //     .collect();
-
-    // offset_inner_nodes.pop();
-    // offset_inner_nodes.splice(0..0, [0u32]);
-
-    // let mut offset_leaf_nodes: Vec<u32> = leaf_nodes
-    //     .iter()
-    //     .scan(0, |acc, next_vec| {
-    //         *acc = *acc + next_vec.len() as u32;
-    //         Some(*acc)
-    //     })
-    //     .collect();
-
-    // offset_leaf_nodes.pop();
-    // offset_leaf_nodes.splice(0..0, [0u32]);
-
-    // let n_objects = inner_nodes.len() as u32;
-
-    // BVH {
-    //     inner_nodes: inner_nodes.into_iter().flatten().collect::<Vec<_>>(),
-    //     leaf_nodes: leaf_nodes.into_iter().flatten().collect::<Vec<_>>(),
-    //     normal_nodes: normal_nodes.into_iter().flatten().collect::<Vec<_>>(),
-    //     offset_inner_nodes,
-    //     len_inner_nodes,
-    //     offset_leaf_nodes,
-    //     model_tags,
-    // }
-    // }
-
     pub fn find_model_locations(&self, tag: &String) -> (u32, u32, u32) {
         // println!("### TAG {:?}", tag);
         let index = self.model_tags.iter().position(|r| r == tag).unwrap();
@@ -491,14 +459,14 @@ impl BVH {
 }
 
 impl NodeLeaf {
-    pub fn new(v: [f32; 9], object_id: u32) -> Self {
+    pub fn new(v: [f32; 9]) -> Self {
         NodeLeaf {
             point1: const_vec3!([v[0], v[1], v[2]]),
             point2: const_vec3!([v[3], v[4], v[5]]),
             point3: const_vec3!([v[6], v[7], v[8]]),
-            object_id,
             pad1: 0,
             pad2: 0,
+            pad3: 0,
         }
     }
 }

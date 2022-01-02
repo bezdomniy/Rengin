@@ -1,10 +1,10 @@
 struct NodeLeaf {
     point1: vec3<f32>;
-    object_id: u32;
-    point2: vec3<f32>;
     pad1: u32;
-    point3: vec3<f32>;
+    point2: vec3<f32>;
     pad2: u32;
+    point3: vec3<f32>;
+    pad3: u32;
 };
 
 struct Normal {
@@ -211,7 +211,7 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
     return true;
 }
 
-fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -> Intersection {
+fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, object_id: i32) -> Intersection {
     let triangle = leaf_nodes.LeafNodes[triangleIdx];
     var uv: vec2<f32> = vec2<f32>(0.0);
     let e1: vec3<f32> = triangle.point2 - triangle.point1;
@@ -247,8 +247,7 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -
                     && (t > EPSILON);
 
     if (isHit) {
-        // TODO: probs dont need object_id in the leaf nodes, just in the pbject params
-        return Intersection(uv,i32(triangleIdx),t,triangle.object_id);
+        return Intersection(uv,i32(triangleIdx),t,u32(object_id));
     }
     return inIntersection;
     // return isHit ? Intersection(uv,inIntersection.id,t) : inIntersection;
@@ -263,7 +262,7 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection) -
 // i += bvh[i].skip_index
 // else:
 // i++
-fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_idx: i32, max_inner_node_idx: i32, leaf_offset: u32) -> Intersection {
+fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_idx: i32, max_inner_node_idx: i32, leaf_offset: u32, object_id: i32) -> Intersection {
     // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
     var ret: Intersection = inIntersection;
 
@@ -279,7 +278,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
             idx = idx + 1;
             if (leaf_node) {
                 for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1 + leaf_offset; primIdx < current_node.idx2 + leaf_offset; primIdx = primIdx + 1u) {
-                    let next_intersection = intersectTriangle(ray, primIdx, ret);
+                    let next_intersection = intersectTriangle(ray, primIdx, ret,object_id);
 
                     if ((next_intersection.closestT < inIntersection.closestT)  && (next_intersection.closestT > EPSILON)) {
                         ret = next_intersection;
@@ -412,7 +411,7 @@ fn intersect(ray: Ray) -> Intersection {
         }
         else {
             // Triangle mesh
-            ret = intersectInnerNodes(nRay,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes);
+            ret = intersectInnerNodes(nRay,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes,i);
         }
 
     }
@@ -671,8 +670,6 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
             var refl = reflectance(cos_theta, refraction_ratio);
 
             if (ob_params.material.transparency > 0.0 && ob_params.material.refractive_index >= 1.0) {
-
-                
                 // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
                 let sin_theta = sqrt(1.0 - cos_theta*cos_theta);
 
