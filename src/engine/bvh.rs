@@ -1,5 +1,5 @@
-use std::string;
-
+use rand::distributions::Uniform;
+use std::any::Any;
 use tobj;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
@@ -34,13 +34,19 @@ pub struct NodeInner {
     pub prim_idx2: u32,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct Primitive {
+#[derive(Debug, Default, Copy, Clone)]
+pub struct TrianglePrimitive {
     pub points: Mat3,
     pub normals: Mat3,
 }
 
-pub struct Primitives(Vec<Vec<Primitive>>);
+#[derive(Debug, Default, Copy, Clone)]
+pub struct UnitPrimitive {} // Sphere or cube
+
+#[derive(Debug, Default, Copy, Clone)]
+pub struct PlanePrimitive {}
+
+pub struct Primitives(Vec<Vec<Box<dyn Bounded>>>);
 
 impl Primitives {
     pub fn new() -> Self {
@@ -48,6 +54,8 @@ impl Primitives {
     }
 
     pub fn extend_from_object_params(&mut self, object_params: &Vec<ObjectParams>) {
+        // let primitives = vec![Primitive::default()];
+        // self.0.push(primitives);
         todo!()
     }
 
@@ -72,14 +80,14 @@ impl Primitives {
         //       fed in as the constructor for bvh. That way can can add other shapes to it.
         for model in models.iter().flatten() {
             // println!("{:?}",model.mesh.indices);
-            let primitives: Vec<Primitive> = model
+            let primitives: Vec<Box<dyn Bounded>> = model
                 .mesh
                 .indices
                 .chunks_exact(3)
                 .into_iter()
                 .map(|triangle_indices| {
                     // println!("{:?}", triangle_indices);
-                    Primitive {
+                    Box::new(TrianglePrimitive {
                         points: const_mat3!(
                             [
                                 model.mesh.positions[3 * triangle_indices[0] as usize],
@@ -114,7 +122,7 @@ impl Primitives {
                                 model.mesh.normals[(3 * triangle_indices[2] + 2) as usize],
                             ]
                         ),
-                    }
+                    }) as Box<dyn Bounded>
                 })
                 .collect();
 
@@ -172,9 +180,20 @@ impl BVH {
             let (triangles, normals): (Vec<NodeLeaf>, Vec<NodeNormal>) = next_primitives
                 .into_iter()
                 .map(|primitive| {
+                    let (points, normals) = if let Some(triangle) =
+                        primitive.as_any().downcast_ref::<TrianglePrimitive>()
+                    {
+                        (triangle.points, triangle.normals)
+                    } else if let Some(p) = primitive.as_any().downcast_ref::<UnitPrimitive>() {
+                        (Mat3::default(), Mat3::default())
+                    } else if let Some(p) = primitive.as_any().downcast_ref::<PlanePrimitive>() {
+                        (Mat3::default(), Mat3::default())
+                    } else {
+                        panic!("Unknown primitive type.")
+                    };
                     (
-                        NodeLeaf::new(primitive.points.to_cols_array()),
-                        NodeNormal::new(primitive.normals.to_cols_array()),
+                        NodeLeaf::new(points.to_cols_array()),
+                        NodeNormal::new(normals.to_cols_array()),
                     )
                 })
                 .unzip();
@@ -231,7 +250,7 @@ impl BVH {
         }
     }
 
-    fn build(triangles: &mut Vec<Primitive>) -> Vec<NodeInner> {
+    fn build(triangles: &mut Vec<Box<dyn Bounded>>) -> Vec<NodeInner> {
         let mut bounding_boxes: Vec<NodeInner> =
             Vec::with_capacity(triangles.len().next_power_of_two());
 
@@ -251,7 +270,7 @@ impl BVH {
     // TODO: make this return the skip pointer so it can bubble up
     fn recursive_build(
         bounding_boxes: &mut Vec<NodeInner>,
-        triangle_params_unsorted: &mut Vec<Primitive>,
+        triangle_params_unsorted: &mut Vec<Box<dyn Bounded>>,
         start: usize,
         end: usize,
         split_method: SplitMethod,
@@ -315,7 +334,7 @@ impl BVH {
 
                 mid = triangle_params_unsorted[start..end]
                     .iter_mut()
-                    .partition_in_place(|&n| n.bounds_centroid()[split_dimension] < pmid)
+                    .partition_in_place(|n| n.bounds_centroid()[split_dimension] < pmid)
                     + start;
 
                 if mid != start && mid != end {
@@ -398,7 +417,7 @@ impl BVH {
                     if n_shapes > MAX_SHAPES_IN_NODE || min_cost < leaf_cost {
                         mid = triangle_params_unsorted[start..end]
                             .iter_mut()
-                            .partition_in_place(|&n| {
+                            .partition_in_place(|n| {
                                 let mut b: usize = n_buckets
                                     * centroid_bounds.offset(&n.bounds_centroid())[split_dimension]
                                         .round() as usize;
@@ -483,21 +502,55 @@ impl NodeNormal {
     }
 }
 
-impl Primitive {
-    pub fn bounds(&self) -> NodeInner {
+trait Bounded {
+    fn bounds(&self) -> NodeInner;
+    fn bounds_centroid(&self) -> Vec3 {
+        let bounds = self.bounds();
+        0.5 * bounds.first + 0.5 * bounds.second
+    }
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl Bounded for TrianglePrimitive {
+    fn bounds(&self) -> NodeInner {
         self.points
             .to_cols_array_2d()
             .iter()
             .fold(NodeInner::empty(), |aabb, p| {
                 aabb.add_point(&const_vec3!(*p))
             })
-        // .add_point(&Vec3::new(0f32, 0f32, 0f32)) // This slows it down massively, but makes cube work for some reason...
-        // this is an issue with bounding boxes around axis aligned triangles - TODO, figure it out
     }
 
-    pub fn bounds_centroid(&self) -> Vec3 {
-        let bounds = self.bounds();
-        0.5 * bounds.first + 0.5 * bounds.second
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Bounded for UnitPrimitive {
+    fn bounds(&self) -> NodeInner {
+        NodeInner {
+            first: Vec3::new(-1f32, -1f32, -1f32),
+            second: Vec3::new(1f32, 1f32, 1f32),
+            ..Default::default()
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Bounded for PlanePrimitive {
+    fn bounds(&self) -> NodeInner {
+        NodeInner {
+            first: Vec3::new(-f32::INFINITY, 0f32, -f32::INFINITY),
+            second: Vec3::new(f32::INFINITY, 0f32, f32::INFINITY),
+            ..Default::default()
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
