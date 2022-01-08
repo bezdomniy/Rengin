@@ -308,16 +308,14 @@ impl Scene {
             serde_yaml::from_reader(f).expect("Failed to load scene description.");
         let (camera, lights, object_params, bvh) = Scene::load_assets(&commands);
 
-        let scene = Scene {
+        Scene {
             commands,
             bvh,
             lights,
             object_params,
             camera,
             textures: None,
-        };
-
-        scene
+        }
     }
 
     fn validate(&self) {
@@ -357,7 +355,7 @@ impl Scene {
                         // Scene::_get_object_params(add_shape, &mut object_params, commands);
                     }
                     Add::Light(add_light) => {
-                        lights.push(add_light.clone());
+                        lights.push(*add_light);
                     }
                     _ => continue,
                 },
@@ -383,12 +381,12 @@ impl Scene {
             obparam_value.model_type += i as u32;
         }
 
-        return (
+        (
             camera,
             Some(lights),
             Some(object_params.into_iter().map(|(k, v)| v).collect()),
             bvh,
-        );
+        )
     }
 
     fn _set_primitive_type(type_name: &String, object_param: &mut ObjectParams) {
@@ -532,7 +530,7 @@ mod tests {
     // use super::Scene;
     #[test]
     fn load_scene() {
-        let scene = Scene::new("./assets/scenes/model3.yaml");
+        let scene = Scene::new("./assets/scenes/test.yaml");
 
         // let x = scene[0].is_sequence()
         println!("{:#?}", scene);

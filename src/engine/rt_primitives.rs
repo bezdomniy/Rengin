@@ -65,7 +65,7 @@ impl Default for Material {
             shininess: 200.0,
             reflective: 0.0,
             transparency: 0.0,
-            refractive_index: 0.0,
+            refractive_index: 1.0,
             _padding: 0,
         }
     }
@@ -99,74 +99,6 @@ impl ObjectParams {
             offset_leaf_nodes,
             model_type,
         }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Ray {
-    origin: Vec3,
-    x: u32,
-    direction: Vec3,
-    y: u32,
-}
-
-impl Ray {
-    pub fn new(x: u32, y: u32, ray_index: u32, ubo: &UBO) -> Self {
-        let half_sub_pixel_size = 1.0 / (ubo.sqrt_rays_per_pixel as f32) / 2.0;
-
-        let sub_pixel_row_number: u32 = ray_index / ubo.sqrt_rays_per_pixel;
-        let sub_pixel_col_number: u32 = ray_index % ubo.sqrt_rays_per_pixel;
-        let sub_pixel_x_offset: f32 = half_sub_pixel_size * (sub_pixel_col_number as f32);
-        let sub_pixel_y_offset: f32 = half_sub_pixel_size * (sub_pixel_row_number as f32);
-
-        let x_offset: f32 = ((x as f32) + sub_pixel_x_offset) * ubo.pixel_size;
-        let y_offset: f32 = ((y as f32) + sub_pixel_y_offset) * ubo.pixel_size;
-
-        let world_x: f32 = ubo.half_width - x_offset;
-        let world_y: f32 = ubo.half_height - y_offset;
-
-        let pixel = ubo.inverse_camera_transform * Vec4::new(world_x, world_y, -1.0, 1.0);
-
-        let ray_o = ubo.inverse_camera_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
-
-        Ray {
-            origin: ray_o.xyz(),
-            x,
-            direction: (pixel - ray_o).xyz(),
-            y,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Default)]
-pub struct Rays {
-    pub data: Vec<Ray>,
-}
-
-// TODO: implement sorting before output to gpu buffer
-impl Rays {
-    pub fn new(width: u32, height: u32) -> Self {
-        let mut rays = Rays {
-            data: vec![
-                Ray {
-                    direction: Vec3::new(0.0, 0.0, 0.0),
-                    x: 0,
-                    origin: Vec3::new(0.0, 0.0, 0.0),
-                    y: 0
-                };
-                (width * height) as usize
-            ],
-        };
-
-        // for x in 0..width {
-        //     for y in 0..height {
-        //         data.
-        //     }
-        // }
-
-        rays
     }
 }
 
@@ -331,5 +263,73 @@ impl UBO {
 
     pub fn update_random_seed(&mut self) {
         self.rnd_seed = rand::thread_rng().gen_range(0.0..1.0);
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Ray {
+    origin: Vec3,
+    x: u32,
+    direction: Vec3,
+    y: u32,
+}
+
+impl Ray {
+    pub fn new(x: u32, y: u32, ray_index: u32, ubo: &UBO) -> Self {
+        let half_sub_pixel_size = 1.0 / (ubo.sqrt_rays_per_pixel as f32) / 2.0;
+
+        let sub_pixel_row_number: u32 = ray_index / ubo.sqrt_rays_per_pixel;
+        let sub_pixel_col_number: u32 = ray_index % ubo.sqrt_rays_per_pixel;
+        let sub_pixel_x_offset: f32 = half_sub_pixel_size * (sub_pixel_col_number as f32);
+        let sub_pixel_y_offset: f32 = half_sub_pixel_size * (sub_pixel_row_number as f32);
+
+        let x_offset: f32 = ((x as f32) + sub_pixel_x_offset) * ubo.pixel_size;
+        let y_offset: f32 = ((y as f32) + sub_pixel_y_offset) * ubo.pixel_size;
+
+        let world_x: f32 = ubo.half_width - x_offset;
+        let world_y: f32 = ubo.half_height - y_offset;
+
+        let pixel = ubo.inverse_camera_transform * Vec4::new(world_x, world_y, -1.0, 1.0);
+
+        let ray_o = ubo.inverse_camera_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
+
+        Ray {
+            origin: ray_o.xyz(),
+            x,
+            direction: (pixel - ray_o).xyz(),
+            y,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct Rays {
+    pub data: Vec<Ray>,
+}
+
+// TODO: implement sorting before output to gpu buffer
+impl Rays {
+    pub fn new(width: u32, height: u32) -> Self {
+        let mut rays = Rays {
+            data: vec![
+                Ray {
+                    direction: Vec3::new(0.0, 0.0, 0.0),
+                    x: 0,
+                    origin: Vec3::new(0.0, 0.0, 0.0),
+                    y: 0
+                };
+                (width * height) as usize
+            ],
+        };
+
+        // for x in 0..width {
+        //     for y in 0..height {
+        //         data.
+        //     }
+        // }
+
+        rays
     }
 }
