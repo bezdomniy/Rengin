@@ -537,7 +537,8 @@ fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
 
 fn reflectance(cosine:f32, ref_idx: f32) -> f32 {
     // Use Schlick's approximation for reflectance.
-    let r0 = ((1.0-ref_idx) / (1.0+ref_idx))*2.0;
+    let r0 = pow((1.0-ref_idx) / (1.0+ref_idx),2.0);
+    // let r0 = ((1.0-ref_idx) / (1.0+ref_idx))*2.0;
     return r0 + (1.0-r0)*pow((1.0 - cosine),5.0);
 }
 
@@ -653,21 +654,15 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
         color = color + lighting(ob_params.material, ubo.lightPos,
                                 hitParams, shadowed) * new_ray.reflectance * new_ray.reflective_or_transparent;
 
-        // if (ob_params.material.reflective > 0.0) {
-        //     top_stack = top_stack + 1;
-        //     stack[top_stack] = Ray(hitParams.overPoint, hitParams.reflectv);
-        // }
-        var refraction_ratio = ob_params.material.refractive_index;
-        if (hitParams.front_face) {
-            refraction_ratio=1.0/refraction_ratio;
-        }
-        // let unit_direction = normalize(new_ray.ray.rayD);
-        // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
-        let cos_theta = dot(hitParams.eyev,hitParams.normalv);
-        var refl = reflectance(cos_theta, refraction_ratio);
-
-        // if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
-
+        if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
+            var refraction_ratio = ob_params.material.refractive_index;
+            if (hitParams.front_face) {
+                refraction_ratio=1.0/refraction_ratio;
+            }
+            // let unit_direction = normalize(new_ray.ray.rayD);
+            // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
+            let cos_theta = dot(hitParams.eyev,hitParams.normalv);
+            let refl = reflectance(cos_theta, refraction_ratio);
 
             if (ob_params.material.transparency > 0.0 && ob_params.material.refractive_index >= 1.0) {
                 // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
@@ -692,7 +687,7 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
                 top_stack = top_stack + 1;
                 stack[top_stack] = RenderRay (Ray(hitParams.overPoint, pixel.x, hitParams.reflectv,pixel.y),new_ray.bounce_number + 1u,refl,ob_params.material.reflective); 
             }
-        // }
+        }
     }
  
     return color;
