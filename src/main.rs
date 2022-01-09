@@ -15,9 +15,9 @@ use winit::event_loop::{ControlFlow, EventLoop};
 
 use std::time::{Duration, Instant};
 
+use clap::Parser;
 use engine::scene_importer::Scene;
 use std::collections::HashMap;
-use std::env;
 
 use crate::renderer::wgpu_utils::RenginWgpu;
 use engine::rt_primitives::{Camera, UBO};
@@ -25,18 +25,14 @@ use engine::rt_primitives::{Camera, UBO};
 static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
 
 static FRAMERATE: f64 = 60.0;
-static RAYS_PER_PIXEL: u32 = 8;
 
 //TODO: try doing passes over parts of the image instead of whole at a time
 //      that way you can maintain framerate
 
-enum RendererType {
+pub enum RendererType {
     PathTracer,
     RayTracer,
 }
-
-// static RENDERER_TYPE: RendererType = RendererType::PathTracer;
-static RENDERER_TYPE: RendererType = RendererType::RayTracer;
 
 struct GameState {
     pub camera: Camera,
@@ -53,7 +49,13 @@ struct RenderApp {
 }
 
 impl RenderApp {
-    pub fn new(scene_path: &str, event_loop: &EventLoop<()>, continous_motion: bool) -> Self {
+    pub fn new(
+        scene_path: &str,
+        event_loop: &EventLoop<()>,
+        continous_motion: bool,
+        rays_per_pixel: u32,
+        renderer_type: RendererType,
+    ) -> Self {
         let mut now = Instant::now();
         log::info!("Loading models...");
 
@@ -69,6 +71,7 @@ impl RenderApp {
             WORKGROUP_SIZE,
             event_loop,
             continous_motion,
+            rays_per_pixel,
         ));
 
         let game_state = GameState {
@@ -88,7 +91,7 @@ impl RenderApp {
             scene.camera.as_ref().unwrap().width,
             scene.camera.as_ref().unwrap().height,
             scene.camera.as_ref().unwrap().field_of_view,
-            (RAYS_PER_PIXEL as f32).sqrt() as u32,
+            (renderer.rays_per_pixel as f32).sqrt() as u32,
         );
 
         println!("ubo: {:?}", ubo);
@@ -96,7 +99,7 @@ impl RenderApp {
         // log::info!("ubo:{:?},", ubo);
         now = Instant::now();
         log::info!("Building shaders...");
-        let shaders = renderer.create_shaders();
+        let shaders = renderer.create_shaders(renderer_type);
         log::info!(
             "Finshed building shaders in {} millis",
             now.elapsed().as_millis()
@@ -227,7 +230,7 @@ impl RenderApp {
                     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                     let time_since_last_frame = last_update_inst.elapsed();
 
-                    if (something_changed || self.ubo.subpixel_idx < RAYS_PER_PIXEL)
+                    if (something_changed || self.ubo.subpixel_idx < self.renderer.rays_per_pixel)
                         && time_since_last_frame >= target_frametime
                         && (!left_mouse_down || self.renderer.continous_motion)
                     {
@@ -520,12 +523,45 @@ impl RenderApp {
     }
 }
 
+/// A wgpu ray tracer
+#[derive(Parser, Debug)]
+#[clap(about, author)]
+struct Args {
+    /// Path to scene definition YAML
+    #[clap(short, long)]
+    scene: String,
+
+    /// Only redraw on mouse up
+    #[clap(short, long)]
+    draw_on_mouseup: bool,
+
+    /// Use Path tracer renderer
+    #[clap(short, long)]
+    pathtracer: bool,
+    /// Number of rays per pixel
+    #[clap(short, long, default_value_t = 8)]
+    rays_per_pixel: u32,
+}
+
 fn main() {
     env_logger::init();
-    let args: Vec<String> = env::args().collect();
 
-    let scene_path = &args[1];
+    let args = Args::parse();
+
+    let renderer_type = if args.pathtracer {
+        RendererType::PathTracer
+    } else {
+        RendererType::RayTracer
+    };
+
+    let scene_path = &args.scene;
     let event_loop = EventLoop::new();
-    let app = RenderApp::new(scene_path, &event_loop, args[2].parse::<bool>().unwrap());
+    let app = RenderApp::new(
+        scene_path,
+        &event_loop,
+        !args.draw_on_mouseup,
+        args.rays_per_pixel,
+        renderer_type,
+    );
     app.render(event_loop);
 }

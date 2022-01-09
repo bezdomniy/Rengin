@@ -3,7 +3,7 @@ use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 use crate::{
     engine::bvh::{NodeInner, NodeLeaf, NodeNormal, BVH},
     engine::rt_primitives::{ObjectParams, UBO},
-    RendererType, RENDERER_TYPE,
+    RendererType,
 };
 use wgpu::{
     util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device,
@@ -30,6 +30,7 @@ pub struct RenginWgpu {
     pub width: u32,
     pub workgroup_size: [u32; 3],
     pub continous_motion: bool,
+    pub rays_per_pixel: u32,
     pub scale_factor: f64,
 }
 
@@ -40,6 +41,7 @@ impl RenginWgpu {
         workgroup_size: [u32; 3],
         event_loop: &EventLoop<()>,
         continous_motion: bool,
+        rays_per_pixel: u32,
     ) -> Self {
         let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
         let instance = wgpu::Instance::new(backend);
@@ -143,12 +145,16 @@ impl RenginWgpu {
             height,
             workgroup_size,
             continous_motion,
+            rays_per_pixel,
             scale_factor,
         }
     }
 
-    pub fn create_shaders(&self) -> HashMap<&'static str, ShaderModule> {
-        let cs_module = match RENDERER_TYPE {
+    pub fn create_shaders(
+        &self,
+        renderer_type: RendererType,
+    ) -> HashMap<&'static str, ShaderModule> {
+        let cs_module = match renderer_type {
             RendererType::PathTracer => {
                 self.device
                     .create_shader_module(&wgpu::ShaderModuleDescriptor {
