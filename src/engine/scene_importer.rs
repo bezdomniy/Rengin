@@ -139,11 +139,11 @@ struct VectorTransform {
 #[serde(rename_all(deserialize = "kebab-case"))]
 struct MaterialDefinition {
     color: Option<[f32; 3]>,
+    emissiveness: Option<[f32; 3]>,
     ambient: Option<f32>,
     diffuse: Option<f32>,
     specular: Option<f32>,
     shininess: Option<f32>,
-    emissiveness: Option<[f32; 3]>,
     reflective: Option<f32>,
     transparency: Option<f32>,
     refractive_index: Option<f32>,
@@ -283,7 +283,7 @@ impl MaterialValue {
         }
         // if material_def.pattern.is_some() {
         //     (*material).pattern = material_def.pattern.unwrap();
-        // }},
+        // }
     }
 }
 
@@ -511,6 +511,7 @@ impl Scene {
                 .as_ref()
                 .unwrap()
                 .set_material(&mut object_param.material, commands);
+            // println!("{:#?}", object_param.material);
         }
 
         accum_object_params.insert((object_map_key.clone(), hash.clone()), object_param);

@@ -1,0 +1,109 @@
+- add: camera
+  width: 900
+  height: 900
+  field-of-view: 0.698132
+  from: [278, 278, -760]
+  to: [278, 278, 0]
+  up: [0, 1, 0]
+- add: light
+  at: [278, 500, 278]
+  intensity: [1, 1, 1]
+- define: base-material
+  value:
+    color: [1, 0, 0]
+    diffuse: 0.7
+    ambient: 0.1
+    specular: 0.3
+    shininess: 200
+    # reflective: 0.1
+- define: blue-material
+  extend: base-material
+  value:
+    color: [0.537, 0.831, 0.914]
+- define: green-material
+  extend: base-material
+  value:
+    color: [0.12, 0.45, 0.15]
+
+- define: red-material
+  extend: base-material
+  value:
+    color: [0.65, 0.05, 0.05]
+
+- define: white-material
+  extend: base-material
+  value:
+    color: [0.73, 0.73, 0.73]
+
+- define: white-light
+  extend: white-material
+  value:
+    emissiveness: [7,7,7]
+
+# - define: sun-light
+#   extend: base-material
+#   value:
+#     emissiveness: [1000,1000,1000]
+
+- add: cube
+  material: white-light
+  transform:
+    - [scale, 65, 1, 53]
+    - [translate, 278, 554, 278]
+
+# - add: sphere
+#   material: sun-light
+#   transform:
+#     - [scale, 65, 65, 65]
+#     - [translate, 278, 278, -2760]
+
+- define: lucy
+  value:
+    add: obj
+    file: assets/models/lucy.obj
+    transform:
+      - [scale, 0.36, 0.36, 0.36]
+
+- add: lucy
+  material: blue-material
+  transform:
+    - [scale, 0.36, 0.36, 0.36]
+    - [rotate-y, -1.0]
+    - [translate, 378, 50, 400]
+
+# - add: sphere
+#   material: blue-material
+#   transform:
+#     - [scale, 80,80, 80]
+#     - [translate, 378, 80, 400]
+
+- add: cube
+  material: white-material
+  transform:
+    - [scale, 278, 1, 278]
+    - [translate, 278, 0, 278]
+- add: cube
+  material: white-material
+  transform:
+    - [scale, 278, 1, 278]
+    - [translate, 278, 555, 278]
+
+- add: cube
+  material: white-material
+  transform:
+    - [scale, 278, 1, 278]
+    - [rotate-x, 1.5708]
+    - [translate, 278, 278, 555]
+
+- add: cube
+  material: red-material
+  transform:
+    - [scale, 278, 1, 278]
+    - [rotate-z, 1.5708]
+    - [translate, 555, 278, 278]
+- add: cube
+  material: green-material
+  transform:
+    - [scale, 278, 1, 278]
+    - [rotate-z, 1.5708]
+    - [translate, 0, 278, 278]

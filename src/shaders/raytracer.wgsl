@@ -538,7 +538,6 @@ fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
 fn reflectance(cosine:f32, ref_idx: f32) -> f32 {
     // Use Schlick's approximation for reflectance.
     let r0 = pow((1.0-ref_idx) / (1.0+ref_idx),2.0);
-    // let r0 = ((1.0-ref_idx) / (1.0+ref_idx))*2.0;
     return r0 + (1.0-r0)*pow((1.0 - cosine),5.0);
 }
 

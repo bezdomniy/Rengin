@@ -1,0 +1,166 @@
+- add: camera
+  width: 800
+  height: 600
+  field-of-view: 1.0472
+  from: [-8, 2, 3]
+  to: [0, 2.8, 0]
+  up: [0, 1, 0]
+- add: light
+  at: [-4, 2, 3]
+  intensity: [1, 1, 1]
+
+- define: white-light
+  value:
+    color: [1,1,1]
+    emissiveness: [7,7,7]
+    
+
+- define: base-material
+  value:
+    color: [1, 1, 1]
+    diffuse: 0.7
+    ambient: 0.1
+    specular: 0.3
+    shininess: 200
+- define: blue-material
+  extend: base-material
+  value:
+    color: [0.537, 0.831, 0.914]
+    # reflective: 1.0
+    # transparency: 0.5
+    # refractive-index: 1.655
+- define: pink-material
+  extend: base-material
+  value:
+    color: [1, 0.42, 0.7]
+    reflective: 0.9
+- define: yellow-material
+  extend: base-material
+  value:
+    color: [0.831, 0.537, 0.214]
+- define: green-material
+  extend: base-material
+  value:
+    color: [0.12, 0.45, 0.15]
+- define: red-material
+  extend: base-material
+  value:
+    color: [0.65, 0.05, 0.05]
+- define: sphere-material
+  extend: base-material
+  value:
+    color: [0.3,0.3,0.3]
+    reflective: 0.2
+    transparency: 0.2
+    refractive-index: 1.5
+- define: standard-transform
+  value:
+    - [scale, 0.5, 0.5, 0.5]
+    - [translate, 1, -1, 1]
+- define: dalmatian-material
+  value:
+    pattern:
+      type: checkers
+      perturbed: 0.5
+      colors:
+        - [0.90, 0.16, 0.16]
+        - [1, 1, 1]
+      transform:
+        - [scale, 0.25, 0.25, 0.25]
+    diffuse: 0.7
+    ambient: 0.1
+    transparency: 0.8
+    refractive-index: 1.52
+- define: hippy-material
+  value:
+    pattern:
+      type: blended
+      perturbed: 0.1
+      patterns:
+        - type: stripes
+          perturbed: 0.1
+          colors:
+            - [0.09, 0.69, 0.86]
+            - [0.88, 0.71, 0.4]
+          transform:
+            - [scale, 0.25, 0.25, 0.25]
+        - type: stripes
+          perturbed: 0.1
+          colors:
+            - [0.02, 0.40, 0.33]
+            - [0.9, 0.16, 0.16]
+          transform:
+            - [rotate-y, 1.5708]
+            - [scale, 0.25, 0.25, 0.25]
+    diffuse: 0.7
+    ambient: 0.1
+- define: suzanne
+  value:
+    add: obj
+    file: assets/models/suzanne.obj
+    material: blue-material 
+    # transform:
+    #   - [rotate-y, 2.1 ]
+    #   - [translate, 0.0, 1.0, 0.0]
+    #   - [scale, 0.5, 0.5, 0.5]
+      # - [scale, 0.268, 0.268, 0.268]
+- define: bunny
+  value:
+    add: obj
+    file: assets/models/bunny.obj
+    # transform:
+    #   - [scale, 0.5, 0.5, 0.5]
+- define: lucy
+  value:
+    add: obj
+    file: assets/models/lucy.obj
+    # transform:
+    #   - [scale, 0.005, 0.005, 0.005]
+- add: suzanne
+  material: red-material
+  transform:
+    # - [rotate-y, 3.7]
+    # - [scale, 0.005, 0.005, 0.005]
+    - [translate, -2, 0, 0]
+- add: bunny
+  material: green-material
+  transform:
+    # - [rotate-y, -0.4]
+    - [translate, 3, -1, 0]
+- add: lucy
+  args: [-1, 1, 1]
+  material: pink-material
+  transform:
+      - [scale, 0.005, 0.005, 0.005]
+  #   - [rotate-y, -2.5 ]
+  #   - [translate, -0.2, 0.0, 0.5]
+
+- add: cube
+  material: white-light
+  transform:
+    - [scale, 1, 0.1, 1]
+    - [translate, 0, 8, 0]
+- add: cube
+  material: white-light
+  transform:
+    - [scale, 1, 1, 0.1]
+    - [translate, 0, 0, 12]
+- add: cube
+  material: blue-material
+  transform:
+    - [scale, 10,5,10]
+    - [translate, 0, 3, 8]
+# - add: plane
+#   material: yellow-material
+#   transform:
+#     - [translate, 0, -3, 0]
+# - add: plane
+#   material: blue-material
+#   transform:
+#     - [rotate-x, 1.5708]
+#     - [translate, 0, 0, -3]
+- add: sphere
+  material: sphere-material
+  transform:
+    - [scale, 0.1, 1, 1]
+    - [translate, -2, 3, 0]
