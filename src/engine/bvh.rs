@@ -1,7 +1,6 @@
-use rand::distributions::Uniform;
+use itertools::partition;
 use std::any::Any;
 use tobj;
-
 static MAX_SHAPES_IN_NODE: usize = 4;
 
 use glam::{const_mat3, const_vec3, const_vec4, Mat3, Vec3, Vec4};
@@ -332,10 +331,9 @@ impl BVH {
                     + centroid_bounds.second[split_dimension])
                     / 2f32;
 
-                mid = triangle_params_unsorted[start..end]
-                    .iter_mut()
-                    .partition_in_place(|n| n.bounds_centroid()[split_dimension] < pmid)
-                    + start;
+                mid = partition(triangle_params_unsorted[start..end].iter_mut(), |n| {
+                    n.bounds_centroid()[split_dimension] < pmid
+                }) + start;
 
                 if mid != start && mid != end {
                     fallthrough = true;
@@ -415,18 +413,15 @@ impl BVH {
 
                     let leaf_cost = n_shapes as f32;
                     if n_shapes > MAX_SHAPES_IN_NODE || min_cost < leaf_cost {
-                        mid = triangle_params_unsorted[start..end]
-                            .iter_mut()
-                            .partition_in_place(|n| {
-                                let mut b: usize = n_buckets
-                                    * centroid_bounds.offset(&n.bounds_centroid())[split_dimension]
-                                        .round() as usize;
-                                if b == n_buckets {
-                                    b = n_buckets - 1;
-                                };
-                                b <= min_cost_split_bucket
-                            })
-                            + start;
+                        mid = partition(triangle_params_unsorted[start..end].iter_mut(), |n| {
+                            let mut b: usize = n_buckets
+                                * centroid_bounds.offset(&n.bounds_centroid())[split_dimension]
+                                    .round() as usize;
+                            if b == n_buckets {
+                                b = n_buckets - 1;
+                            };
+                            b <= min_cost_split_bucket
+                        }) + start;
                     } else {
                         // println!("leaf");
                         bounds.skip_ptr_or_prim_idx1 = start as u32;

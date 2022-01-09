@@ -1,5 +1,3 @@
-#![feature(iter_partition_in_place)]
-
 mod engine;
 mod renderer;
 mod shaders;
