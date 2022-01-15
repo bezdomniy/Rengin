@@ -256,7 +256,7 @@ impl RenderApp {
                 }
                 Event::WindowEvent {
                     event:
-                    // TODO: resize makes picture darker - fix it
+                    // TODO: resize camera all wonky when turning - fix it
                         WindowEvent::Resized(size)
                         | WindowEvent::ScaleFactorChanged {
                             new_inner_size: &mut size,
@@ -268,6 +268,7 @@ impl RenderApp {
                     // Reconfigure the surface with the new size
                     self.renderer.config.width = size.width.max(1);
                     self.renderer.config.height = size.height.max(1);
+                    self.ubo.subpixel_idx = 0;
 
                     let logical_size: LogicalSize<u32> =
                         winit::dpi::PhysicalSize::new(size.width, size.height)
