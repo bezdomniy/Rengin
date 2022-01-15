@@ -217,7 +217,7 @@ pub struct UBO {
     pixel_size: f32,
     half_width: f32,
     half_height: f32,
-    _padding: u32,
+    fov: f32,
     n_objects: u32,
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
@@ -253,12 +253,26 @@ impl UBO {
             pixel_size,
             half_width,
             half_height,
-            _padding: 0,
+            fov,
             n_objects,
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
             rnd_seed: rand::thread_rng().gen_range(0.0..1.0),
         }
+    }
+
+    pub fn update_dims(&mut self, width: u32, height: u32) {
+        let half_view = (self.fov / 2f32).tan();
+        let aspect = width as f32 / height as f32;
+
+        self.half_width = half_view;
+        self.half_height = half_view / aspect;
+
+        if aspect < 1f32 {
+            self.half_height = half_view;
+            self.half_width = half_view / aspect;
+        }
+        self.pixel_size = (self.half_width * 2f32) / width as f32;
     }
 
     pub fn update_random_seed(&mut self) {

@@ -222,8 +222,7 @@ impl RenderApp {
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
             match event {
-                Event::MainEventsCleared => {
-                }
+                Event::MainEventsCleared => {}
                 Event::RedrawEventsCleared => {
                     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                     let time_since_last_frame = last_update_inst.elapsed();
@@ -256,7 +255,6 @@ impl RenderApp {
                 }
                 Event::WindowEvent {
                     event:
-                    // TODO: resize camera all wonky when turning - fix it
                         WindowEvent::Resized(size)
                         | WindowEvent::ScaleFactorChanged {
                             new_inner_size: &mut size,
@@ -269,6 +267,7 @@ impl RenderApp {
                     self.renderer.config.width = size.width.max(1);
                     self.renderer.config.height = size.height.max(1);
                     self.ubo.subpixel_idx = 0;
+                    self.ubo.update_dims(size.width, size.height);
 
                     let logical_size: LogicalSize<u32> =
                         winit::dpi::PhysicalSize::new(size.width, size.height)
@@ -481,7 +480,11 @@ impl RenderApp {
                             &[],
                         );
 
-                        let logical_size: LogicalSize<u32> = winit::dpi::PhysicalSize::new(self.renderer.config.width, self.renderer.config.height).to_logical(self.renderer.scale_factor);
+                        let logical_size: LogicalSize<u32> = winit::dpi::PhysicalSize::new(
+                            self.renderer.config.width,
+                            self.renderer.config.height,
+                        )
+                        .to_logical(self.renderer.scale_factor);
 
                         cpass.dispatch(
                             logical_size.width / WORKGROUP_SIZE[0],
