@@ -44,6 +44,7 @@ impl RenginWgpu {
         rays_per_pixel: u32,
     ) -> Self {
         let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
+        // let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
         let instance = wgpu::Instance::new(backend);
 
         let scale_factor: f64 = event_loop.primary_monitor().unwrap().scale_factor();
@@ -70,11 +71,6 @@ impl RenginWgpu {
             .await
             .unwrap();
 
-        // let adapter = instance
-        //     .request_adapter(&wgpu::RequestAdapterOptions::default())
-        //     .await
-        //     .unwrap();
-
         let adapter_info = adapter.get_info();
         println!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
         println!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
@@ -87,10 +83,11 @@ impl RenginWgpu {
                 | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
                 | wgpu::Features::PUSH_CONSTANTS
         };
-        let required_features = { wgpu::Features::TEXTURE_BINDING_ARRAY };
+        // let required_features = { wgpu::Features::TEXTURE_BINDING_ARRAY };
+        let required_features = { wgpu::Features::empty() };
         let required_limits = {
             wgpu::Limits {
-                max_push_constant_size: 4,
+                max_push_constant_size: 0,
                 ..wgpu::Limits::default()
             }
         }
@@ -384,7 +381,7 @@ impl RenginWgpu {
 
         self.render_bind_group_layout = Some(self.device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
-                label: Some("bind group layout"),
+                label: Some("render bind group layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -394,7 +391,7 @@ impl RenginWgpu {
                             view_dimension: wgpu::TextureViewDimension::D2,
                             multisampled: false,
                         },
-                        count: core::num::NonZeroU32::new(1),
+                        count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
