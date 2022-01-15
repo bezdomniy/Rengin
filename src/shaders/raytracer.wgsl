@@ -694,7 +694,7 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
 }
 
 
-[[stage(compute), workgroup_size(8, 8)]]
+[[stage(compute), workgroup_size(16, 16)]]
 fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>

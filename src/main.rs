@@ -479,9 +479,12 @@ impl RenderApp {
                             self.renderer.compute_bind_group.as_ref().unwrap(),
                             &[],
                         );
+
+                        let logical_size: LogicalSize<u32> = winit::dpi::PhysicalSize::new(self.renderer.config.width, self.renderer.config.height).to_logical(self.renderer.scale_factor);
+
                         cpass.dispatch(
-                            self.renderer.config.width / WORKGROUP_SIZE[0],
-                            self.renderer.config.height / WORKGROUP_SIZE[1],
+                            logical_size.width / WORKGROUP_SIZE[0],
+                            logical_size.height / WORKGROUP_SIZE[1],
                             WORKGROUP_SIZE[2],
                         );
                     }
