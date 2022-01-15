@@ -6,7 +6,7 @@ This ray tracer is mostly based on Jamis Buck's The Ray Tracer Challenge. There 
 It is implemented in Rust using the WGPU library and compute shaders in WGSL.
 ### System requirements:
 - Rust and Cargo - https://www.rust-lang.org/tools/install
-- A device compatible with WGPU - https://github.com/gfx-rs/wgpu
+- A device compatible with WGPU - https://github.com/gfx-rs/wgpu 
 
 ### How to run:
 `cargo run --release -- -s assets/scenes/models.yaml`
@@ -20,3 +20,5 @@ Type `cargo run --release -- -h` for a full list of options.
 
 ### Bugs:
 This is early days for my renderer and there are many bugs. Please let me know if you find some.
+
+I have tested it using Vulkan and Metal backends for WGPU. I know that it currently does not work with the DX12 backend.
