@@ -2,8 +2,8 @@
   width: 800
   height: 600
   field-of-view: 1.0472
-  from: [-8, 2, 3]
-  to: [0, 2.8, 0]
+  from: [-3, 2, 10]
+  to: [0, 1.8, 0]
   up: [0, 1, 0]
 - add: light
   at: [-4, 2, 3]
@@ -12,7 +12,7 @@
 - define: white-light
   value:
     color: [1,1,1]
-    emissiveness: [7,7,7]
+    emissiveness: [8,8,8]
     
 
 - define: base-material
@@ -49,7 +49,7 @@
 - define: sphere-material
   extend: base-material
   value:
-    color: [0.3,0.3,0.3]
+    color: [0,0,0]
     reflective: 0.2
     transparency: 0.2
     refractive-index: 1.5
@@ -162,5 +162,5 @@
 - add: sphere
   material: sphere-material
   transform:
-    - [scale, 0.1, 1, 1]
+    - [scale, 1, 1, 1]
     - [translate, -2, 3, 0]
