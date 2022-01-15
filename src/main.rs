@@ -267,11 +267,12 @@ impl RenderApp {
                     self.renderer.config.width = size.width.max(1);
                     self.renderer.config.height = size.height.max(1);
                     self.ubo.subpixel_idx = 0;
-                    self.ubo.update_dims(size.width, size.height);
 
                     let logical_size: LogicalSize<u32> =
                         winit::dpi::PhysicalSize::new(size.width, size.height)
                             .to_logical(self.renderer.scale_factor);
+
+                    self.ubo.update_dims(&logical_size);
 
                     // println!("l: {} {}", logical_size.width, logical_size.height);
 

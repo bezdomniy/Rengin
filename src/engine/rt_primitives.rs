@@ -3,6 +3,7 @@ use std::f32::consts::FRAC_PI_2;
 use glam::{const_vec3, const_vec4, Mat4, Vec3, Vec4, Vec4Swizzles};
 use rand::Rng;
 use wgpu::SurfaceConfiguration;
+use winit::dpi::LogicalSize;
 
 // pub const OPENGL_TO_WGPU_MATRIX: Mat4 = const_mat4!(
 //     [1.0, 0.0, 0.0, 0.0],
@@ -261,9 +262,9 @@ impl UBO {
         }
     }
 
-    pub fn update_dims(&mut self, width: u32, height: u32) {
+    pub fn update_dims(&mut self, size: &LogicalSize<u32>) {
         let half_view = (self.fov / 2f32).tan();
-        let aspect = width as f32 / height as f32;
+        let aspect = size.width as f32 / size.height as f32;
 
         self.half_width = half_view;
         self.half_height = half_view / aspect;
@@ -272,7 +273,7 @@ impl UBO {
             self.half_height = half_view;
             self.half_width = half_view / aspect;
         }
-        self.pixel_size = (self.half_width * 2f32) / width as f32;
+        self.pixel_size = (self.half_width * 2f32) / size.width as f32;
     }
 
     pub fn update_random_seed(&mut self) {
