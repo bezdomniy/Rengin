@@ -231,7 +231,7 @@ impl RenderApp {
                         && time_since_last_frame >= target_frametime
                         && (!left_mouse_down || self.renderer.continous_motion)
                     {
-                        println!("Drawing ray index: {}", self.ubo.subpixel_idx);
+                        // println!("Drawing ray index: {}", self.ubo.subpixel_idx);
 
                         // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
                         // self.renderer.instance.poll_all(true);
