@@ -3,7 +3,7 @@
   height: 900
   field-of-view: 0.698132
   from: [278, 278, -760]
-  to: [278, 278, 0]
+  to: [278, 300, 0]
   up: [0, 1, 0]
 - add: light
   at: [278, 500, 278]
@@ -29,7 +29,11 @@
   extend: base-material
   value:
     color: [0.65, 0.05, 0.05]
-
+- define: pink-material
+  extend: base-material
+  value:
+    color: [1, 0.42, 0.7]
+    reflective: 0.9
 - define: white-material
   extend: base-material
   value:
@@ -65,17 +69,17 @@
       - [scale, 0.36, 0.36, 0.36]
 
 - add: lucy
-  material: blue-material
+  material: pink-material
   transform:
     - [scale, 0.36, 0.36, 0.36]
     - [rotate-y, -1.0]
     - [translate, 378, 50, 400]
 
-# - add: sphere
-#   material: blue-material
-#   transform:
-#     - [scale, 80,80, 80]
-#     - [translate, 378, 80, 400]
+- add: sphere
+  material: blue-material
+  transform:
+    - [scale, 80,80, 80]
+    - [translate, 200, 80, 400]
 
 - add: cube
   material: white-material
