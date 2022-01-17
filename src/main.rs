@@ -17,6 +17,7 @@ use clap::Parser;
 use engine::scene_importer::Scene;
 use std::collections::HashMap;
 
+use crate::engine::rt_primitives::Rays;
 use crate::renderer::wgpu_utils::RenginWgpu;
 use engine::rt_primitives::{Camera, UBO};
 
@@ -83,13 +84,20 @@ impl RenderApp {
         let light_value = scene.lights.as_ref().unwrap()[0].at;
         let ubo = UBO::new(
             // [-4f32, 2f32, 3f32, 1f32],
-            [light_value[0], light_value[1], light_value[2], 1.0],
+            [light_value[0], light_value[1], light_value[2]],
             game_state.camera.get_inverse_transform(),
             scene.object_params.as_ref().unwrap().len() as u32,
             scene.camera.as_ref().unwrap().width,
             scene.camera.as_ref().unwrap().height,
             scene.camera.as_ref().unwrap().field_of_view,
             (renderer.rays_per_pixel as f32).sqrt() as u32,
+        );
+
+        let rays = Rays::new(
+            scene.camera.as_ref().unwrap().width,
+            scene.camera.as_ref().unwrap().height,
+            &renderer.resolution,
+            &ubo,
         );
 
         println!("ubo: {:?}", ubo);
@@ -124,9 +132,16 @@ impl RenderApp {
         let buffers = renderer.create_buffers(
             scene.bvh.as_ref().unwrap(),
             &ubo,
+            &rays,
             scene.object_params.as_ref().unwrap(),
         );
-        renderer.create_pipelines(&buffers, &shaders, &texture, scene.bvh.as_ref().unwrap());
+        renderer.create_pipelines(
+            &buffers,
+            &shaders,
+            &texture,
+            scene.bvh.as_ref().unwrap(),
+            &rays,
+        );
 
         Self {
             renderer,
@@ -206,11 +221,24 @@ impl RenderApp {
         }
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self, size: &LogicalSize<u32>) {
         self.renderer.queue.write_buffer(
             self.buffers.get("ubo").unwrap(),
             0,
             bytemuck::bytes_of(&self.ubo),
+        );
+
+        let rays = Rays::new(
+            size.width,
+            size.height,
+            &self.renderer.resolution,
+            &self.ubo,
+        );
+
+        self.renderer.queue.write_buffer(
+            self.buffers.get("rays").unwrap(),
+            0,
+            bytemuck::cast_slice(&rays.data),
         );
     }
 
@@ -231,7 +259,7 @@ impl RenderApp {
                         && time_since_last_frame >= target_frametime
                         && (!left_mouse_down || self.renderer.continous_motion)
                     {
-                        // println!("Drawing ray index: {}", self.ubo.subpixel_idx);
+                        println!("Drawing ray index: {}", self.ubo.subpixel_idx);
 
                         // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
                         // self.renderer.instance.poll_all(true);
@@ -358,6 +386,15 @@ impl RenderApp {
                                             .unwrap()
                                             .as_entire_binding(),
                                     },
+                                    wgpu::BindGroupEntry {
+                                        binding: 6,
+                                        resource: self
+                                            .buffers
+                                            .get("rays")
+                                            .as_ref()
+                                            .unwrap()
+                                            .as_entire_binding(),
+                                    },
                                 ],
                             }),
                     );
@@ -432,7 +469,14 @@ impl RenderApp {
                     // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
                     // println!("done");
                     // println!("redrawing");
-                    self.update();
+
+                    let logical_size: LogicalSize<u32> = winit::dpi::PhysicalSize::new(
+                        self.renderer.config.width,
+                        self.renderer.config.height,
+                    )
+                    .to_logical(self.renderer.scale_factor);
+
+                    self.update(&logical_size);
                     let frame = match self.renderer.window_surface.get_current_texture() {
                         Ok(frame) => frame,
                         Err(_) => {
@@ -480,12 +524,6 @@ impl RenderApp {
                             self.renderer.compute_bind_group.as_ref().unwrap(),
                             &[],
                         );
-
-                        let logical_size: LogicalSize<u32> = winit::dpi::PhysicalSize::new(
-                            self.renderer.config.width,
-                            self.renderer.config.height,
-                        )
-                        .to_logical(self.renderer.scale_factor);
 
                         cpass.dispatch(
                             logical_size.width / WORKGROUP_SIZE[0],

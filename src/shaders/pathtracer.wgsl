@@ -48,7 +48,7 @@ struct Camera {
     pixelSize: f32;
     halfWidth: f32;
     halfHeight: f32;
-    _padding: u32;
+    fov: f32;
 };
 
 
@@ -108,6 +108,10 @@ struct Ray {
     y: u32;
 };
 
+struct Rays {
+    Rays: [[stride(32)]] array<Ray>;
+};
+
 struct Intersection {
     uv: vec2<f32>;
     id: i32;
@@ -127,6 +131,8 @@ var<storage, read> leaf_nodes: LeafNodes;
 var<storage, read> normal_nodes: Normals;
 [[group(0), binding(5)]]
 var<storage, read> object_params: ObjectParams;
+[[group(0), binding(6)]]
+var<storage, read_write> rays: Rays;
 
 let EPSILON:f32 = 0.0001;
 let MAXLEN: f32 = 10000.0;
@@ -562,7 +568,8 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
 
     // var ray: Ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
 
-    var new_ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
+    // var new_ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
+    var new_ray = rays.Rays[(pixel.y * 600u) + pixel.x];
     var type_enum = 0;
     // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 

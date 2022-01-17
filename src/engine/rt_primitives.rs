@@ -3,7 +3,7 @@ use std::f32::consts::FRAC_PI_2;
 use glam::{const_vec3, const_vec4, Mat4, Vec3, Vec4, Vec4Swizzles};
 use rand::Rng;
 use wgpu::SurfaceConfiguration;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalSize};
 
 // pub const OPENGL_TO_WGPU_MATRIX: Mat4 = const_mat4!(
 //     [1.0, 0.0, 0.0, 0.0],
@@ -213,7 +213,8 @@ impl Camera {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct UBO {
     // Compute shader uniform block object
-    light_pos: Vec4,
+    light_pos: Vec3,
+    width: u32,
     pub inverse_camera_transform: Mat4,
     pixel_size: f32,
     half_width: f32,
@@ -228,7 +229,7 @@ pub struct UBO {
 
 impl UBO {
     pub fn new(
-        light_pos: [f32; 4],
+        light_pos: [f32; 3],
         inverse_camera_transform: Mat4,
         n_objects: u32,
         width: u32,
@@ -249,7 +250,8 @@ impl UBO {
         let pixel_size = (half_width * 2f32) / width as f32;
 
         UBO {
-            light_pos: const_vec4!(light_pos),
+            light_pos: const_vec3!(light_pos),
+            width,
             inverse_camera_transform,
             pixel_size,
             half_width,
@@ -265,6 +267,8 @@ impl UBO {
     pub fn update_dims(&mut self, size: &LogicalSize<u32>) {
         let half_view = (self.fov / 2f32).tan();
         let aspect = size.width as f32 / size.height as f32;
+
+        self.width = size.width;
 
         self.half_width = half_view;
         self.half_height = half_view / aspect;
@@ -282,7 +286,7 @@ impl UBO {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ray {
     origin: Vec3,
     x: u32,
@@ -326,25 +330,47 @@ pub struct Rays {
 
 // TODO: implement sorting before output to gpu buffer
 impl Rays {
-    pub fn new(width: u32, height: u32) -> Self {
-        let mut rays = Rays {
-            data: vec![
-                Ray {
-                    direction: Vec3::new(0.0, 0.0, 0.0),
-                    x: 0,
-                    origin: Vec3::new(0.0, 0.0, 0.0),
-                    y: 0
-                };
-                (width * height) as usize
-            ],
-        };
+    pub fn new(width: u32, height: u32, resolution: &PhysicalSize<u32>, ubo: &UBO) -> Self {
+        let mut rays: Vec<Ray> = (0..width)
+            .into_iter()
+            .flat_map(|x| {
+                (0..height)
+                    .into_iter()
+                    .map(move |y| Rays::ray_from_xy(x, y, ubo))
+            })
+            .collect();
 
-        // for x in 0..width {
-        //     for y in 0..height {
-        //         data.
-        //     }
-        // }
+        rays.extend(
+            vec![Ray::default(); (resolution.width * resolution.height) as usize - rays.len()]
+                .iter(),
+        );
 
-        rays
+        Rays { data: rays }
+    }
+
+    fn ray_from_xy(x: u32, y: u32, ubo: &UBO) -> Ray {
+        let half_sub_pixel_size = 1f32 / (ubo.sqrt_rays_per_pixel as f32) / 2f32;
+
+        let sub_pixel_row_number: u32 = ubo.subpixel_idx / ubo.sqrt_rays_per_pixel;
+        let sub_pixel_col_number: u32 = ubo.subpixel_idx % ubo.sqrt_rays_per_pixel;
+        let sub_pixel_x_offset: f32 = half_sub_pixel_size * sub_pixel_col_number as f32;
+        let sub_pixel_y_offset: f32 = half_sub_pixel_size * sub_pixel_row_number as f32;
+
+        let x_offset: f32 = (x as f32 + sub_pixel_x_offset) * ubo.pixel_size;
+        let y_offset: f32 = (y as f32 + sub_pixel_y_offset) * ubo.pixel_size;
+
+        let world_x: f32 = ubo.half_width - x_offset;
+        let world_y: f32 = ubo.half_height - y_offset;
+
+        let pixel = ubo.inverse_camera_transform * Vec4::new(world_x, world_y, -1.0, 1.0);
+
+        let ray_o = ubo.inverse_camera_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
+
+        Ray {
+            origin: ray_o.xyz(),
+            x,
+            direction: (pixel - ray_o).normalize().xyz(),
+            y,
+        }
     }
 }

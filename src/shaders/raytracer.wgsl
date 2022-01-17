@@ -48,13 +48,13 @@ struct Camera {
     pixelSize: f32;
     halfWidth: f32;
     halfHeight: f32;
-    _padding: u32;
+    fov: f32;
 };
 
 
 struct UBO {
     lightPos: vec3<f32>;
-    _padding: u32;
+    width: u32;
     camera: Camera;
     n_objects: i32;
     subpixel_idx: u32;
@@ -108,6 +108,10 @@ struct Ray {
     y: u32;
 };
 
+struct Rays {
+    Rays: [[stride(32)]] array<Ray>;
+};
+
 struct Intersection {
     uv: vec2<f32>;
     id: i32;
@@ -127,6 +131,8 @@ var<storage, read> leaf_nodes: LeafNodes;
 var<storage, read> normal_nodes: Normals;
 [[group(0), binding(5)]]
 var<storage, read> object_params: ObjectParams;
+[[group(0), binding(6)]]
+var<storage, read_write> rays: Rays;
 
 let EPSILON:f32 = 0.0001;
 let MAXLEN: f32 = 10000.0;
@@ -253,15 +259,6 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, o
     // return isHit ? Intersection(uv,inIntersection.id,t) : inIntersection;
 }
 
-//TODO:
-// i = 0
-// while i < bvh.size():
-// if bvh[i] is a primitive:
-// perform and record the ray-object intersection check
-// else if the ray does not hit the bounding volume of bvh[i]:
-// i += bvh[i].skip_index
-// else:
-// i++
 fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_idx: i32, max_inner_node_idx: i32, leaf_offset: u32, object_id: i32) -> Intersection {
     // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
     var ret: Intersection = inIntersection;
@@ -598,7 +595,7 @@ struct RenderRay {
     reflective_or_transparent: f32;
 };
 
-fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
+fn renderScene(init_ray: Ray,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
     var uv: vec2<f32>;
@@ -606,7 +603,8 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
 
     // var ray: Ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
 
-    let init_ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
+    // let init_ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
+    // let init_ray = rays.Rays[(pixel.y * 900u) + pixel.x];
     var type_enum = 0;
     // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
@@ -677,14 +675,14 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
                     let r_out_parallel = -sqrt(abs(1.0 - dot(r_out_perp,r_out_perp))) * hitParams.normalv;
 
                     top_stack = top_stack + 1;
-                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,pixel.x, r_out_perp + r_out_parallel,pixel.y),new_ray.bounce_number + 1u,1.0-refl,ob_params.material.transparency); 
+                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,init_ray.x, r_out_perp + r_out_parallel,init_ray.y),new_ray.bounce_number + 1u,1.0-refl,ob_params.material.transparency); 
 
                     // direction = refract(unit_direction, rec.normal, refraction_ratio);
                 }
             }
             if (ob_params.material.reflective > 0.0) {
                 top_stack = top_stack + 1;
-                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, pixel.x, hitParams.reflectv,pixel.y),new_ray.bounce_number + 1u,refl,ob_params.material.reflective); 
+                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, init_ray.x, hitParams.reflectv,init_ray.y),new_ray.bounce_number + 1u,refl,ob_params.material.reflective); 
             }
         }
     }
@@ -700,15 +698,21 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
         ) 
 {
-
     var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
+    let ray = rays.Rays[(global_invocation_id.y * ubo.width) + global_invocation_id.x];
+
+    if (ray.x == 0u && ray.y == 0u) {
+        return;
+    }
+
+    let uv = vec2<i32>(i32(ray.x) ,i32(ray.y));
     if (ubo.subpixel_idx > 0u) {
-        let inUV = vec2<i32>(i32(global_invocation_id.x) ,i32(global_invocation_id.y) );
-        color = textureLoad(imageData,inUV);
+        color = textureLoad(imageData,uv);
     }
 
     let half_sub_pixel_size = 1.0 / f32(ubo.sqrt_rays_per_pixel) / 2.0;
-    let ray_color = renderScene(global_invocation_id.xy,ubo.subpixel_idx,ubo.sqrt_rays_per_pixel,half_sub_pixel_size);
+
+    let ray_color = renderScene(ray,ubo.subpixel_idx,ubo.sqrt_rays_per_pixel,half_sub_pixel_size);
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
@@ -718,7 +722,6 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
     color.g = clamp(color.g,0.0,0.999);
     color.b = clamp(color.b,0.0,0.999);
     color.a = clamp(color.a,0.0,0.999);
-    
 
-    textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+    textureStore(imageData, uv, color);
 }
