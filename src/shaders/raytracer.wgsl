@@ -103,9 +103,9 @@ struct ObjectParams {
 
 struct Ray {
     rayO: vec3<f32>;
-    x: u32;
+    x: i32;
     rayD: vec3<f32>;
-    y: u32;
+    y: i32;
 };
 
 struct Rays {
@@ -175,7 +175,7 @@ fn rayForPixel(p: vec2<u32>, sqrt_rays_per_pixel: u32, current_ray_index: u32, h
 
     let rayO: vec4<f32> = ubo.camera.inverseTransform * vec4<f32>(0.0, 0.0, 0.0, 1.0);
 
-    return Ray(rayO.xyz, p.x, normalize(pixel - rayO).xyz,p.y);
+    return Ray(rayO.xyz, i32(p.x), normalize(pixel - rayO).xyz,i32(p.y));
 }
 
 
@@ -504,7 +504,7 @@ fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
   let distance: f32 = length(v);
   let direction: vec3<f32> = normalize(v);
 
-  let intersection: Intersection = intersect(Ray(point,0u,direction,0u));
+  let intersection: Intersection = intersect(Ray(point,0,direction,0));
 
   if (intersection.closestT > EPSILON && intersection.closestT < distance)
   {
@@ -604,7 +604,7 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_
     // var ray: Ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
 
     // let init_ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
-    // let init_ray = rays.Rays[(pixel.y * 900u) + pixel.x];
+    // let init_ray = rays.Rays[(pixel.y * ubo.width) + pixel.x];
     var type_enum = 0;
     // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
@@ -675,14 +675,14 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_
                     let r_out_parallel = -sqrt(abs(1.0 - dot(r_out_perp,r_out_perp))) * hitParams.normalv;
 
                     top_stack = top_stack + 1;
-                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,init_ray.x, r_out_perp + r_out_parallel,init_ray.y),new_ray.bounce_number + 1u,1.0-refl,ob_params.material.transparency); 
+                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, r_out_perp + r_out_parallel,new_ray.ray.y),new_ray.bounce_number + 1u,1.0-refl,ob_params.material.transparency); 
 
                     // direction = refract(unit_direction, rec.normal, refraction_ratio);
                 }
             }
             if (ob_params.material.reflective > 0.0) {
                 top_stack = top_stack + 1;
-                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, init_ray.x, hitParams.reflectv,init_ray.y),new_ray.bounce_number + 1u,refl,ob_params.material.reflective); 
+                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,refl,ob_params.material.reflective); 
             }
         }
     }
@@ -698,20 +698,28 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
         ) 
 {
+    // var color: vec4<f32> = vec4<f32>(f32((workgroup_id.x * workgroup_id.y) % 4u) / 4.0,0.0,0.0,1.0);
     var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
+
+    // if (ubo.subpixel_idx > 0u) {
+    //     color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
+    // }
+    // textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+
     let ray = rays.Rays[(global_invocation_id.y * ubo.width) + global_invocation_id.x];
 
-    if (ray.x == 0u && ray.y == 0u) {
+    if (ray.x < 0) {
         return;
     }
 
-    let uv = vec2<i32>(i32(ray.x) ,i32(ray.y));
+    
+    // let uv = vec2<i32>(ray.x ,ray.y);
+
     if (ubo.subpixel_idx > 0u) {
-        color = textureLoad(imageData,uv);
+        color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
     }
 
     let half_sub_pixel_size = 1.0 / f32(ubo.sqrt_rays_per_pixel) / 2.0;
-
     let ray_color = renderScene(ray,ubo.subpixel_idx,ubo.sqrt_rays_per_pixel,half_sub_pixel_size);
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
@@ -722,6 +730,7 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
     color.g = clamp(color.g,0.0,0.999);
     color.b = clamp(color.b,0.0,0.999);
     color.a = clamp(color.a,0.0,0.999);
+    
 
-    textureStore(imageData, uv, color);
+    textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }

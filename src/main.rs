@@ -93,12 +93,7 @@ impl RenderApp {
             (renderer.rays_per_pixel as f32).sqrt() as u32,
         );
 
-        let rays = Rays::new(
-            scene.camera.as_ref().unwrap().width,
-            scene.camera.as_ref().unwrap().height,
-            &renderer.resolution,
-            &ubo,
-        );
+        let rays = Rays::empty(&renderer.resolution);
 
         println!("ubo: {:?}", ubo);
 
@@ -248,25 +243,26 @@ impl RenderApp {
         let mut something_changed = false;
 
         event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Wait;
+            // *control_flow = ControlFlow::Wait;
             match event {
                 Event::MainEventsCleared => {}
                 Event::RedrawEventsCleared => {
                     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                     let time_since_last_frame = last_update_inst.elapsed();
 
-                    if (something_changed || self.ubo.subpixel_idx < self.renderer.rays_per_pixel)
-                        && time_since_last_frame >= target_frametime
-                        && (!left_mouse_down || self.renderer.continous_motion)
+                    if (!left_mouse_down || self.renderer.continous_motion)
+                        && ((self.ubo.subpixel_idx < self.renderer.rays_per_pixel)
+                            || (something_changed && time_since_last_frame >= target_frametime))
                     {
                         println!("Drawing ray index: {}", self.ubo.subpixel_idx);
 
                         // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
                         // self.renderer.instance.poll_all(true);
-                        self.renderer.device.poll(wgpu::Maintain::Wait);
+                        // self.renderer.device.poll(wgpu::Maintain::Wait);
 
                         self.renderer.window.request_redraw();
 
+                        self.ubo.subpixel_idx += 1;
                         // if let Some(ref mut x) = self.ubo {
                         //     x.subpixel_idx += 1;
                         // }
@@ -477,6 +473,7 @@ impl RenderApp {
                     .to_logical(self.renderer.scale_factor);
 
                     self.update(&logical_size);
+
                     let frame = match self.renderer.window_surface.get_current_texture() {
                         Ok(frame) => frame,
                         Err(_) => {
@@ -526,8 +523,8 @@ impl RenderApp {
                         );
 
                         cpass.dispatch(
-                            logical_size.width / WORKGROUP_SIZE[0],
-                            logical_size.height / WORKGROUP_SIZE[1],
+                            (logical_size.width / WORKGROUP_SIZE[0]) + WORKGROUP_SIZE[0],
+                            (logical_size.height / WORKGROUP_SIZE[1]) + WORKGROUP_SIZE[1],
                             WORKGROUP_SIZE[2],
                         );
                     }
@@ -553,9 +550,8 @@ impl RenderApp {
                         .queue
                         .submit(std::iter::once(command_encoder.finish()));
 
+                    self.renderer.device.poll(wgpu::Maintain::Wait);
                     frame.present();
-
-                    self.ubo.subpixel_idx += 1;
 
                     // if let Some(ref mut x) = self.ubo {
                     //     x.subpixel_idx += 1;

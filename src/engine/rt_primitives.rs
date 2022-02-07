@@ -249,6 +249,8 @@ impl UBO {
         }
         let pixel_size = (half_width * 2f32) / width as f32;
 
+        println!("{width} {height}");
+
         UBO {
             light_pos: const_vec3!(light_pos),
             width,
@@ -286,20 +288,20 @@ impl UBO {
 }
 
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ray {
     origin: Vec3,
-    x: u32,
+    x: i32,
     direction: Vec3,
-    y: u32,
+    y: i32,
 }
 
 impl Ray {
-    pub fn new(x: u32, y: u32, ray_index: u32, ubo: &UBO) -> Self {
+    pub fn new(x: i32, y: i32, ubo: &UBO) -> Self {
         let half_sub_pixel_size = 1.0 / (ubo.sqrt_rays_per_pixel as f32) / 2.0;
 
-        let sub_pixel_row_number: u32 = ray_index / ubo.sqrt_rays_per_pixel;
-        let sub_pixel_col_number: u32 = ray_index % ubo.sqrt_rays_per_pixel;
+        let sub_pixel_row_number: u32 = ubo.subpixel_idx / ubo.sqrt_rays_per_pixel;
+        let sub_pixel_col_number: u32 = ubo.subpixel_idx % ubo.sqrt_rays_per_pixel;
         let sub_pixel_x_offset: f32 = half_sub_pixel_size * (sub_pixel_col_number as f32);
         let sub_pixel_y_offset: f32 = half_sub_pixel_size * (sub_pixel_row_number as f32);
 
@@ -316,8 +318,19 @@ impl Ray {
         Ray {
             origin: ray_o.xyz(),
             x,
-            direction: (pixel - ray_o).xyz(),
+            direction: (pixel - ray_o).normalize().xyz(),
             y,
+        }
+    }
+}
+
+impl Default for Ray {
+    fn default() -> Self {
+        Ray {
+            x: -1,
+            y: -1,
+            direction: Vec3::default(),
+            origin: Vec3::default(),
         }
     }
 }
@@ -331,15 +344,24 @@ pub struct Rays {
 // TODO: implement sorting before output to gpu buffer
 impl Rays {
     pub fn new(width: u32, height: u32, resolution: &PhysicalSize<u32>, ubo: &UBO) -> Self {
-        let mut rays: Vec<Ray> = (0..width)
+        println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
+        let mut rays: Vec<Ray> = (0..height)
             .into_iter()
-            .flat_map(|x| {
-                (0..height)
+            .flat_map(|y| {
+                (0..width)
                     .into_iter()
-                    .map(move |y| Rays::ray_from_xy(x, y, ubo))
+                    .map(move |x| Ray::new(x as i32, y as i32, ubo))
             })
             .collect();
 
+        // let mut rays: Vec<Ray> = vec![];
+        // for y in 0..height {
+        //     for x in 0..width {
+        //         rays.push(Ray::new(x as i32, y as i32, ubo));
+        //     }
+        // }
+
+        // println!("r rays:{}", rays.len());
         rays.extend(
             vec![Ray::default(); (resolution.width * resolution.height) as usize - rays.len()]
                 .iter(),
@@ -348,29 +370,9 @@ impl Rays {
         Rays { data: rays }
     }
 
-    fn ray_from_xy(x: u32, y: u32, ubo: &UBO) -> Ray {
-        let half_sub_pixel_size = 1f32 / (ubo.sqrt_rays_per_pixel as f32) / 2f32;
-
-        let sub_pixel_row_number: u32 = ubo.subpixel_idx / ubo.sqrt_rays_per_pixel;
-        let sub_pixel_col_number: u32 = ubo.subpixel_idx % ubo.sqrt_rays_per_pixel;
-        let sub_pixel_x_offset: f32 = half_sub_pixel_size * sub_pixel_col_number as f32;
-        let sub_pixel_y_offset: f32 = half_sub_pixel_size * sub_pixel_row_number as f32;
-
-        let x_offset: f32 = (x as f32 + sub_pixel_x_offset) * ubo.pixel_size;
-        let y_offset: f32 = (y as f32 + sub_pixel_y_offset) * ubo.pixel_size;
-
-        let world_x: f32 = ubo.half_width - x_offset;
-        let world_y: f32 = ubo.half_height - y_offset;
-
-        let pixel = ubo.inverse_camera_transform * Vec4::new(world_x, world_y, -1.0, 1.0);
-
-        let ray_o = ubo.inverse_camera_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
-
-        Ray {
-            origin: ray_o.xyz(),
-            x,
-            direction: (pixel - ray_o).normalize().xyz(),
-            y,
+    pub fn empty(resolution: &PhysicalSize<u32>) -> Self {
+        Rays {
+            data: vec![Ray::default(); (resolution.width * resolution.height) as usize],
         }
     }
 }

@@ -54,7 +54,7 @@ struct Camera {
 
 struct UBO {
     lightPos: vec3<f32>;
-    _padding: u32;
+    width: u32;
     camera: Camera;
     n_objects: i32;
     subpixel_idx: u32;
@@ -103,9 +103,9 @@ struct ObjectParams {
 
 struct Ray {
     rayO: vec3<f32>;
-    x: u32;
+    x: i32;
     rayD: vec3<f32>;
-    y: u32;
+    y: i32;
 };
 
 struct Rays {
@@ -214,7 +214,7 @@ fn rayForPixel(p: vec2<u32>, sqrt_rays_per_pixel: u32, current_ray_index: u32, h
 
     let rayO: vec4<f32> = ubo.camera.inverseTransform * vec4<f32>(0.0, 0.0, 0.0, 1.0);
 
-    return Ray(rayO.xyz, p.x, normalize(pixel - rayO).xyz,p.y);
+    return Ray(rayO.xyz, i32(p.x), normalize(pixel - rayO).xyz,i32(p.y));
 }
 
 
@@ -428,10 +428,12 @@ fn intersect(ray: Ray) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
+
     // TODO: fix loop range - get number of objects
     for (var i: i32 = 0; i < ubo.n_objects; i = i+1) {
         let ob_params = object_params.ObjectParams[i];
         let nRay: Ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO,1.0)).xyz, ray.x, (ob_params.inverse_transform * vec4<f32>(ray.rayD,0.0)).xyz, ray.y);
+
 
         if (ob_params.model_type == 0u) { //Sphere
             ret = intersectSphere(nRay,ret, i);
@@ -460,6 +462,7 @@ fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
     let ret: vec3<f32> = normalize((transpose(object_params.ObjectParams[object_id].inverse_transform) * vec4<f32>(normal,0.0)).xyz);
     // ret.w = 0.0;
     // ret = normalize(ret);
+
 
     return ret;
 }
@@ -539,7 +542,7 @@ fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
   let distance: f32 = length(v);
   let direction: vec3<f32> = normalize(v);
 
-  let intersection: Intersection = intersect(Ray(point,0u,direction,0u));
+  let intersection: Intersection = intersect(Ray(point,0,direction,0));
 
   if (intersection.closestT > EPSILON && intersection.closestT < distance)
   {
@@ -560,7 +563,7 @@ struct Node {
     emissiveness: vec4<f32>;
 };
 
-fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
+fn renderScene(init_ray: Ray,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
     var uv: vec2<f32>;
@@ -569,7 +572,7 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
     // var ray: Ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
 
     // var new_ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
-    var new_ray = rays.Rays[(pixel.y * 600u) + pixel.x];
+    var new_ray = init_ray;
     var type_enum = 0;
     // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
@@ -611,7 +614,7 @@ fn renderScene(pixel: vec2<u32>,current_ray_idx: u32,sqrt_rays_per_pixel: u32,ha
             scatterTarget = hitParams.normalv;
         }
 
-        new_ray = Ray(hitParams.overPoint, pixel.x, scatterTarget, pixel.y);
+        new_ray = Ray(hitParams.overPoint, init_ray.x, scatterTarget, init_ray.y);
 
         let hit_colour = ob_params.material.colour;
 
@@ -653,15 +656,22 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
         ) 
 {
-
     var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
+    let ray = rays.Rays[(global_invocation_id.y * ubo.width) + global_invocation_id.x];
+
+    if (ray.x < 0) {
+        return;
+    }
+    
+
+    // let uv = vec2<u32>(ray.x ,ray.y);
+
     if (ubo.subpixel_idx > 0u) {
-        let inUV = vec2<i32>(i32(global_invocation_id.x) ,i32(global_invocation_id.y) );
-        color = textureLoad(imageData,inUV);
+        color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
     }
 
     let half_sub_pixel_size = 1.0 / f32(ubo.sqrt_rays_per_pixel) / 2.0;
-    let ray_color = renderScene(global_invocation_id.xy,ubo.subpixel_idx,ubo.sqrt_rays_per_pixel,half_sub_pixel_size);
+    let ray_color = renderScene(ray,ubo.subpixel_idx,ubo.sqrt_rays_per_pixel,half_sub_pixel_size);
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
