@@ -237,7 +237,92 @@ impl RenderApp {
         event_loop.run(move |event, _, control_flow| {
             // *control_flow = ControlFlow::Wait;
             match event {
-                Event::MainEventsCleared => {}
+                Event::MainEventsCleared => {
+                    if self.ubo.subpixel_idx < self.renderer.rays_per_pixel {
+                        self.update();
+
+                        let frame = match self.renderer.window_surface.get_current_texture() {
+                            Ok(frame) => frame,
+                            Err(_) => {
+                                self.renderer
+                                    .window_surface
+                                    .configure(&self.renderer.device, &self.renderer.config);
+                                self.renderer
+                                    .window_surface
+                                    .get_current_texture()
+                                    .expect("Failed to acquire next surface texture!")
+                            }
+                        };
+                        let view = frame
+                            .texture
+                            .create_view(&wgpu::TextureViewDescriptor::default());
+
+                        // create render pass descriptor and its color attachments
+                        let color_attachments = [wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: true,
+                            },
+                        }];
+                        let render_pass_descriptor = wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &color_attachments,
+                            depth_stencil_attachment: None,
+                        };
+
+                        let mut command_encoder = self.renderer.device.create_command_encoder(
+                            &wgpu::CommandEncoderDescriptor { label: None },
+                        );
+
+                        command_encoder.push_debug_group("compute ray trace");
+                        {
+                            // compute pass
+                            let mut cpass = command_encoder
+                                .begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+                            cpass.set_pipeline(self.renderer.compute_pipeline.as_ref().unwrap());
+                            cpass.set_bind_group(
+                                0,
+                                self.renderer.compute_bind_group.as_ref().unwrap(),
+                                &[],
+                            );
+
+                            cpass.dispatch(
+                                (self.renderer.logical_size.width / WORKGROUP_SIZE[0])
+                                    + WORKGROUP_SIZE[0],
+                                (self.renderer.logical_size.height / WORKGROUP_SIZE[1])
+                                    + WORKGROUP_SIZE[1],
+                                WORKGROUP_SIZE[2],
+                            );
+                        }
+                        command_encoder.pop_debug_group();
+
+                        command_encoder.push_debug_group("render texture");
+                        {
+                            // render pass
+                            let mut rpass =
+                                command_encoder.begin_render_pass(&render_pass_descriptor);
+                            rpass.set_pipeline(self.renderer.render_pipeline.as_ref().unwrap());
+                            rpass.set_bind_group(
+                                0,
+                                self.renderer.render_bind_group.as_ref().unwrap(),
+                                &[],
+                            );
+                            // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
+                            // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
+                            rpass.draw(0..3, 0..1);
+                        }
+                        command_encoder.pop_debug_group();
+
+                        self.renderer
+                            .queue
+                            .submit(std::iter::once(command_encoder.finish()));
+
+                        self.renderer.device.poll(wgpu::Maintain::Wait);
+                        frame.present();
+                    }
+                }
                 Event::RedrawEventsCleared => {
                     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                     let time_since_last_frame = last_update_inst.elapsed();
@@ -248,10 +333,6 @@ impl RenderApp {
                                 && time_since_last_frame >= target_frametime))
                     {
                         println!("Drawing ray index: {}", self.ubo.subpixel_idx);
-
-                        // self.update();
-
-                        self.renderer.window.request_redraw();
 
                         last_update_inst = Instant::now();
                     } else {
@@ -367,6 +448,7 @@ impl RenderApp {
                                             .unwrap()
                                             .as_entire_binding(),
                                     },
+                                    // TODO: split this into directions and origins buffers to work with buffer size limit on mac
                                     wgpu::BindGroupEntry {
                                         binding: 6,
                                         resource: self
@@ -439,108 +521,7 @@ impl RenderApp {
                         self.update_window_event(event, &mut left_mouse_down);
                     }
                 },
-                Event::RedrawRequested(_) => {
-                    // self.renderer.queue.submit(None);
-                    // println!("blocking");
-                    // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
-                    // println!("done");
-                    // println!("redrawing");
-
-                    // let logical_size: LogicalSize<u32> = winit::dpi::PhysicalSize::new(
-                    //     self.renderer.config.width,
-                    //     self.renderer.config.height,
-                    // )
-                    // .to_logical(self.renderer.scale_factor);
-
-                    // self.update(&logical_size);
-
-                    self.update();
-
-                    let frame = match self.renderer.window_surface.get_current_texture() {
-                        Ok(frame) => frame,
-                        Err(_) => {
-                            self.renderer
-                                .window_surface
-                                .configure(&self.renderer.device, &self.renderer.config);
-                            self.renderer
-                                .window_surface
-                                .get_current_texture()
-                                .expect("Failed to acquire next surface texture!")
-                        }
-                    };
-                    let view = frame
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-
-                    // create render pass descriptor and its color attachments
-                    let color_attachments = [wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: true,
-                        },
-                    }];
-                    let render_pass_descriptor = wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &color_attachments,
-                        depth_stencil_attachment: None,
-                    };
-
-                    let mut command_encoder = self
-                        .renderer
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-                    command_encoder.push_debug_group("compute ray trace");
-                    {
-                        // compute pass
-                        let mut cpass = command_encoder
-                            .begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
-                        cpass.set_pipeline(self.renderer.compute_pipeline.as_ref().unwrap());
-                        cpass.set_bind_group(
-                            0,
-                            self.renderer.compute_bind_group.as_ref().unwrap(),
-                            &[],
-                        );
-
-                        cpass.dispatch(
-                            (self.renderer.logical_size.width / WORKGROUP_SIZE[0])
-                                + WORKGROUP_SIZE[0],
-                            (self.renderer.logical_size.height / WORKGROUP_SIZE[1])
-                                + WORKGROUP_SIZE[1],
-                            WORKGROUP_SIZE[2],
-                        );
-                    }
-                    command_encoder.pop_debug_group();
-
-                    command_encoder.push_debug_group("render texture");
-                    {
-                        // render pass
-                        let mut rpass = command_encoder.begin_render_pass(&render_pass_descriptor);
-                        rpass.set_pipeline(self.renderer.render_pipeline.as_ref().unwrap());
-                        rpass.set_bind_group(
-                            0,
-                            self.renderer.render_bind_group.as_ref().unwrap(),
-                            &[],
-                        );
-                        // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
-                        // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
-                        rpass.draw(0..3, 0..1);
-                    }
-                    command_encoder.pop_debug_group();
-
-                    self.renderer
-                        .queue
-                        .submit(std::iter::once(command_encoder.finish()));
-
-                    self.renderer.device.poll(wgpu::Maintain::Wait);
-                    frame.present();
-
-                    // if let Some(ref mut x) = self.ubo {
-                    //     x.subpixel_idx += 1;
-                    // }
-                }
+                Event::RedrawRequested(_) => {}
                 _ => {}
             }
         });
