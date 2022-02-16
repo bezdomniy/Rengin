@@ -149,12 +149,7 @@ impl RenderApp {
         }
     }
 
-    fn update_device_event(
-        &mut self,
-        event: DeviceEvent,
-        left_mouse_down: &mut bool,
-        something_changed: &mut bool,
-    ) {
+    fn update_device_event(&mut self, event: DeviceEvent, left_mouse_down: &mut bool) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
                 // println!("x:{}, y:{}", position.x, position.y);
@@ -167,7 +162,6 @@ impl RenderApp {
                         self.game_state.camera.get_inverse_transform();
                     self.ubo.subpixel_idx = 0;
                     self.ubo.update_random_seed();
-                    *something_changed = true;
                 }
             }
             DeviceEvent::MouseWheel { delta } => match delta {
@@ -179,7 +173,6 @@ impl RenderApp {
                         self.game_state.camera.get_inverse_transform();
                     self.ubo.subpixel_idx = 0;
                     self.ubo.update_random_seed();
-                    *something_changed = true;
                 }
                 MouseScrollDelta::PixelDelta(xy) => {
                     // println!("pix xy: {:?}", xy);
@@ -189,7 +182,6 @@ impl RenderApp {
                         self.game_state.camera.get_inverse_transform();
                     self.ubo.subpixel_idx = 0;
                     self.ubo.update_random_seed();
-                    *something_changed = true;
                 } // _ => {}
             },
             _ => {}
@@ -216,16 +208,10 @@ impl RenderApp {
         }
     }
 
-    pub fn update(&mut self, size: &LogicalSize<u32>) {
-        self.renderer.queue.write_buffer(
-            self.buffers.get("ubo").unwrap(),
-            0,
-            bytemuck::bytes_of(&self.ubo),
-        );
-
+    pub fn update(&mut self) {
         let rays = Rays::new(
-            size.width,
-            size.height,
+            self.renderer.logical_size.width,
+            self.renderer.logical_size.height,
             &self.renderer.resolution,
             &self.ubo,
         );
@@ -235,12 +221,18 @@ impl RenderApp {
             0,
             bytemuck::cast_slice(&rays.data),
         );
+        self.renderer.queue.write_buffer(
+            self.buffers.get("ubo").unwrap(),
+            0,
+            bytemuck::bytes_of(&self.ubo),
+        );
+
+        self.ubo.subpixel_idx += 1;
     }
 
     pub fn render(mut self, event_loop: EventLoop<()>) {
         let mut last_update_inst = Instant::now();
         let mut left_mouse_down = false;
-        let mut something_changed = false;
 
         event_loop.run(move |event, _, control_flow| {
             // *control_flow = ControlFlow::Wait;
@@ -252,23 +244,14 @@ impl RenderApp {
 
                     if (!left_mouse_down || self.renderer.continous_motion)
                         && ((self.ubo.subpixel_idx < self.renderer.rays_per_pixel)
-                            || (something_changed && time_since_last_frame >= target_frametime))
+                            || (self.ubo.subpixel_idx == 0
+                                && time_since_last_frame >= target_frametime))
                     {
                         println!("Drawing ray index: {}", self.ubo.subpixel_idx);
 
-                        // futures::executor::block_on(self.renderer.queue.on_submitted_work_done());
-                        // self.renderer.instance.poll_all(true);
-                        // self.renderer.device.poll(wgpu::Maintain::Wait);
+                        // self.update();
 
                         self.renderer.window.request_redraw();
-
-                        self.ubo.subpixel_idx += 1;
-                        // if let Some(ref mut x) = self.ubo {
-                        //     x.subpixel_idx += 1;
-                        // }
-
-                        // println!("render time: {:?}", time_since_last_frame);
-                        something_changed = false;
 
                         last_update_inst = Instant::now();
                     } else {
@@ -286,23 +269,25 @@ impl RenderApp {
                         },
                     ..
                 } => {
-                    // println!("p: {} {}", size.width, size.height);
-                    // Reconfigure the surface with the new size
-                    self.renderer.config.width = size.width.max(1);
-                    self.renderer.config.height = size.height.max(1);
+                    // // println!("p: {} {}", size.width, size.height);
+                    // // Reconfigure the surface with the new size
+                    // self.renderer.config.width = size.width.max(1);
+                    // self.renderer.config.height = size.height.max(1);
                     self.ubo.subpixel_idx = 0;
 
-                    let logical_size: LogicalSize<u32> =
-                        winit::dpi::PhysicalSize::new(size.width, size.height)
-                            .to_logical(self.renderer.scale_factor);
+                    // let logical_size: LogicalSize<u32> =
+                    //     winit::dpi::PhysicalSize::new(size.width, size.height)
+                    //         .to_logical(self.renderer.scale_factor);
 
-                    self.ubo.update_dims(&logical_size);
+                    self.renderer.update_window_size(size.width, size.height);
+
+                    self.ubo.update_dims(&self.renderer.logical_size);
 
                     // println!("l: {} {}", logical_size.width, logical_size.height);
 
                     let texture_extent = wgpu::Extent3d {
-                        width: logical_size.width,
-                        height: logical_size.height,
+                        width: self.renderer.logical_size.width,
+                        height: self.renderer.logical_size.height,
                         depth_or_array_layers: 1,
                     };
 
@@ -419,15 +404,10 @@ impl RenderApp {
                     self.renderer
                         .window_surface
                         .configure(&self.renderer.device, &self.renderer.config);
-                    something_changed = true;
                 }
                 Event::DeviceEvent { event, .. } => match event {
                     _ => {
-                        self.update_device_event(
-                            event,
-                            &mut left_mouse_down,
-                            &mut something_changed,
-                        );
+                        self.update_device_event(event, &mut left_mouse_down);
                     }
                 },
                 Event::WindowEvent { event, .. } => match event {
@@ -466,13 +446,15 @@ impl RenderApp {
                     // println!("done");
                     // println!("redrawing");
 
-                    let logical_size: LogicalSize<u32> = winit::dpi::PhysicalSize::new(
-                        self.renderer.config.width,
-                        self.renderer.config.height,
-                    )
-                    .to_logical(self.renderer.scale_factor);
+                    // let logical_size: LogicalSize<u32> = winit::dpi::PhysicalSize::new(
+                    //     self.renderer.config.width,
+                    //     self.renderer.config.height,
+                    // )
+                    // .to_logical(self.renderer.scale_factor);
 
-                    self.update(&logical_size);
+                    // self.update(&logical_size);
+
+                    self.update();
 
                     let frame = match self.renderer.window_surface.get_current_texture() {
                         Ok(frame) => frame,
@@ -523,8 +505,10 @@ impl RenderApp {
                         );
 
                         cpass.dispatch(
-                            (logical_size.width / WORKGROUP_SIZE[0]) + WORKGROUP_SIZE[0],
-                            (logical_size.height / WORKGROUP_SIZE[1]) + WORKGROUP_SIZE[1],
+                            (self.renderer.logical_size.width / WORKGROUP_SIZE[0])
+                                + WORKGROUP_SIZE[0],
+                            (self.renderer.logical_size.height / WORKGROUP_SIZE[1])
+                                + WORKGROUP_SIZE[1],
                             WORKGROUP_SIZE[2],
                         );
                     }
