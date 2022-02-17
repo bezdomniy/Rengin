@@ -360,6 +360,12 @@ impl BVH {
                                 .unwrap()
                         },
                     );
+                    // if start != end - 1
+                    //     && triangle_params_unsorted[end - 1].bounds_centroid()[split_dimension]
+                    //         < triangle_params_unsorted[start].bounds_centroid()[split_dimension]
+                    // {
+                    //     triangle_params_unsorted.swap(start, end - 1);
+                    // }
                 } else {
                     let n_buckets: usize = 12;
                     let mut buckets = vec![NodeInner::empty(); n_buckets];

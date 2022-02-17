@@ -1,15 +1,18 @@
 use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 
 use crate::{
-    engine::bvh::{NodeInner, NodeLeaf, NodeNormal, BVH},
-    engine::rt_primitives::{ObjectParams, UBO},
+    engine::rt_primitives::{ObjectParams, Ray, UBO},
+    engine::{
+        bvh::{NodeInner, NodeLeaf, NodeNormal, BVH},
+        rt_primitives::Rays,
+    },
     RendererType,
 };
 use wgpu::{
     util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device,
     Instance, Queue, RenderPipeline, Sampler, ShaderModule, Surface, Texture,
 };
-use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::WindowBuilder};
+use winit::{dpi::LogicalSize, dpi::PhysicalSize, event_loop::EventLoop, window::WindowBuilder};
 
 pub struct RenginWgpu {
     pub instance: Instance,
@@ -26,15 +29,24 @@ pub struct RenginWgpu {
     pub window: winit::window::Window,
     pub window_surface: Surface,
     pub config: wgpu::SurfaceConfiguration,
-    pub height: u32,
-    pub width: u32,
+    pub physical_size: PhysicalSize<u32>,
+    pub logical_size: LogicalSize<u32>,
     pub workgroup_size: [u32; 3],
     pub continous_motion: bool,
     pub rays_per_pixel: u32,
     pub scale_factor: f64,
+    pub resolution: PhysicalSize<u32>,
 }
 
 impl RenginWgpu {
+    pub fn update_window_size(&mut self, width: u32, height: u32) {
+        self.logical_size = winit::dpi::LogicalSize::new(width, height);
+        self.physical_size = self.logical_size.to_physical(self.scale_factor);
+
+        self.config.width = self.physical_size.width;
+        self.config.height = self.physical_size.height;
+    }
+
     pub async fn new(
         width: u32,
         height: u32,
@@ -47,9 +59,12 @@ impl RenginWgpu {
         // let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
         let instance = wgpu::Instance::new(backend);
 
+        // TODO: window might not be on primary monitor
+        let resolution = event_loop.primary_monitor().unwrap().size();
+
         let scale_factor: f64 = event_loop.primary_monitor().unwrap().scale_factor();
-        let physical_size: PhysicalSize<f64> =
-            winit::dpi::LogicalSize::new(width, height).to_physical(scale_factor);
+        let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(width, height);
+        let physical_size: PhysicalSize<u32> = logical_size.to_physical(scale_factor);
 
         let window = WindowBuilder::new()
             .with_title("Rengin")
@@ -123,6 +138,10 @@ impl RenginWgpu {
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
 
+        let physical_size: PhysicalSize<u32> = winit::dpi::PhysicalSize::new(width, height);
+
+        let logical_size: LogicalSize<u32> = physical_size.to_logical(scale_factor);
+
         RenginWgpu {
             instance: instance,
             adapter: adapter,
@@ -138,12 +157,13 @@ impl RenginWgpu {
             window: window,
             window_surface,
             config,
-            width,
-            height,
+            physical_size,
+            logical_size,
             workgroup_size,
             continous_motion,
             rays_per_pixel,
             scale_factor,
+            resolution,
         }
     }
 
@@ -202,6 +222,7 @@ impl RenginWgpu {
         &mut self,
         bvh: &BVH,
         ubo: &UBO,
+        rays: &Rays,
         object_params: &Vec<ObjectParams>,
     ) -> HashMap<&'static str, Buffer> {
         let now = Instant::now();
@@ -256,16 +277,13 @@ impl RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
-        // let rays = ..self.render.camera
-
-        // let buf_rays = self
-        //     .renderer
-        //     .device
-        //     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //         label: Some("Ray Buffer"),
-        //         contents: bytemuck::cast_slice(&self.rays.as_ref().unwrap()),
-        //         usage: wgpu::BufferUsages::STORAGE,
-        //     });
+        let buf_rays = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Ray Buffer"),
+                contents: bytemuck::cast_slice(&rays.data),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
 
         log::info!(
             "Finshed loading buffers in {} millis",
@@ -278,6 +296,7 @@ impl RenginWgpu {
         buffers.insert("blas", buf_blas);
         buffers.insert("normals", buf_normals);
         buffers.insert("object_params", buf_op);
+        buffers.insert("rays", buf_rays);
 
         buffers
     }
@@ -287,7 +306,9 @@ impl RenginWgpu {
         buffers: &HashMap<&'static str, Buffer>,
         shaders: &HashMap<&'static str, ShaderModule>,
         texture: &Texture,
+        // TODO: bvh is only needed to get lengths, is there a better way to pass these?
         bvh: &BVH,
+        rays: &Rays,
     ) {
         self.compute_bind_group_layout = Some(self.device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
@@ -361,6 +382,19 @@ impl RenginWgpu {
                             min_binding_size: wgpu::BufferSize::new(
                                 mem::size_of::<ObjectParams>() as _
                             ),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (rays.data.len() * mem::size_of::<Ray>()) as _,
+                            ),
+                            // min_binding_size: None,
                         },
                         count: None,
                     },
@@ -497,6 +531,10 @@ impl RenginWgpu {
                             .as_ref()
                             .unwrap()
                             .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: buffers.get("rays").as_ref().unwrap().as_entire_binding(),
                     },
                 ],
             }),
