@@ -287,12 +287,25 @@ impl UBO {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone)]
 pub struct Ray {
     origin: Vec3,
     x: i32,
     direction: Vec3,
+    y: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct RayOrigin {
+    data: Vec3,
+    x: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct RayDirection {
+    data: Vec3,
     y: i32,
 }
 
@@ -374,5 +387,23 @@ impl Rays {
         Rays {
             data: vec![Ray::default(); (resolution.width * resolution.height) as usize],
         }
+    }
+
+    pub fn make_buffers(&self) -> (Vec<RayOrigin>, Vec<RayDirection>) {
+        self.data
+            .iter()
+            .map(|ray| {
+                (
+                    RayOrigin {
+                        data: ray.origin,
+                        x: ray.x,
+                    },
+                    RayDirection {
+                        data: ray.direction,
+                        y: ray.y,
+                    },
+                )
+            })
+            .unzip()
     }
 }

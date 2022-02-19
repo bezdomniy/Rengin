@@ -101,15 +101,29 @@ struct ObjectParams {
     // ObjectParams: [[stride(96)]] array<ObjectParam>;
 };
 
+struct RayOrigin {
+    data: vec3<f32>;
+    x: i32;
+};
+
+struct RayDirection {
+    data: vec3<f32>;
+    y: i32;
+};
+
+struct RayOrigins {
+    RayOrigins: [[stride(16)]] array<RayOrigin>;
+};
+
+struct RayDirections {
+    RayDirections: [[stride(16)]] array<RayDirection>;
+};
+
 struct Ray {
     rayO: vec3<f32>;
     x: i32;
     rayD: vec3<f32>;
     y: i32;
-};
-
-struct Rays {
-    Rays: [[stride(32)]] array<Ray>;
 };
 
 struct Intersection {
@@ -132,7 +146,9 @@ var<storage, read> normal_nodes: Normals;
 [[group(0), binding(5)]]
 var<storage, read> object_params: ObjectParams;
 [[group(0), binding(6)]]
-var<storage, read_write> rays: Rays;
+var<storage, read_write> ray_origins: RayOrigins;
+[[group(0), binding(7)]]
+var<storage, read_write> ray_directions: RayDirections;
 
 let EPSILON:f32 = 0.0001;
 let MAXLEN: f32 = 10000.0;
@@ -706,13 +722,15 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
     // }
     // textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 
-    let ray = rays.Rays[(global_invocation_id.y * ubo.width) + global_invocation_id.x];
+    let ray_origin = ray_origins.RayOrigins[(global_invocation_id.y * ubo.width) + global_invocation_id.x];
+    let ray_direction = ray_directions.RayDirections[(global_invocation_id.y * ubo.width) + global_invocation_id.x];
 
-    if (ray.x < 0) {
+    if (ray_origin.x < 0) {
         return;
     }
 
-    
+    let ray = Ray(ray_origin.data,ray_origin.x,ray_direction.data,ray_direction.y);
+
     // let uv = vec2<i32>(ray.x ,ray.y);
 
     if (ubo.subpixel_idx > 0u) {

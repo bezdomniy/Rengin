@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 
 use crate::{
-    engine::rt_primitives::{ObjectParams, Ray, UBO},
+    engine::rt_primitives::{ObjectParams, RayDirection, RayOrigin, UBO},
     engine::{
         bvh::{NodeInner, NodeLeaf, NodeNormal, BVH},
         rt_primitives::Rays,
@@ -228,14 +228,7 @@ impl RenginWgpu {
         let now = Instant::now();
         log::info!("Creating buffers...");
 
-        // let bvh = self.objects.as_ref().unwrap().get(0).unwrap();
-
-        // for node in dragon_blas {
-        //     println!("{:?}", node.points);
-        // }
-        // for node in dragon_tlas {
-        //     println!("{:?}", node);
-        // }
+        let (ray_origins, ray_directions) = rays.make_buffers();
 
         let buf_ubo = self
             .device
@@ -277,11 +270,19 @@ impl RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
-        let buf_rays = self
+        let buf_ray_os = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Ray Buffer"),
-                contents: bytemuck::cast_slice(&rays.data),
+                label: Some("Ray Origin Buffer"),
+                contents: bytemuck::cast_slice(&ray_origins),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+
+        let buf_ray_ds = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Ray Direction Buffer"),
+                contents: bytemuck::cast_slice(&ray_directions),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
 
@@ -296,7 +297,8 @@ impl RenginWgpu {
         buffers.insert("blas", buf_blas);
         buffers.insert("normals", buf_normals);
         buffers.insert("object_params", buf_op);
-        buffers.insert("rays", buf_rays);
+        buffers.insert("ray_origins", buf_ray_os);
+        buffers.insert("ray_directions", buf_ray_ds);
 
         buffers
     }
@@ -392,7 +394,20 @@ impl RenginWgpu {
                             ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(
-                                (rays.data.len() * mem::size_of::<Ray>()) as _,
+                                (rays.data.len() * mem::size_of::<RayOrigin>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (rays.data.len() * mem::size_of::<RayDirection>()) as _,
                             ),
                             // min_binding_size: None,
                         },
@@ -534,7 +549,19 @@ impl RenginWgpu {
                     },
                     wgpu::BindGroupEntry {
                         binding: 6,
-                        resource: buffers.get("rays").as_ref().unwrap().as_entire_binding(),
+                        resource: buffers
+                            .get("ray_origins")
+                            .as_ref()
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: buffers
+                            .get("ray_directions")
+                            .as_ref()
+                            .unwrap()
+                            .as_entire_binding(),
                     },
                 ],
             }),

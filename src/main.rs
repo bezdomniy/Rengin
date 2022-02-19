@@ -216,11 +216,20 @@ impl RenderApp {
             &self.ubo,
         );
 
+        let (ray_origins, ray_directions) = rays.make_buffers();
+
         self.renderer.queue.write_buffer(
-            self.buffers.get("rays").unwrap(),
+            self.buffers.get("ray_origins").unwrap(),
             0,
-            bytemuck::cast_slice(&rays.data),
+            bytemuck::cast_slice(&ray_origins),
         );
+
+        self.renderer.queue.write_buffer(
+            self.buffers.get("ray_directions").unwrap(),
+            0,
+            bytemuck::cast_slice(&ray_directions),
+        );
+
         self.renderer.queue.write_buffer(
             self.buffers.get("ubo").unwrap(),
             0,
@@ -448,12 +457,20 @@ impl RenderApp {
                                             .unwrap()
                                             .as_entire_binding(),
                                     },
-                                    // TODO: split this into directions and origins buffers to work with buffer size limit on mac
                                     wgpu::BindGroupEntry {
                                         binding: 6,
                                         resource: self
                                             .buffers
-                                            .get("rays")
+                                            .get("ray_origins")
+                                            .as_ref()
+                                            .unwrap()
+                                            .as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 7,
+                                        resource: self
+                                            .buffers
+                                            .get("ray_directions")
                                             .as_ref()
                                             .unwrap()
                                             .as_entire_binding(),
