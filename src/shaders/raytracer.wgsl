@@ -43,22 +43,14 @@ struct Material {
     refractive_index: f32;
 };
 
-struct Camera {
-    inverseTransform: mat4x4<f32>;
-    pixelSize: f32;
-    halfWidth: f32;
-    halfHeight: f32;
-    fov: f32;
-};
-
 
 struct UBO {
     lightPos: vec3<f32>;
     width: u32;
-    camera: Camera;
+    _pad1: array<u32,20>;
     n_objects: i32;
     subpixel_idx: u32;
-    sqrt_rays_per_pixel: u32;
+    _pad2: u32;
     rnd_seed: f32;
     // max_inner_node_idx: i32;
     // max_leaf_node_idx: i32;
@@ -154,30 +146,6 @@ let RAY_BOUNCES: i32 = 5;
 //     p3 = p3 + dot(p3, p3.yzx + 33.33);
 //     return fract((p3.x + p3.y) * p3.z);
 // }
-
-fn rayForPixel(p: vec2<u32>, sqrt_rays_per_pixel: u32, current_ray_index: u32, half_sub_pixel_size: f32) -> Ray {
-    
-    let sub_pixel_row_number: u32 = current_ray_index / sqrt_rays_per_pixel;
-    let sub_pixel_col_number: u32 = current_ray_index % sqrt_rays_per_pixel;
-    let sub_pixel_x_offset: f32 = half_sub_pixel_size * f32(sub_pixel_col_number);
-    let sub_pixel_y_offset: f32 = half_sub_pixel_size * f32(sub_pixel_row_number);
-
-    let xOffset: f32 = (f32(p.x) + sub_pixel_x_offset) * ubo.camera.pixelSize;
-    let yOffset: f32 = (f32(p.y) + sub_pixel_y_offset) * ubo.camera.pixelSize;
-
-    // let xOffset: f32 = (f32(p.x) / 0.5) * ubo.camera.pixelSize;
-    // let yOffset: f32 = (f32(p.y) / 0.5) * ubo.camera.pixelSize;
-
-    let worldX: f32 = ubo.camera.halfWidth - xOffset;
-    let worldY: f32 = ubo.camera.halfHeight - yOffset;
-
-    let pixel: vec4<f32> = ubo.camera.inverseTransform * vec4<f32>(worldX, worldY, -1.0, 1.0);
-
-    let rayO: vec4<f32> = ubo.camera.inverseTransform * vec4<f32>(0.0, 0.0, 0.0, 1.0);
-
-    return Ray(rayO.xyz, i32(p.x), normalize(pixel - rayO).xyz,i32(p.y));
-}
-
 
 
 fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
@@ -595,7 +563,7 @@ struct RenderRay {
     reflective_or_transparent: f32;
 };
 
-fn renderScene(init_ray: Ray,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
+fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
     var uv: vec2<f32>;
@@ -719,8 +687,7 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
     }
 
-    let half_sub_pixel_size = 1.0 / f32(ubo.sqrt_rays_per_pixel) / 2.0;
-    let ray_color = renderScene(ray,ubo.subpixel_idx,ubo.sqrt_rays_per_pixel,half_sub_pixel_size);
+    let ray_color = renderScene(ray,ubo.subpixel_idx);
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
