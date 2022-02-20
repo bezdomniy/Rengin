@@ -345,29 +345,32 @@ pub struct Rays {
 impl Rays {
     pub fn new(width: u32, height: u32, resolution: &PhysicalSize<u32>, ubo: &UBO) -> Self {
         println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
-        let mut rays: Vec<Ray> = (0..height)
-            .into_iter()
-            .flat_map(|y| {
-                (0..width)
-                    .into_iter()
-                    .map(move |x| Ray::new(x as i32, y as i32, ubo))
-            })
-            .collect();
-
-        // let mut rays: Vec<Ray> = vec![];
-        // for y in 0..height {
-        //     for x in 0..width {
-        //         rays.push(Ray::new(x as i32, y as i32, ubo));
-        //     }
-        // }
+        // let mut rays: Vec<Ray> = (0..height)
+        //     .into_iter()
+        //     .flat_map(|y| {
+        //         (0..width)
+        //             .into_iter()
+        //             .map(move |x| Ray::new(x as i32, y as i32, ubo))
+        //     })
+        //     .collect();
 
         // println!("r rays:{}", rays.len());
-        rays.extend(
-            vec![Ray::default(); (resolution.width * resolution.height) as usize - rays.len()]
-                .iter(),
-        );
+        // rays.extend(
+        //     vec![Ray::default(); (resolution.width * resolution.height) as usize - rays.len()]
+        //         .iter(),
+        // );
 
-        Rays { data: rays }
+        // Rays { data: rays }
+
+        let mut rays = Rays::empty(resolution);
+
+        for x in 0..width {
+            for y in 0..height {
+                rays.data[((y * width) + x) as usize] = Ray::new(x as i32, y as i32, ubo);
+            }
+        }
+
+        rays
     }
 
     pub fn empty(resolution: &PhysicalSize<u32>) -> Self {
