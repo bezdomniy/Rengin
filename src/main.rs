@@ -210,8 +210,8 @@ impl RenderApp {
 
     pub fn update(&mut self) {
         let rays = Rays::new(
-            self.renderer.logical_size.width,
-            self.renderer.logical_size.height,
+            self.renderer.physical_size.width,
+            self.renderer.physical_size.height,
             &self.renderer.resolution,
             &self.ubo,
         );
@@ -289,9 +289,9 @@ impl RenderApp {
                             );
 
                             cpass.dispatch(
-                                (self.renderer.logical_size.width / WORKGROUP_SIZE[0])
+                                (self.renderer.physical_size.width / WORKGROUP_SIZE[0])
                                     + WORKGROUP_SIZE[0],
-                                (self.renderer.logical_size.height / WORKGROUP_SIZE[1])
+                                (self.renderer.physical_size.height / WORKGROUP_SIZE[1])
                                     + WORKGROUP_SIZE[1],
                                 WORKGROUP_SIZE[2],
                             );

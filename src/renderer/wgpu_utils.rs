@@ -103,6 +103,7 @@ impl RenginWgpu {
         let required_limits = {
             wgpu::Limits {
                 max_push_constant_size: 0,
+                max_storage_buffer_binding_size: 1024 << 20,
                 ..wgpu::Limits::default()
             }
         }
