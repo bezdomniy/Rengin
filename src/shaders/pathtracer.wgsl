@@ -558,14 +558,9 @@ fn reflectance(cosine:f32, ref_idx: f32) -> f32 {
     return r0 + (1.0-r0)*pow((1.0 - cosine),5.0);
 }
 
-struct Node {
-    hit_colour: vec4<f32>;
-    emissiveness: vec4<f32>;
-};
-
 fn renderScene(init_ray: Ray,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_sub_pixel_size: f32) -> vec4<f32> {
     // int id = 0;
-    var color: vec4<f32> = vec4<f32>(0.0);
+    var color: vec4<f32> = vec4<f32>(1.0);
     var uv: vec2<f32>;
     var t: f32 = MAXLEN;
 
@@ -576,9 +571,10 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_
     var type_enum = 0;
     // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
-    var stack: array<Node,RAY_BOUNCES>;
-    var top_stack = -1;
+    // var stack: array<vec4<f32>,RAY_BOUNCES>;
+    // var top_stack = -1;
 
+    var emissive_found = false;
     
     for (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1) {
         // Get intersected object ID
@@ -586,13 +582,6 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_
         
         if (intersection.closestT >= MAXLEN || intersection.id == -1)
         {
-            // let unit_direction = normalize(new_ray.rayD);
-            // let t = 0.5*(unit_direction.y + 1.0);
-            // top_stack = top_stack + 1;
-            // stack[top_stack] = Node((1.0-t)*vec4<f32>(1.0, 1.0, 1.0, 1.0) + t*vec4<f32>(0.5, 0.7, 1.0, 1.0),vec4<f32>(0.0,0.0,0.0,0.0));
-
-            // top_stack = top_stack - 1;
-            // continue
             break;
         }
 
@@ -600,10 +589,13 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_
         let ob_params = object_params.ObjectParams[intersection.model_id];
 
         if (ob_params.material.emissiveness.w > 0.0) {
-            top_stack = top_stack + 1;
-            stack[top_stack] = Node(vec4<f32>(0.0,0.0,0.0,0.0),ob_params.material.emissiveness);
+            emissive_found = true;
+
+            color = color * ob_params.material.emissiveness;
             break;
         }
+
+        color = color * ob_params.material.colour;
 
         let hitParams: HitParams = getHitParams(new_ray, intersection, ob_params.model_type);
         // var scatterTarget: vec4<f32> = hitParams.normalv + hemisphericalRand(1.0,hitParams.normalv.xyz,new_ray.rayD.xyz,ubo.rnd_seed);
@@ -616,33 +608,10 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32,sqrt_rays_per_pixel: u32,half_
 
         new_ray = Ray(hitParams.overPoint, init_ray.x, scatterTarget, init_ray.y);
 
-        let hit_colour = ob_params.material.colour;
-
-        // if (bounce_idx == 0) {
-        //     color = hit_colour;
-        // }
-
-        top_stack = top_stack + 1;
-        stack[top_stack] = Node(hit_colour,ob_params.material.emissiveness);
-
-
     }
 
-    if (top_stack > -1) {
-        let node = stack[top_stack];
-        top_stack = top_stack - 1;
-        color = node.emissiveness;
-
-        loop {
-            if (top_stack == -1) {
-                break;
-            }
-            let node = stack[top_stack];
-            top_stack = top_stack - 1;
-            // color = color * node.hit_colour;
-            color = node.emissiveness + color * node.hit_colour;
-
-        }
+    if (!emissive_found) {
+        color = vec4<f32>(0.0);
     }
  
     return color;
