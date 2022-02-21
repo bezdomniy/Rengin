@@ -156,7 +156,7 @@ impl RenderApp {
                 if *left_mouse_down {
                     self.game_state
                         .camera
-                        .rotate(delta.0 as f32, delta.1 as f32);
+                        .rotate(-delta.0 as f32, delta.1 as f32);
 
                     self.ubo.inverse_camera_transform =
                         self.game_state.camera.get_inverse_transform();
