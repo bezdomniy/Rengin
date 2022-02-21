@@ -212,6 +212,15 @@ impl Camera {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct UBO {
+    light_pos: Vec4,
+    width: u32,
+    n_objects: u32,
+    subpixel_idx: u32,
+    rnd_seed: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct ScreenData {
     // Compute shader uniform block object
     light_pos: Vec3,
     width: u32,
@@ -227,7 +236,7 @@ pub struct UBO {
     // _padding: [u32; 1],
 }
 
-impl UBO {
+impl ScreenData {
     pub fn new(
         light_pos: [f32; 3],
         inverse_camera_transform: Mat4,
@@ -236,7 +245,7 @@ impl UBO {
         height: u32,
         fov: f32,
         sqrt_rays_per_pixel: u32,
-    ) -> UBO {
+    ) -> ScreenData {
         let half_view = (fov / 2f32).tan();
         let aspect = width as f32 / height as f32;
 
@@ -251,7 +260,7 @@ impl UBO {
 
         println!("{width} {height}");
 
-        UBO {
+        ScreenData {
             light_pos: const_vec3!(light_pos),
             width,
             inverse_camera_transform,
@@ -285,6 +294,16 @@ impl UBO {
     pub fn update_random_seed(&mut self) {
         self.rnd_seed = rand::thread_rng().gen_range(0.0..1.0);
     }
+
+    pub fn generate_ubo(&self) -> UBO {
+        UBO {
+            light_pos: self.light_pos.extend(1.0),
+            width: self.width,
+            n_objects: self.n_objects,
+            subpixel_idx: self.subpixel_idx,
+            rnd_seed: self.rnd_seed,
+        }
+    }
 }
 
 #[repr(C)]
@@ -297,7 +316,7 @@ pub struct Ray {
 }
 
 impl Ray {
-    pub fn new(x: i32, y: i32, ubo: &UBO) -> Self {
+    pub fn new(x: i32, y: i32, ubo: &ScreenData) -> Self {
         let half_sub_pixel_size = 1.0 / (ubo.sqrt_rays_per_pixel as f32) / 2.0;
 
         let sub_pixel_row_number: u32 = ubo.subpixel_idx / ubo.sqrt_rays_per_pixel;
@@ -343,25 +362,8 @@ pub struct Rays {
 
 // TODO: implement sorting before output to gpu buffer
 impl Rays {
-    pub fn new(width: u32, height: u32, resolution: &PhysicalSize<u32>, ubo: &UBO) -> Self {
+    pub fn new(width: u32, height: u32, resolution: &PhysicalSize<u32>, ubo: &ScreenData) -> Self {
         println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
-        // let mut rays: Vec<Ray> = (0..height)
-        //     .into_iter()
-        //     .flat_map(|y| {
-        //         (0..width)
-        //             .into_iter()
-        //             .map(move |x| Ray::new(x as i32, y as i32, ubo))
-        //     })
-        //     .collect();
-
-        // println!("r rays:{}", rays.len());
-        // rays.extend(
-        //     vec![Ray::default(); (resolution.width * resolution.height) as usize - rays.len()]
-        //         .iter(),
-        // );
-
-        // Rays { data: rays }
-
         let mut rays = Rays::empty(resolution);
 
         for x in 0..width {

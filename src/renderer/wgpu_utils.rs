@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 
 use crate::{
-    engine::rt_primitives::{ObjectParams, Ray, UBO},
+    engine::rt_primitives::{ObjectParams, Ray, ScreenData, UBO},
     engine::{
         bvh::{NodeInner, NodeLeaf, NodeNormal, BVH},
         rt_primitives::Rays,
@@ -26,6 +26,8 @@ pub struct RenginWgpu {
     pub compute_bind_group: Option<BindGroup>,
     pub render_bind_group_layout: Option<BindGroupLayout>,
     pub render_bind_group: Option<BindGroup>,
+    pub buffers: Option<HashMap<&'static str, Buffer>>,
+    pub target_texture: Option<Texture>,
     pub window: winit::window::Window,
     pub window_surface: Surface,
     pub config: wgpu::SurfaceConfiguration,
@@ -154,6 +156,8 @@ impl RenginWgpu {
             render_bind_group: None,
             render_bind_group_layout: None,
             render_pipeline: None,
+            buffers: None,
+            target_texture: None,
             sampler,
             window: window,
             window_surface,
@@ -166,6 +170,24 @@ impl RenginWgpu {
             scale_factor,
             resolution,
         }
+    }
+
+    pub fn create_target_texture(&mut self) {
+        let texture_extent = wgpu::Extent3d {
+            width: self.physical_size.width,
+            height: self.physical_size.height,
+            depth_or_array_layers: 1,
+        };
+
+        self.target_texture = Some(self.device.create_texture(&wgpu::TextureDescriptor {
+            size: texture_extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            label: None,
+        }));
     }
 
     pub fn create_shaders(
@@ -222,10 +244,10 @@ impl RenginWgpu {
     pub fn create_buffers(
         &mut self,
         bvh: &BVH,
-        ubo: &UBO,
+        screen_data: &ScreenData,
         rays: &Rays,
         object_params: &Vec<ObjectParams>,
-    ) -> HashMap<&'static str, Buffer> {
+    ) {
         let now = Instant::now();
         log::info!("Creating buffers...");
 
@@ -242,7 +264,7 @@ impl RenginWgpu {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("UBO Buffer"),
-                contents: bytemuck::bytes_of(ubo),
+                contents: bytemuck::bytes_of(&screen_data.generate_ubo()),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
@@ -291,22 +313,19 @@ impl RenginWgpu {
             now.elapsed().as_millis()
         );
 
-        let mut buffers: HashMap<&'static str, Buffer> = HashMap::new();
-        buffers.insert("ubo", buf_ubo);
-        buffers.insert("tlas", buf_tlas);
-        buffers.insert("blas", buf_blas);
-        buffers.insert("normals", buf_normals);
-        buffers.insert("object_params", buf_op);
-        buffers.insert("rays", buf_rays);
-
-        buffers
+        self.buffers = Some(HashMap::from([
+            ("ubo", buf_ubo),
+            ("tlas", buf_tlas),
+            ("blas", buf_blas),
+            ("normals", buf_normals),
+            ("object_params", buf_op),
+            ("rays", buf_rays),
+        ]));
     }
 
     pub fn create_pipelines(
         &mut self,
-        buffers: &HashMap<&'static str, Buffer>,
         shaders: &HashMap<&'static str, ShaderModule>,
-        texture: &Texture,
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
         bvh: &BVH,
         rays: &Rays,
@@ -413,7 +432,6 @@ impl RenginWgpu {
         ));
 
         // create render pipeline
-
         self.render_bind_group_layout = Some(self.device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
                 label: Some("render bind group layout"),
@@ -437,23 +455,6 @@ impl RenginWgpu {
                 ],
             },
         ));
-
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        self.render_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
-            layout: self.render_bind_group_layout.as_ref().unwrap(),
-            label: Some("bind group"),
-        }));
 
         let render_pipeline_layout = Some(self.device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
@@ -500,6 +501,34 @@ impl RenginWgpu {
             },
         ));
 
+        // TODO: remove buffers as arg and move into RenginWgpu state
+        self.create_bind_groups();
+    }
+
+    pub fn create_bind_groups(&mut self) {
+        self.create_target_texture();
+
+        let texture_view = self
+            .target_texture
+            .as_ref()
+            .unwrap()
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.render_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+            layout: self.render_bind_group_layout.as_ref().unwrap(),
+            label: Some("bind group"),
+        }));
+
         self.compute_bind_group = Some(
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
@@ -511,31 +540,63 @@ impl RenginWgpu {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: buffers.get("ubo").as_ref().unwrap().as_entire_binding(),
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("ubo")
+                            .unwrap()
+                            .as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: buffers.get("tlas").as_ref().unwrap().as_entire_binding(),
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("tlas")
+                            .unwrap()
+                            .as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: buffers.get("blas").as_ref().unwrap().as_entire_binding(),
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("blas")
+                            .unwrap()
+                            .as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 4,
-                        resource: buffers.get("normals").as_ref().unwrap().as_entire_binding(),
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("normals")
+                            .unwrap()
+                            .as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 5,
-                        resource: buffers
-                            .get("object_params")
+                        resource: self
+                            .buffers
                             .as_ref()
+                            .unwrap()
+                            .get("object_params")
                             .unwrap()
                             .as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 6,
-                        resource: buffers.get("rays").as_ref().unwrap().as_entire_binding(),
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("rays")
+                            .unwrap()
+                            .as_entire_binding(),
                     },
                 ],
             }),

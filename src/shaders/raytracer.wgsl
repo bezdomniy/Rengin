@@ -46,23 +46,12 @@ struct Material {
 
 struct UBO {
     lightPos: vec3<f32>;
+    _pad: u32;
     width: u32;
-    _pad1: array<u32,20>;
     n_objects: i32;
     subpixel_idx: u32;
-    _pad2: u32;
     rnd_seed: f32;
-    // max_inner_node_idx: i32;
-    // max_leaf_node_idx: i32;
-    // padding: array<u32,2>;
 };
-
-// 
-// struct BVH {
-//     InnerNodes: [[stride(32)]] array<NodeInner>;
-//     LeafNodes: [[stride(128)]] array<NodeLeaf>;
-// };
-
 
 struct InnerNodes {
     InnerNodes: [[stride(32)]] array<NodeInner>;
@@ -193,25 +182,13 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, o
 
     let dirCrossE2: vec3<f32> = cross(ray.rayD, e2);
     let det: f32 = dot(e1, dirCrossE2);
-    // if (abs(det) < EPSILON) {
-    //     return Intersection(inIntersection.uv,inIntersection.id,-1.0);
-    // }
 
     let f: f32 = 1.0 / det;
     let p1ToOrigin: vec3<f32> = (ray.rayO - triangle.point1);
     uv.x = f * dot(p1ToOrigin, dirCrossE2);
-    // if (uv.x < 0.0 || uv.x > 1.0) {
-    //   return Intersection(inIntersection.uv,inIntersection.id,-1.0);
-    // }
 
     let originCrossE1: vec3<f32>  = cross(p1ToOrigin, e1);
     uv.y = f * dot(ray.rayD, originCrossE1);
-    // uv.y =1.0;
-
-    // if (uv.y < 0.0 || (uv.x + uv.y) > 1.0) {
-    //     return Intersection(inIntersection.uv,inIntersection.id,-1.0);
-    // }
-    // return Intersection(uv,inIntersection.id,f * dot(e2, originCrossE1));
 
     let t = f * dot(e2, originCrossE1);
 
@@ -224,7 +201,6 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, o
         return Intersection(uv,i32(triangleIdx),t,u32(object_id));
     }
     return inIntersection;
-    // return isHit ? Intersection(uv,inIntersection.id,t) : inIntersection;
 }
 
 fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_idx: i32, max_inner_node_idx: i32, leaf_offset: u32, object_id: i32) -> Intersection {

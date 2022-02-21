@@ -2,31 +2,25 @@ mod engine;
 mod renderer;
 mod shaders;
 
-use wgpu::{Buffer, ShaderModule, Texture};
-
-use winit::dpi::LogicalSize;
 use winit::event::{
     DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode,
     WindowEvent,
 };
 use winit::event_loop::{ControlFlow, EventLoop};
 
+use std::process::exit;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
 use engine::scene_importer::Scene;
-use std::collections::HashMap;
 
 use crate::engine::rt_primitives::Rays;
 use crate::renderer::wgpu_utils::RenginWgpu;
-use engine::rt_primitives::{Camera, UBO};
+use engine::rt_primitives::{Camera, ScreenData};
 
 static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
 
 static FRAMERATE: f64 = 60.0;
-
-//TODO: try doing passes over parts of the image instead of whole at a time
-//      that way you can maintain framerate
 
 pub enum RendererType {
     PathTracer,
@@ -39,11 +33,7 @@ struct GameState {
 
 struct RenderApp {
     renderer: RenginWgpu,
-    shaders: HashMap<&'static str, ShaderModule>,
-    scene: Scene,
-    buffers: HashMap<&'static str, Buffer>,
-    texture: Texture,
-    ubo: UBO,
+    screen_data: ScreenData,
     game_state: GameState,
 }
 
@@ -82,8 +72,7 @@ impl RenderApp {
         };
 
         let light_value = scene.lights.as_ref().unwrap()[0].at;
-        let ubo = UBO::new(
-            // [-4f32, 2f32, 3f32, 1f32],
+        let screen_data = ScreenData::new(
             [light_value[0], light_value[1], light_value[2]],
             game_state.camera.get_inverse_transform(),
             scene.object_params.as_ref().unwrap().len() as u32,
@@ -95,9 +84,8 @@ impl RenderApp {
 
         let rays = Rays::empty(&renderer.resolution);
 
-        println!("ubo: {:?}", ubo);
+        println!("screen_data: {:?}", screen_data);
 
-        // log::info!("ubo:{:?},", ubo);
         now = Instant::now();
         log::info!("Building shaders...");
         let shaders = renderer.create_shaders(renderer_type);
@@ -106,45 +94,23 @@ impl RenderApp {
             now.elapsed().as_millis()
         );
 
-        // TODO: update texture size on resize
-        let texture_extent = wgpu::Extent3d {
-            width: scene.camera.as_ref().unwrap().width,
-            height: scene.camera.as_ref().unwrap().height,
-            depth_or_array_layers: 1,
-        };
-
-        // The render pipeline renders data into this texture
-        let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {
-            size: texture_extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            label: None,
-        });
-
-        let buffers = renderer.create_buffers(
+        renderer.create_buffers(
             scene.bvh.as_ref().unwrap(),
-            &ubo,
+            &screen_data,
             &rays,
             scene.object_params.as_ref().unwrap(),
         );
         renderer.create_pipelines(
-            &buffers,
+            // &buffers,
             &shaders,
-            &texture,
+            // &renderer.target_texture,
             scene.bvh.as_ref().unwrap(),
             &rays,
         );
 
         Self {
             renderer,
-            shaders,
-            scene,
-            buffers,
-            texture,
-            ubo,
+            screen_data,
             game_state,
         }
     }
@@ -158,10 +124,10 @@ impl RenderApp {
                         .camera
                         .rotate(-delta.0 as f32, delta.1 as f32);
 
-                    self.ubo.inverse_camera_transform =
+                    self.screen_data.inverse_camera_transform =
                         self.game_state.camera.get_inverse_transform();
-                    self.ubo.subpixel_idx = 0;
-                    self.ubo.update_random_seed();
+                    self.screen_data.subpixel_idx = 0;
+                    self.screen_data.update_random_seed();
                 }
             }
             DeviceEvent::MouseWheel { delta } => match delta {
@@ -169,19 +135,19 @@ impl RenderApp {
                     // println!("y: {}", y);
                     self.game_state.camera.move_forward(y as f32);
 
-                    self.ubo.inverse_camera_transform =
+                    self.screen_data.inverse_camera_transform =
                         self.game_state.camera.get_inverse_transform();
-                    self.ubo.subpixel_idx = 0;
-                    self.ubo.update_random_seed();
+                    self.screen_data.subpixel_idx = 0;
+                    self.screen_data.update_random_seed();
                 }
                 MouseScrollDelta::PixelDelta(xy) => {
                     // println!("pix xy: {:?}", xy);
                     self.game_state.camera.move_forward(xy.y as f32);
 
-                    self.ubo.inverse_camera_transform =
+                    self.screen_data.inverse_camera_transform =
                         self.game_state.camera.get_inverse_transform();
-                    self.ubo.subpixel_idx = 0;
-                    self.ubo.update_random_seed();
+                    self.screen_data.subpixel_idx = 0;
+                    self.screen_data.update_random_seed();
                 } // _ => {}
             },
             _ => {}
@@ -213,21 +179,21 @@ impl RenderApp {
             self.renderer.physical_size.width,
             self.renderer.physical_size.height,
             &self.renderer.resolution,
-            &self.ubo,
+            &self.screen_data,
         );
 
         self.renderer.queue.write_buffer(
-            self.buffers.get("rays").unwrap(),
+            self.renderer.buffers.as_ref().unwrap().get("rays").unwrap(),
             0,
             bytemuck::cast_slice(&rays.data),
         );
         self.renderer.queue.write_buffer(
-            self.buffers.get("ubo").unwrap(),
+            self.renderer.buffers.as_ref().unwrap().get("ubo").unwrap(),
             0,
-            bytemuck::bytes_of(&self.ubo),
+            bytemuck::bytes_of(&self.screen_data.generate_ubo()),
         );
 
-        self.ubo.subpixel_idx += 1;
+        self.screen_data.subpixel_idx += 1;
     }
 
     pub fn render(mut self, event_loop: EventLoop<()>) {
@@ -238,7 +204,7 @@ impl RenderApp {
             // *control_flow = ControlFlow::Wait;
             match event {
                 Event::MainEventsCleared => {
-                    if self.ubo.subpixel_idx < self.renderer.rays_per_pixel {
+                    if self.screen_data.subpixel_idx < self.renderer.rays_per_pixel {
                         self.update();
 
                         let frame = match self.renderer.window_surface.get_current_texture() {
@@ -328,14 +294,15 @@ impl RenderApp {
                     let time_since_last_frame = last_update_inst.elapsed();
 
                     if (!left_mouse_down || self.renderer.continous_motion)
-                        && ((self.ubo.subpixel_idx < self.renderer.rays_per_pixel)
-                            || (self.ubo.subpixel_idx == 0
+                        && ((self.screen_data.subpixel_idx < self.renderer.rays_per_pixel)
+                            || (self.screen_data.subpixel_idx == 0
                                 && time_since_last_frame >= target_frametime))
                     {
-                        println!("Drawing ray index: {}", self.ubo.subpixel_idx);
+                        println!("Drawing ray index: {}", self.screen_data.subpixel_idx);
 
                         last_update_inst = Instant::now();
                     } else {
+                        // exit(0);
                         *control_flow = ControlFlow::WaitUntil(
                             Instant::now() + target_frametime - time_since_last_frame,
                         );
@@ -350,137 +317,15 @@ impl RenderApp {
                         },
                     ..
                 } => {
-                    // // println!("p: {} {}", size.width, size.height);
-                    // // Reconfigure the surface with the new size
-                    // self.renderer.config.width = size.width.max(1);
-                    // self.renderer.config.height = size.height.max(1);
-                    self.ubo.subpixel_idx = 0;
-
-                    // let logical_size: LogicalSize<u32> =
-                    //     winit::dpi::PhysicalSize::new(size.width, size.height)
-                    //         .to_logical(self.renderer.scale_factor);
+                    self.screen_data.subpixel_idx = 0;
 
                     self.renderer.update_window_size(size.width, size.height);
 
-                    self.ubo.update_dims(&self.renderer.logical_size);
+                    self.screen_data.update_dims(&self.renderer.logical_size);
 
                     // println!("l: {} {}", logical_size.width, logical_size.height);
 
-                    let texture_extent = wgpu::Extent3d {
-                        width: self.renderer.logical_size.width,
-                        height: self.renderer.logical_size.height,
-                        depth_or_array_layers: 1,
-                    };
-
-                    // The render pipeline renders data into this texture
-                    self.texture = self
-                        .renderer
-                        .device
-                        .create_texture(&wgpu::TextureDescriptor {
-                            size: texture_extent,
-                            mip_level_count: 1,
-                            sample_count: 1,
-                            dimension: wgpu::TextureDimension::D2,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            usage: wgpu::TextureUsages::STORAGE_BINDING
-                                | wgpu::TextureUsages::TEXTURE_BINDING,
-                            label: None,
-                        });
-
-                    let texture_view = self
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-
-                    // TODO: move this into wgpu_utils function
-                    self.renderer.compute_bind_group = Some(
-                        self.renderer
-                            .device
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: None,
-                                layout: self.renderer.compute_bind_group_layout.as_ref().unwrap(),
-                                entries: &[
-                                    wgpu::BindGroupEntry {
-                                        binding: 0,
-                                        resource: wgpu::BindingResource::TextureView(&texture_view),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 1,
-                                        resource: self
-                                            .buffers
-                                            .get("ubo")
-                                            .as_ref()
-                                            .unwrap()
-                                            .as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 2,
-                                        resource: self
-                                            .buffers
-                                            .get("tlas")
-                                            .as_ref()
-                                            .unwrap()
-                                            .as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 3,
-                                        resource: self
-                                            .buffers
-                                            .get("blas")
-                                            .as_ref()
-                                            .unwrap()
-                                            .as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 4,
-                                        resource: self
-                                            .buffers
-                                            .get("normals")
-                                            .as_ref()
-                                            .unwrap()
-                                            .as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 5,
-                                        resource: self
-                                            .buffers
-                                            .get("object_params")
-                                            .as_ref()
-                                            .unwrap()
-                                            .as_entire_binding(),
-                                    },
-                                    // TODO: split this into directions and origins buffers to work with buffer size limit on mac
-                                    wgpu::BindGroupEntry {
-                                        binding: 6,
-                                        resource: self
-                                            .buffers
-                                            .get("rays")
-                                            .as_ref()
-                                            .unwrap()
-                                            .as_entire_binding(),
-                                    },
-                                ],
-                            }),
-                    );
-
-                    // TODO: change this to function in wgpu_utils
-                    self.renderer.render_bind_group = Some(self.renderer.device.create_bind_group(
-                        &wgpu::BindGroupDescriptor {
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::Sampler(
-                                        &self.renderer.sampler,
-                                    ),
-                                },
-                            ],
-                            layout: self.renderer.render_bind_group_layout.as_ref().unwrap(),
-                            label: Some("bind group"),
-                        },
-                    ));
+                    self.renderer.create_bind_groups();
 
                     // println!("{} {}", size.width, size.height);
                     self.renderer
