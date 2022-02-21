@@ -176,8 +176,7 @@ impl RenderApp {
 
     pub fn update(&mut self) {
         let rays = Rays::new(
-            self.renderer.physical_size.width,
-            self.renderer.physical_size.height,
+            &self.renderer.physical_size,
             &self.renderer.resolution,
             &self.screen_data,
         );
@@ -321,7 +320,7 @@ impl RenderApp {
 
                     self.renderer.update_window_size(size.width, size.height);
 
-                    self.screen_data.update_dims(&self.renderer.logical_size);
+                    self.screen_data.update_dims(&self.renderer.physical_size);
 
                     // println!("l: {} {}", logical_size.width, logical_size.height);
 

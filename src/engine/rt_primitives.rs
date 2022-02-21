@@ -275,7 +275,7 @@ impl ScreenData {
         }
     }
 
-    pub fn update_dims(&mut self, size: &LogicalSize<u32>) {
+    pub fn update_dims(&mut self, size: &PhysicalSize<u32>) {
         let half_view = (self.fov / 2f32).tan();
         let aspect = size.width as f32 / size.height as f32;
 
@@ -362,13 +362,14 @@ pub struct Rays {
 
 // TODO: implement sorting before output to gpu buffer
 impl Rays {
-    pub fn new(width: u32, height: u32, resolution: &PhysicalSize<u32>, ubo: &ScreenData) -> Self {
+    pub fn new(size: &PhysicalSize<u32>, resolution: &PhysicalSize<u32>, ubo: &ScreenData) -> Self {
         println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
         let mut rays = Rays::empty(resolution);
 
-        for x in 0..width {
-            for y in 0..height {
-                rays.data[((y * width) + x) as usize] = Ray::new(x as i32, y as i32, ubo);
+        for x in 0..size.width {
+            for y in 0..size.height {
+                // TODO: fix this so size is never bigger than resolution
+                rays.data[((y * size.width) + x) as usize] = Ray::new(x as i32, y as i32, ubo);
             }
         }
 
