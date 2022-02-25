@@ -48,7 +48,7 @@ struct UBO {
     width: u32;
     n_objects: i32;
     subpixel_idx: u32;
-    rnd_seed: f32;
+    bounce_idx: u32;
 };
 
 
@@ -134,7 +134,7 @@ fn rand(xy: vec2<f32>, seed: f32) -> f32 {
 fn rand2(xy: vec2<f32>,seed:f32) -> f32
 {
     let v = 0.152;
-    let pos = (xy * v + ubo.rnd_seed * 1500. + 50.0);
+    let pos = (xy * v + f32(ubo.bounce_idx) * 1500. + 50.0);
 
 	var p3 = fract(vec3<f32>(pos.xyx) * 0.1031);
     p3 = p3 + dot(p3, p3.yzx + 33.33);
@@ -468,41 +468,50 @@ fn reflectance(cosine:f32, ref_idx: f32) -> f32 {
     return r0 + (1.0-r0)*pow((1.0 - cosine),5.0);
 }
 
-fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
+struct RenderRet {
+    color: vec4<f32>;
+    ray: Ray;
+    emissive_found: bool;
+};
+
+fn renderScene(new_ray: Ray,current_ray_idx: u32) -> RenderRet {
     // int id = 0;
-    var color: vec4<f32> = vec4<f32>(1.0);
+    // var color: vec4<f32> = vec4<f32>(1.0);
     var uv: vec2<f32>;
     var t: f32 = MAXLEN;
 
-    var new_ray = init_ray;
+    // var new_ray = init_ray;
     var type_enum = 0;
     // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
     // var stack: array<vec4<f32>,RAY_BOUNCES>;
     // var top_stack = -1;
 
-    var emissive_found = false;
+    // var emissive_found = false;
     
-    for (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1) {
+    // for (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1) {
         // Get intersected object ID
         let intersection = intersect(new_ray);
         
         if (intersection.closestT >= MAXLEN || intersection.id == -1)
         {
-            break;
+            // rays.Rays[(u32(new_ray.y) * ubo.width) + u32(new_ray.x)] = Ray(vec3<f32>(-1.0),-1,vec3<f32>(-1.0),-1);
+            return RenderRet(vec4<f32>(0.0), Ray(vec3<f32>(-1.0),-1,vec3<f32>(-1.0),-1),false);
+            // break;
         }
 
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
 
         if (ob_params.material.emissiveness.w > 0.0) {
-            emissive_found = true;
+            // emissive_found = true;
 
-            color = color * ob_params.material.emissiveness;
-            break;
+            // rays.Rays[(u32(new_ray.y) * ubo.width) + u32(new_ray.x)] = Ray(vec3<f32>(-1.0),-1,vec3<f32>(-1.0),-1);
+            return RenderRet(ob_params.material.emissiveness, Ray(vec3<f32>(-1.0),-1,vec3<f32>(-1.0),-1),true);
+            // break;
         }
 
-        color = color * ob_params.material.colour;
+        // color = color * ob_params.material.colour;
 
         let hitParams: HitParams = getHitParams(new_ray, intersection, ob_params.model_type);
         // var scatterTarget: vec4<f32> = hitParams.normalv + hemisphericalRand(1.0,hitParams.normalv.xyz,new_ray.rayD.xyz,ubo.rnd_seed);
@@ -513,17 +522,17 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
             scatterTarget = hitParams.normalv;
         }
 
-        new_ray = Ray(hitParams.overPoint, init_ray.x, scatterTarget, init_ray.y);
+        // new_ray = Ray(hitParams.overPoint, new_ray.x, scatterTarget, new_ray.y);
 
         // rays.Rays[(u32(new_ray.y) * ubo.width) + u32(new_ray.x)] = new_ray;
 
-    }
+    // }
 
-    if (!emissive_found) {
-        color = vec4<f32>(0.0);
-    }
+    // if (!emissive_found) {
+    //     color = vec4<f32>(0.0);
+    // }
  
-    return color;
+    return RenderRet(ob_params.material.colour, Ray(hitParams.overPoint, new_ray.x, scatterTarget, new_ray.y),false);
 
 }
 
@@ -534,27 +543,40 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
         ) 
 {
-    var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
     let ray = rays.Rays[(global_invocation_id.y * ubo.width) + global_invocation_id.x];
 
     if (ray.x < 0) {
         return;
     }
     
-    let ray_color = renderScene(ray,ubo.subpixel_idx);
+    // var color: vec4<f32> = vec4<f32>(1.0);
+    // var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
 
-    if (ubo.subpixel_idx > 0u) {
-        color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
+    let render_ret = renderScene(ray,ubo.subpixel_idx);
+    rays.Rays[(u32(ray.y) * ubo.width) + u32(ray.x)] = render_ret.ray;
+
+    if (render_ret.ray.x < 0 && !render_ret.emissive_found) {
+        textureStore(imageData, vec2<i32>(global_invocation_id.xy), vec4<f32>(0.0));
+        return;
     }
 
-    let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
+    if (ubo.bounce_idx == 0u) {
+        textureStore(imageData, vec2<i32>(global_invocation_id.xy), render_ret.color);
+        return;
+    }
 
-    color = (color * (1.0 - scale)) + (ray_color * scale);
+    let color =  textureLoad(imageData,vec2<i32>(global_invocation_id.xy)) * render_ret.color;
 
-    color.r = clamp(color.r,0.0,0.999);
-    color.g = clamp(color.g,0.0,0.999);
-    color.b = clamp(color.b,0.0,0.999);
-    color.a = clamp(color.a,0.0,0.999);
+    // if (ubo.bounce_idx ==  0u) {
+        // let scale = 1.0 / (f32(ubo.subpixel_idx + 1u) * f32(ubo.bounce_idx + 1u));
+
+        // color = (color * (1.0 - scale)) + (render_ret.color * scale);
+
+        // color.r = clamp(color.r,0.0,0.999);
+        // color.g = clamp(color.g,0.0,0.999);
+        // color.b = clamp(color.b,0.0,0.999);
+        // color.a = clamp(color.a,0.0,0.999);
+    // }
     
     textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }

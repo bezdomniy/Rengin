@@ -27,7 +27,8 @@ pub struct RenginWgpu {
     pub render_bind_group_layout: Option<BindGroupLayout>,
     pub render_bind_group: Option<BindGroup>,
     pub buffers: Option<HashMap<&'static str, Buffer>>,
-    pub target_texture: Option<Texture>,
+    pub compute_target_texture: Option<Texture>,
+    pub previous_frame_texture: Option<Texture>,
     pub window: winit::window::Window,
     pub window_surface: Surface,
     pub config: wgpu::SurfaceConfiguration,
@@ -36,6 +37,7 @@ pub struct RenginWgpu {
     pub workgroup_size: [u32; 3],
     pub continous_motion: bool,
     pub rays_per_pixel: u32,
+    pub ray_bounces: u32,
     pub scale_factor: f64,
     pub resolution: PhysicalSize<u32>,
 }
@@ -56,6 +58,7 @@ impl RenginWgpu {
         event_loop: &EventLoop<()>,
         continous_motion: bool,
         rays_per_pixel: u32,
+        ray_bounces: u32,
     ) -> Self {
         let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
         // let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
@@ -157,7 +160,8 @@ impl RenginWgpu {
             render_bind_group_layout: None,
             render_pipeline: None,
             buffers: None,
-            target_texture: None,
+            compute_target_texture: None,
+            previous_frame_texture: None,
             sampler,
             window: window,
             window_surface,
@@ -167,25 +171,36 @@ impl RenginWgpu {
             workgroup_size,
             continous_motion,
             rays_per_pixel,
+            ray_bounces,
             scale_factor,
             resolution,
         }
     }
 
-    pub fn create_target_texture(&mut self) {
+    pub fn create_target_textures(&mut self) {
         let texture_extent = wgpu::Extent3d {
             width: self.physical_size.width,
             height: self.physical_size.height,
             depth_or_array_layers: 1,
         };
 
-        self.target_texture = Some(self.device.create_texture(&wgpu::TextureDescriptor {
+        self.compute_target_texture = Some(self.device.create_texture(&wgpu::TextureDescriptor {
             size: texture_extent,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::STORAGE_BINDING,
+            label: None,
+        }));
+
+        self.previous_frame_texture = Some(self.device.create_texture(&wgpu::TextureDescriptor {
+            size: texture_extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING,
             label: None,
         }));
     }
@@ -439,10 +454,10 @@ impl RenginWgpu {
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::ReadOnly,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
                             view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
                         },
                         count: None,
                     },
@@ -450,6 +465,31 @@ impl RenginWgpu {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::ReadWrite,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        // ty: wgpu::BindingType::Texture {
+                        //     sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        //     view_dimension: wgpu::TextureViewDimension::D2,
+                        //     multisampled: false,
+                        // },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                        },
                         count: None,
                     },
                 ],
@@ -506,28 +546,50 @@ impl RenginWgpu {
     }
 
     pub fn create_bind_groups(&mut self) {
-        self.create_target_texture();
+        self.create_target_textures();
 
-        let texture_view = self
-            .target_texture
+        let compute_target_texture_view = self
+            .compute_target_texture
             .as_ref()
             .unwrap()
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        self.render_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
-            layout: self.render_bind_group_layout.as_ref().unwrap(),
-            label: Some("bind group"),
-        }));
+        let previous_frame_texture_view = self
+            .previous_frame_texture
+            .as_ref()
+            .unwrap()
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.render_bind_group = Some(
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&compute_target_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&previous_frame_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("ubo")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                ],
+                layout: self.render_bind_group_layout.as_ref().unwrap(),
+                label: Some("bind group"),
+            }),
+        );
 
         self.compute_bind_group = Some(
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -536,7 +598,7 @@ impl RenginWgpu {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                        resource: wgpu::BindingResource::TextureView(&compute_target_texture_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,

@@ -43,6 +43,7 @@ impl RenderApp {
         event_loop: &EventLoop<()>,
         continous_motion: bool,
         rays_per_pixel: u32,
+        ray_bounces: u32,
         renderer_type: RendererType,
     ) -> Self {
         let mut now = Instant::now();
@@ -61,6 +62,7 @@ impl RenderApp {
             event_loop,
             continous_motion,
             rays_per_pixel,
+            ray_bounces,
         ));
 
         let game_state = GameState {
@@ -127,7 +129,7 @@ impl RenderApp {
                     self.screen_data.inverse_camera_transform =
                         self.game_state.camera.get_inverse_transform();
                     self.screen_data.subpixel_idx = 0;
-                    self.screen_data.update_random_seed();
+                    // self.screen_data.update_random_seed();
                 }
             }
             DeviceEvent::MouseWheel { delta } => match delta {
@@ -138,7 +140,7 @@ impl RenderApp {
                     self.screen_data.inverse_camera_transform =
                         self.game_state.camera.get_inverse_transform();
                     self.screen_data.subpixel_idx = 0;
-                    self.screen_data.update_random_seed();
+                    // self.screen_data.update_random_seed();
                 }
                 MouseScrollDelta::PixelDelta(xy) => {
                     // println!("pix xy: {:?}", xy);
@@ -147,7 +149,7 @@ impl RenderApp {
                     self.screen_data.inverse_camera_transform =
                         self.game_state.camera.get_inverse_transform();
                     self.screen_data.subpixel_idx = 0;
-                    self.screen_data.update_random_seed();
+                    // self.screen_data.update_random_seed();
                 } // _ => {}
             },
             _ => {}
@@ -222,11 +224,14 @@ impl RenderApp {
                             .texture
                             .create_view(&wgpu::TextureViewDescriptor::default());
 
+                        // TODO: create send texture to use to keep track of previous frame
+
                         // create render pass descriptor and its color attachments
                         let color_attachments = [wgpu::RenderPassColorAttachment {
                             view: &view,
                             resolve_target: None,
                             ops: wgpu::Operations {
+                                // load: wgpu::LoadOp::Load,
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                 store: true,
                             },
@@ -253,13 +258,25 @@ impl RenderApp {
                                 &[],
                             );
 
-                            cpass.dispatch(
-                                (self.renderer.physical_size.width / WORKGROUP_SIZE[0])
-                                    + WORKGROUP_SIZE[0],
-                                (self.renderer.physical_size.height / WORKGROUP_SIZE[1])
-                                    + WORKGROUP_SIZE[1],
-                                WORKGROUP_SIZE[2],
-                            );
+                            // TODO: move ray bounce loop out of shader, and do it here
+
+                            for _ in 0..self.renderer.ray_bounces {
+                                cpass.dispatch(
+                                    (self.renderer.physical_size.width / WORKGROUP_SIZE[0])
+                                        + WORKGROUP_SIZE[0],
+                                    (self.renderer.physical_size.height / WORKGROUP_SIZE[1])
+                                        + WORKGROUP_SIZE[1],
+                                    WORKGROUP_SIZE[2],
+                                );
+
+                                self.screen_data.bounce_idx += 1;
+
+                                self.renderer.queue.write_buffer(
+                                    self.renderer.buffers.as_ref().unwrap().get("ubo").unwrap(),
+                                    0,
+                                    bytemuck::bytes_of(&self.screen_data.generate_ubo()),
+                                );
+                            }
                         }
                         command_encoder.pop_debug_group();
 
@@ -301,7 +318,7 @@ impl RenderApp {
 
                         last_update_inst = Instant::now();
                     } else {
-                        // exit(0);
+                        exit(0);
                         *control_flow = ControlFlow::WaitUntil(
                             Instant::now() + target_frametime - time_since_last_frame,
                         );
@@ -390,6 +407,9 @@ struct Args {
     /// Number of rays per pixel
     #[clap(short, long, default_value_t = 8)]
     rays_per_pixel: u32,
+    /// Number of bounces per ray
+    #[clap(short, long, default_value_t = 8)]
+    bounces: u32,
 }
 
 fn main() {
@@ -410,6 +430,7 @@ fn main() {
         &event_loop,
         !args.draw_on_mouseup,
         args.rays_per_pixel,
+        args.bounces,
         renderer_type,
     );
     app.render(event_loop);

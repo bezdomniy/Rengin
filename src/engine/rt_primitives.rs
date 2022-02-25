@@ -216,7 +216,7 @@ pub struct UBO {
     width: u32,
     n_objects: u32,
     subpixel_idx: u32,
-    rnd_seed: f32,
+    bounce_idx: u32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -232,7 +232,7 @@ pub struct ScreenData {
     n_objects: u32,
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
-    rnd_seed: f32,
+    pub bounce_idx: u32,
     // _padding: [u32; 1],
 }
 
@@ -271,7 +271,7 @@ impl ScreenData {
             n_objects,
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
-            rnd_seed: rand::thread_rng().gen_range(0.0..1.0),
+            bounce_idx: 0,
         }
     }
 
@@ -291,9 +291,9 @@ impl ScreenData {
         self.pixel_size = (self.half_width * 2f32) / size.width as f32;
     }
 
-    pub fn update_random_seed(&mut self) {
-        self.rnd_seed = rand::thread_rng().gen_range(0.0..1.0);
-    }
+    // pub fn update_random_seed(&mut self) {
+    //     self.rnd_seed = rand::thread_rng().gen_range(0.0..1.0);
+    // }
 
     pub fn generate_ubo(&self) -> UBO {
         UBO {
@@ -301,7 +301,7 @@ impl ScreenData {
             width: self.width,
             n_objects: self.n_objects,
             subpixel_idx: self.subpixel_idx,
-            rnd_seed: self.rnd_seed,
+            bounce_idx: 0,
         }
     }
 }
