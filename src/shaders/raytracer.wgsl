@@ -50,7 +50,7 @@ struct UBO {
     width: u32;
     n_objects: i32;
     subpixel_idx: u32;
-    rnd_seed: f32;
+    _ray_bounces: f32;
 };
 
 struct InnerNodes {

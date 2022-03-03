@@ -48,7 +48,7 @@ struct UBO {
     width: u32;
     n_objects: i32;
     subpixel_idx: u32;
-    bounce_idx: u32;
+    ray_bounces: u32;
 };
 
 
@@ -121,7 +121,7 @@ let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
 let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio 
 // let RAYS_PER_PIXEL: u32 = 4u;  
-let RAY_BOUNCES: i32 = 50;
+// let RAY_BOUNCES: i32 = 50;
 
 fn gold_noise(xy: vec2<f32>, seed: f32) -> f32 {
     return fract(tan(distance(xy*PHI, xy)*seed)*xy.x);
@@ -134,7 +134,7 @@ fn rand(xy: vec2<f32>, seed: f32) -> f32 {
 fn rand2(xy: vec2<f32>,seed:f32) -> f32
 {
     let v = 0.152;
-    let pos = (xy * v + f32(ubo.bounce_idx) * 1500. + 50.0);
+    let pos = (xy * v + f32(ubo.subpixel_idx) * 1500. + 50.0);
 
 	var p3 = fract(vec3<f32>(pos.xyx) * 0.1031);
     p3 = p3 + dot(p3, p3.yzx + 33.33);
@@ -474,65 +474,60 @@ struct RenderRet {
     emissive_found: bool;
 };
 
-fn renderScene(new_ray: Ray,current_ray_idx: u32) -> RenderRet {
+fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
     // int id = 0;
-    // var color: vec4<f32> = vec4<f32>(1.0);
+    var color: vec4<f32> = vec4<f32>(1.0);
     var uv: vec2<f32>;
     var t: f32 = MAXLEN;
 
-    // var new_ray = init_ray;
-    var type_enum = 0;
+    var new_ray = init_ray;
+    // var type_enum = 0;
     // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
     // var stack: array<vec4<f32>,RAY_BOUNCES>;
     // var top_stack = -1;
 
-    // var emissive_found = false;
+    var emissive_found = false;
     
-    // for (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1) {
+    for (var bounce_idx: u32 = 0u; bounce_idx < ubo.ray_bounces; bounce_idx =  bounce_idx + 1u) {
         // Get intersected object ID
         let intersection = intersect(new_ray);
         
         if (intersection.closestT >= MAXLEN || intersection.id == -1)
         {
-            // rays.Rays[(u32(new_ray.y) * ubo.width) + u32(new_ray.x)] = Ray(vec3<f32>(-1.0),-1,vec3<f32>(-1.0),-1);
-            return RenderRet(vec4<f32>(0.0), Ray(vec3<f32>(-1.0),-1,vec3<f32>(-1.0),-1),false);
-            // break;
+            break;
         }
 
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
 
         if (ob_params.material.emissiveness.w > 0.0) {
-            // emissive_found = true;
+            emissive_found = true;
 
-            // rays.Rays[(u32(new_ray.y) * ubo.width) + u32(new_ray.x)] = Ray(vec3<f32>(-1.0),-1,vec3<f32>(-1.0),-1);
-            return RenderRet(ob_params.material.emissiveness, Ray(vec3<f32>(-1.0),-1,vec3<f32>(-1.0),-1),true);
-            // break;
+            color = color * ob_params.material.emissiveness;
+            break;
         }
 
-        // color = color * ob_params.material.colour;
+        color = color * ob_params.material.colour;
 
         let hitParams: HitParams = getHitParams(new_ray, intersection, ob_params.model_type);
         // var scatterTarget: vec4<f32> = hitParams.normalv + hemisphericalRand(1.0,hitParams.normalv.xyz,new_ray.rayD.xyz,ubo.rnd_seed);
-        var scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.rayD.xyz,f32(ubo.subpixel_idx));
+        var scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx));
 
         if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON )
         {
             scatterTarget = hitParams.normalv;
         }
 
-        // new_ray = Ray(hitParams.overPoint, new_ray.x, scatterTarget, new_ray.y);
+        new_ray = Ray(hitParams.overPoint, init_ray.x, scatterTarget, init_ray.y);
 
-        // rays.Rays[(u32(new_ray.y) * ubo.width) + u32(new_ray.x)] = new_ray;
+    }
 
-    // }
-
-    // if (!emissive_found) {
-    //     color = vec4<f32>(0.0);
-    // }
+    if (!emissive_found) {
+        color = vec4<f32>(0.0);
+    }
  
-    return RenderRet(ob_params.material.colour, Ray(hitParams.overPoint, new_ray.x, scatterTarget, new_ray.y),false);
+    return color;
 
 }
 
@@ -543,40 +538,31 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
         ) 
 {
+    var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
     let ray = rays.Rays[(global_invocation_id.y * ubo.width) + global_invocation_id.x];
 
     if (ray.x < 0) {
         return;
     }
     
-    // var color: vec4<f32> = vec4<f32>(1.0);
-    // var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
 
-    let render_ret = renderScene(ray,ubo.subpixel_idx);
-    rays.Rays[(u32(ray.y) * ubo.width) + u32(ray.x)] = render_ret.ray;
+    // let uv = vec2<u32>(ray.x ,ray.y);
 
-    if (render_ret.ray.x < 0 && !render_ret.emissive_found) {
-        textureStore(imageData, vec2<i32>(global_invocation_id.xy), vec4<f32>(0.0));
-        return;
+    if (ubo.subpixel_idx > 0u) {
+        color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
     }
 
-    if (ubo.bounce_idx == 0u) {
-        textureStore(imageData, vec2<i32>(global_invocation_id.xy), render_ret.color);
-        return;
-    }
+    let ray_color = renderScene(ray,ubo.subpixel_idx);
 
-    let color =  textureLoad(imageData,vec2<i32>(global_invocation_id.xy)) * render_ret.color;
+    let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
-    // if (ubo.bounce_idx ==  0u) {
-        // let scale = 1.0 / (f32(ubo.subpixel_idx + 1u) * f32(ubo.bounce_idx + 1u));
+    color = (color * (1.0 - scale)) + (ray_color * scale);
 
-        // color = (color * (1.0 - scale)) + (render_ret.color * scale);
-
-        // color.r = clamp(color.r,0.0,0.999);
-        // color.g = clamp(color.g,0.0,0.999);
-        // color.b = clamp(color.b,0.0,0.999);
-        // color.a = clamp(color.a,0.0,0.999);
-    // }
+    color.r = clamp(color.r,0.0,0.999);
+    color.g = clamp(color.g,0.0,0.999);
+    color.b = clamp(color.b,0.0,0.999);
+    color.a = clamp(color.a,0.0,0.999);
     
+
     textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }

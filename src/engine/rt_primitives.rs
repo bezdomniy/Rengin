@@ -216,7 +216,7 @@ pub struct UBO {
     width: u32,
     n_objects: u32,
     subpixel_idx: u32,
-    bounce_idx: u32,
+    ray_bounces: u32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -232,7 +232,7 @@ pub struct ScreenData {
     n_objects: u32,
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
-    pub bounce_idx: u32,
+    pub ray_bounces: u32,
     // _padding: [u32; 1],
 }
 
@@ -241,6 +241,7 @@ impl ScreenData {
         light_pos: [f32; 3],
         inverse_camera_transform: Mat4,
         n_objects: u32,
+        ray_bounces: u32,
         width: u32,
         height: u32,
         fov: f32,
@@ -271,7 +272,7 @@ impl ScreenData {
             n_objects,
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
-            bounce_idx: 0,
+            ray_bounces,
         }
     }
 
@@ -301,7 +302,7 @@ impl ScreenData {
             width: self.width,
             n_objects: self.n_objects,
             subpixel_idx: self.subpixel_idx,
-            bounce_idx: 0,
+            ray_bounces: self.ray_bounces,
         }
     }
 }

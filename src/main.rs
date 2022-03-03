@@ -78,6 +78,7 @@ impl RenderApp {
             [light_value[0], light_value[1], light_value[2]],
             game_state.camera.get_inverse_transform(),
             scene.object_params.as_ref().unwrap().len() as u32,
+            ray_bounces,
             scene.camera.as_ref().unwrap().width,
             scene.camera.as_ref().unwrap().height,
             scene.camera.as_ref().unwrap().field_of_view,
@@ -260,23 +261,13 @@ impl RenderApp {
 
                             // TODO: move ray bounce loop out of shader, and do it here
 
-                            for _ in 0..self.renderer.ray_bounces {
-                                cpass.dispatch(
-                                    (self.renderer.physical_size.width / WORKGROUP_SIZE[0])
-                                        + WORKGROUP_SIZE[0],
-                                    (self.renderer.physical_size.height / WORKGROUP_SIZE[1])
-                                        + WORKGROUP_SIZE[1],
-                                    WORKGROUP_SIZE[2],
-                                );
-
-                                self.screen_data.bounce_idx += 1;
-
-                                self.renderer.queue.write_buffer(
-                                    self.renderer.buffers.as_ref().unwrap().get("ubo").unwrap(),
-                                    0,
-                                    bytemuck::bytes_of(&self.screen_data.generate_ubo()),
-                                );
-                            }
+                            cpass.dispatch(
+                                (self.renderer.physical_size.width / WORKGROUP_SIZE[0])
+                                    + WORKGROUP_SIZE[0],
+                                (self.renderer.physical_size.height / WORKGROUP_SIZE[1])
+                                    + WORKGROUP_SIZE[1],
+                                WORKGROUP_SIZE[2],
+                            );
                         }
                         command_encoder.pop_debug_group();
 
@@ -318,7 +309,7 @@ impl RenderApp {
 
                         last_update_inst = Instant::now();
                     } else {
-                        exit(0);
+                        // exit(0);
                         *control_flow = ControlFlow::WaitUntil(
                             Instant::now() + target_frametime - time_since_last_frame,
                         );
