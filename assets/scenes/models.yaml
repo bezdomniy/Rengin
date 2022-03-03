@@ -11,9 +11,8 @@
 
 - define: white-light
   value:
-    color: [1,1,1]
-    emissiveness: [8,8,8]
-    
+    color: [1, 1, 1]
+    emissiveness: [8, 8, 8]
 
 - define: base-material
   value:
@@ -49,7 +48,7 @@
 - define: sphere-material
   extend: base-material
   value:
-    color: [0,0,0]
+    color: [0.1, 0.1, 0.1]
     reflective: 0.2
     transparency: 0.2
     refractive-index: 1.5
@@ -98,12 +97,12 @@
   value:
     add: obj
     file: assets/models/suzanne.obj
-    material: blue-material 
+    material: blue-material
     # transform:
     #   - [rotate-y, 2.1 ]
     #   - [translate, 0.0, 1.0, 0.0]
     #   - [scale, 0.5, 0.5, 0.5]
-      # - [scale, 0.268, 0.268, 0.268]
+    # - [scale, 0.268, 0.268, 0.268]
 - define: bunny
   value:
     add: obj
@@ -131,7 +130,7 @@
   args: [-1, 1, 1]
   material: pink-material
   transform:
-      - [scale, 0.005, 0.005, 0.005]
+    - [scale, 0.005, 0.005, 0.005]
   #   - [rotate-y, -2.5 ]
   #   - [translate, -0.2, 0.0, 0.5]
 
@@ -148,7 +147,7 @@
 - add: cube
   material: blue-material
   transform:
-    - [scale, 10,5,10]
+    - [scale, 10, 5, 10]
     - [translate, 0, 3, 8]
 # - add: plane
 #   material: yellow-material
