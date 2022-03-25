@@ -44,8 +44,8 @@ pub struct RenginWgpu {
 
 impl RenginWgpu {
     pub fn update_window_size(&mut self, width: u32, height: u32) {
-        self.logical_size = winit::dpi::LogicalSize::new(width, height);
-        self.physical_size = self.logical_size.to_physical(self.scale_factor);
+        self.physical_size = winit::dpi::PhysicalSize::new(width, height);
+        self.logical_size = self.physical_size.to_logical(self.scale_factor);
 
         self.config.width = self.physical_size.width;
         self.config.height = self.physical_size.height;
