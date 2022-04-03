@@ -603,8 +603,12 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
             // let unit_direction = normalize(new_ray.ray.rayD);
             // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
             let cos_theta = dot(hitParams.eyev,hitParams.normalv);
-            let refl = reflectance(cos_theta, refraction_ratio);
 
+            var refl = 1.0;
+            if (ob_params.material.transparency > 0.0 && ob_params.material.reflective > 0.0) {
+                refl = reflectance(cos_theta, refraction_ratio);
+            }
+            
             if (ob_params.material.transparency > 0.0 && ob_params.material.refractive_index >= 1.0) {
                 // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
                 let sin_theta = sqrt(1.0 - cos_theta*cos_theta);

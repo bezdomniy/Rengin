@@ -16,9 +16,20 @@ var u_Sampler: sampler;
 // [[group(0), binding(3)]]
 // var<uniform> ubo: UBO;
 
+fn float_to_linear_rgb(x: f32) -> f32 {
+    if (x > 0.04045) {
+        return pow((x + 0.055) / 1.055,2.4);
+    }
+    return x / 12.92;
+}
+
+fn to_linear_rgb(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(float_to_linear_rgb(c.x),float_to_linear_rgb(c.y),float_to_linear_rgb(c.z),1.0);
+}
+
 [[stage(fragment)]]
 fn main([[location(0)]] inUV: vec2<f32>) -> [[location(0)]] vec4<f32> {
-    return textureSample(u_Textures, u_Sampler, inUV);
+    return to_linear_rgb(textureSample(u_Textures, u_Sampler, inUV));
 
     // let position = vec2<i32>(i32(inUV.x * (800.0 - 1.0)), i32(inUV.y * (600.0 - 1.0)));
 
