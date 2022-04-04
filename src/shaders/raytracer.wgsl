@@ -536,7 +536,8 @@ struct RenderRay {
     ray: Ray;
     bounce_number: u32;
     reflectance: f32;
-    reflective_or_transparent: f32;
+    reflective: f32;
+    transparent: f32;
 };
 
 fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
@@ -556,7 +557,7 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
     var top_stack = -1;
 
     top_stack = top_stack + 1;
-    stack[top_stack] = RenderRay (init_ray,0u,1.0,1.0);
+    stack[top_stack] = RenderRay (init_ray,0u,1.0,1.0,1.0);
 
 
 // (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1)
@@ -565,24 +566,17 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
         if (top_stack < 0) { break }
 
         let new_ray = stack[top_stack];
+        top_stack = top_stack - 1;
 
         if (new_ray.bounce_number >= u32(RAY_BOUNCES)) { 
-            top_stack = top_stack - 1;
-            continue
+            continue;
         }
 
-        top_stack = top_stack - 1;
         let intersection = intersect(new_ray.ray);
         
         if (intersection.closestT >= MAXLEN || intersection.id == -1)
         {
-            // let unit_direction = normalize(new_ray.rayD);
-            // let t = 0.5*(unit_direction.y + 1.0);
-            // top_stack = top_stack + 1;
-            // stack[top_stack] = (1.0-t)*vec4<f32>(1.0, 1.0, 1.0, 1.0) + t*vec4<f32>(0.5, 0.7, 1.0, 1.0);
-            top_stack = top_stack - 1;
-            continue
-            // break;
+            continue;
         }
 
         // TODO: just hard code object type in the intersection rather than looking it up
@@ -592,8 +586,10 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
         let hitParams: HitParams = getHitParams(new_ray.ray, intersection, ob_params.model_type);
         let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
         // let shadowed = false;
-        color = color + lighting(ob_params.material, ubo.lightPos,
-                                hitParams, shadowed) * new_ray.reflectance * new_ray.reflective_or_transparent;
+        
+        let albedo = lighting(ob_params.material, ubo.lightPos,
+                                hitParams, shadowed) * new_ray.reflectance * new_ray.reflective * new_ray.transparent;
+        color = color + albedo;
 
         if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
             var refraction_ratio = ob_params.material.refractive_index;
@@ -623,14 +619,14 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
                     let r_out_parallel = -sqrt(abs(1.0 - dot(r_out_perp,r_out_perp))) * hitParams.normalv;
 
                     top_stack = top_stack + 1;
-                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, r_out_perp + r_out_parallel,new_ray.ray.y),new_ray.bounce_number + 1u,1.0-refl,ob_params.material.transparency); 
+                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, r_out_perp + r_out_parallel,new_ray.ray.y),new_ray.bounce_number + 1u,1.0-refl,new_ray.reflective,new_ray.transparent * ob_params.material.transparency); 
 
                     // direction = refract(unit_direction, rec.normal, refraction_ratio);
                 }
             }
             if (ob_params.material.reflective > 0.0) {
                 top_stack = top_stack + 1;
-                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,refl,ob_params.material.reflective); 
+                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,refl,new_ray.reflective * ob_params.material.reflective,new_ray.transparent); 
             }
         }
     }
