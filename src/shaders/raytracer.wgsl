@@ -416,15 +416,12 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
         normalAt(hitParams.point, intersection, typeEnum);
     hitParams.eyev = -ray.rayD;
 
-    if (dot(hitParams.normalv, hitParams.eyev) < 0.0)
+    // hitParams.front_face = dot(hitParams.normalv, hitParams.eyev) < 0.0;
+    hitParams.front_face = dot(ray.rayD, hitParams.normalv) < 0.0;
+    if (!hitParams.front_face)
     {
-        // intersection.comps->inside = true;
         hitParams.normalv = -hitParams.normalv;
     }
-    // else
-    // {
-    //   intersection.comps->inside = false;
-    // }
 
     hitParams.reflectv =
         reflect(ray.rayD, hitParams.normalv);
@@ -432,12 +429,6 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
         hitParams.point + hitParams.normalv * EPSILON;
     hitParams.underPoint =
         hitParams.point - hitParams.normalv * EPSILON;
-
-    // get_refractive_index_from_to(intersections, intersection, comps);
-    hitParams.front_face = dot(ray.rayD, hitParams.normalv) < 0.0;
-    if (!hitParams.front_face) {
-        hitParams.normalv = -hitParams.normalv;
-    }
 
     return hitParams;
 }
@@ -476,10 +467,10 @@ fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
 //     return r0 + (1.0 - r0) * std::pow(1.0 - cos, 5);
 //   }
 
-fn reflectance(cosine:f32, ref_idx: f32) -> f32 {
+fn reflectance(cos_i:f32, ref_idx: f32) -> f32 {
     // Use Schlick's approximation for reflectance.
     let r0 = pow((1.0-ref_idx) / (1.0+ref_idx),2.0);
-    return r0 + (1.0-r0)*pow((1.0 - cosine),5.0);
+    return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
 }
 
 fn lighting(material: Material, lightPos: vec3<f32>, hitParams: HitParams, shadowed: bool) -> vec4<f32>
@@ -540,6 +531,16 @@ struct RenderRay {
     transparent: f32;
 };
 
+// fn refract() {
+//     float cosi = clamp(-1, 1, dotProduct(I, N)); 
+//     float etai = 1, etat = ior; 
+//     Vec3f n = N; 
+//     if (cosi < 0) { cosi = -cosi; } else { std::swap(etai, etat); n= -N; } 
+//     float eta = etai / etat; 
+//     float k = 1 - eta * eta * (1 - cosi * cosi); 
+//     return k < 0 ? 0 : eta * I + (eta * cosi - sqrtf(k)) * n; 
+// }
+
 fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
@@ -588,41 +589,61 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
         // let shadowed = false;
         
         let albedo = lighting(ob_params.material, ubo.lightPos,
-                                hitParams, shadowed) * new_ray.reflectance * new_ray.reflective * new_ray.transparent;
+                                hitParams, shadowed) 
+                                * new_ray.reflectance 
+                                * new_ray.reflective * new_ray.transparent;
         color = color + albedo;
 
         if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
-            var refraction_ratio = ob_params.material.refractive_index;
+            var eta_i = 1.0;
+            var eta_t = ob_params.material.refractive_index;
             if (hitParams.front_face) {
-                refraction_ratio=1.0/refraction_ratio;
+                eta_t=1.0/eta_t;
             }
-            // let unit_direction = normalize(new_ray.ray.rayD);
-            // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
-            let cos_theta = dot(hitParams.eyev,hitParams.normalv);
+            
+            var cos_i = clamp(-1.0,1.0,dot(hitParams.eyev,hitParams.normalv));
+
+            // var n = hitParams.normalv; 
+            if (cos_i < 0.0) {
+                cos_i = -cos_i; 
+            } else { 
+                let temp = eta_t;
+                eta_t = eta_i;
+                eta_i = temp;
+                // n= -n; 
+            } 
 
             var refl = 1.0;
             if (ob_params.material.transparency > 0.0 && ob_params.material.reflective > 0.0) {
-                refl = reflectance(cos_theta, refraction_ratio);
+                refl = reflectance(cos_i, eta_t);
             }
             
             if (ob_params.material.transparency > 0.0 && ob_params.material.refractive_index >= 1.0) {
-                // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
-                let sin_theta = sqrt(1.0 - cos_theta*cos_theta);
+                // let eta = eta_i / eta_t; 
+                // let k = 1.0 - eta * eta * (1.0 - cos_i * cos_i); 
 
-                let cannot_refract = refraction_ratio * sin_theta > 1.0;
-                
-                if (!cannot_refract)
+                // // If not total internal reflection
+                // if (k >= 0.0) {
+                //     let direction =  eta * hitParams.eyev + (eta * cos_i - sqrt(k)) * n; 
+
+                //     top_stack = top_stack + 1;
+                //     stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,1.0-refl,new_ray.reflective,new_ray.transparent * ob_params.material.transparency); 
+                // }
+
+                let n_ratio = eta_i / eta_t;
+                let sin_2t = (n_ratio * n_ratio) * (1.0 - (cos_i * cos_i));
+
+                if (sin_2t <= 1.0)
                 {
-                    // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
-                    let unit_direction = normalize(new_ray.ray.rayD);
-                    let r_out_perp =  refraction_ratio * (unit_direction + cos_theta*hitParams.normalv);
-                    let r_out_parallel = -sqrt(abs(1.0 - dot(r_out_perp,r_out_perp))) * hitParams.normalv;
+                    let cos_t = sqrt(1.0 - sin_2t);
+                    let direction = hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
+                                (hitParams.eyev * n_ratio);
 
                     top_stack = top_stack + 1;
-                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, r_out_perp + r_out_parallel,new_ray.ray.y),new_ray.bounce_number + 1u,1.0-refl,new_ray.reflective,new_ray.transparent * ob_params.material.transparency); 
-
-                    // direction = refract(unit_direction, rec.normal, refraction_ratio);
+                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,1.0-refl,new_ray.reflective,new_ray.transparent * ob_params.material.transparency); 
                 }
+
+
             }
             if (ob_params.material.reflective > 0.0) {
                 top_stack = top_stack + 1;
