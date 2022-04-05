@@ -475,19 +475,13 @@ struct RenderRet {
 };
 
 fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
-    // int id = 0;
-    var color: vec4<f32> = vec4<f32>(1.0);
+    var radiance: vec4<f32> = vec4<f32>(0.0);
+    var throughput: vec4<f32> = vec4<f32>(1.0);
+
     var uv: vec2<f32>;
     var t: f32 = MAXLEN;
 
     var new_ray = init_ray;
-    // var type_enum = 0;
-    // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
-
-    // var stack: array<vec4<f32>,RAY_BOUNCES>;
-    // var top_stack = -1;
-
-    var emissive_found = false;
     
     for (var bounce_idx: u32 = 0u; bounce_idx < ubo.ray_bounces; bounce_idx =  bounce_idx + 1u) {
         // Get intersected object ID
@@ -501,14 +495,8 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
 
-        if (ob_params.material.emissiveness.w > 0.0) {
-            emissive_found = true;
-
-            color = color * ob_params.material.emissiveness;
-            break;
-        }
-
-        color = color * ob_params.material.colour;
+        radiance = radiance + (ob_params.material.emissiveness * throughput);
+        throughput = throughput * ob_params.material.colour;
 
         let hitParams: HitParams = getHitParams(new_ray, intersection, ob_params.model_type);
         // var scatterTarget: vec4<f32> = hitParams.normalv + hemisphericalRand(1.0,hitParams.normalv.xyz,new_ray.rayD.xyz,ubo.rnd_seed);
@@ -522,12 +510,8 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
         new_ray = Ray(hitParams.overPoint, init_ray.x, scatterTarget, init_ray.y);
 
     }
-
-    if (!emissive_found) {
-        color = vec4<f32>(0.0);
-    }
  
-    return color;
+    return radiance;
 
 }
 
@@ -558,10 +542,10 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
 
     color = (color * (1.0 - scale)) + (ray_color * scale);
 
-    color.r = clamp(color.r,0.0,0.999);
-    color.g = clamp(color.g,0.0,0.999);
-    color.b = clamp(color.b,0.0,0.999);
-    color.a = clamp(color.a,0.0,0.999);
+    color.r = clamp(color.r,0.0,1.0);
+    color.g = clamp(color.g,0.0,1.0);
+    color.b = clamp(color.b,0.0,1.0);
+    color.a = clamp(color.a,0.0,1.0);
     
 
     textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
