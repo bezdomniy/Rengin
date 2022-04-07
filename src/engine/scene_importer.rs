@@ -308,6 +308,15 @@ impl Scene {
             serde_yaml::from_reader(f).expect("Failed to load scene description.");
         let (camera, lights, object_params, bvh) = Scene::load_assets(&commands);
 
+        println!(
+            "op: {:?}",
+            object_params
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|x| x.material.colour)
+                .collect::<Vec<Vec4>>()
+        );
         Scene {
             commands,
             bvh,
