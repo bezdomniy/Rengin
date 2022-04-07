@@ -222,7 +222,7 @@
     - [translate, -10, 4.6, 2.7]
   material:
     color: [0.3098, 0.5961, 0.3098]
-    # emissiveness: [1,1,1]
+    # emissiveness: [10,10,1]
     diffuse: 0.6
 
 # mirror frame
@@ -232,6 +232,7 @@
     - [translate, -2, 3.5, 9.95]
   material:
     color: [0.3882, 0.2627, 0.1882]
+    emissiveness: [10,10,1]
     diffuse: 0.7
 
 # mirror
