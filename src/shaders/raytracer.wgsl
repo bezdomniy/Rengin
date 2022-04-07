@@ -531,15 +531,6 @@ struct RenderRay {
     transparent: f32;
 };
 
-// fn refract() {
-//     float cosi = clamp(-1, 1, dotProduct(I, N)); 
-//     float etai = 1, etat = ior; 
-//     Vec3f n = N; 
-//     if (cosi < 0) { cosi = -cosi; } else { std::swap(etai, etat); n= -N; } 
-//     float eta = etai / etat; 
-//     float k = 1 - eta * eta * (1 - cosi * cosi); 
-//     return k < 0 ? 0 : eta * I + (eta * cosi - sqrtf(k)) * n; 
-// }
 
 fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
     // int id = 0;
@@ -591,45 +582,33 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
         let albedo = lighting(ob_params.material, ubo.lightPos,
                                 hitParams, shadowed) 
                                 * new_ray.reflectance 
-                                * new_ray.reflective * new_ray.transparent;
+                                * new_ray.reflective 
+                                * new_ray.transparent
+                                ;
         color = color + albedo;
 
         if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
             var eta_i = 1.0;
             var eta_t = ob_params.material.refractive_index;
-            if (hitParams.front_face) {
-                eta_t=1.0/eta_t;
-            }
-            
+
             var cos_i = clamp(-1.0,1.0,dot(hitParams.eyev,hitParams.normalv));
 
-            // var n = hitParams.normalv; 
-            if (cos_i < 0.0) {
-                cos_i = -cos_i; 
-            } else { 
-                let temp = eta_t;
-                eta_t = eta_i;
-                eta_i = temp;
-                // n= -n; 
-            } 
+            if (!hitParams.front_face) {
+                eta_t=1.0/eta_t;
+            }
 
             var refl = 1.0;
-            if (ob_params.material.transparency > 0.0 && ob_params.material.reflective > 0.0) {
+            let do_schlick = ob_params.material.transparency > 0.0 && ob_params.material.reflective > 0.0;
+            if (do_schlick) {
                 refl = reflectance(cos_i, eta_t);
             }
-            
-            if (ob_params.material.transparency > 0.0 && ob_params.material.refractive_index >= 1.0) {
-                // let eta = eta_i / eta_t; 
-                // let k = 1.0 - eta * eta * (1.0 - cos_i * cos_i); 
 
-                // // If not total internal reflection
-                // if (k >= 0.0) {
-                //     let direction =  eta * hitParams.eyev + (eta * cos_i - sqrt(k)) * n; 
-
-                //     top_stack = top_stack + 1;
-                //     stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,1.0-refl,new_ray.reflective,new_ray.transparent * ob_params.material.transparency); 
-                // }
-
+            if (ob_params.material.reflective > 0.0) {
+                top_stack = top_stack + 1;
+                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,refl * new_ray.reflectance,new_ray.reflective * ob_params.material.reflective,1.0); 
+            }
+                        
+            if (ob_params.material.transparency > 0.0) {
                 let n_ratio = eta_i / eta_t;
                 let sin_2t = (n_ratio * n_ratio) * (1.0 - (cos_i * cos_i));
 
@@ -639,15 +618,15 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
                     let direction = hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
                                 (hitParams.eyev * n_ratio);
 
+                    if (do_schlick) {
+                        refl = 1.0-refl;
+                    }
+
                     top_stack = top_stack + 1;
-                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,1.0-refl,new_ray.reflective,new_ray.transparent * ob_params.material.transparency); 
+                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,refl * new_ray.reflectance,1.0,new_ray.transparent * ob_params.material.transparency); 
                 }
 
 
-            }
-            if (ob_params.material.reflective > 0.0) {
-                top_stack = top_stack + 1;
-                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,refl,new_ray.reflective * ob_params.material.reflective,new_ray.transparent); 
             }
         }
     }
