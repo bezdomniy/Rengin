@@ -9,7 +9,11 @@ It is implemented in Rust using the WGPU library and compute shaders in WGSL.
 - A device compatible with WGPU - https://github.com/gfx-rs/wgpu 
 
 ### How to run:
-`cargo run --release -- -s assets/scenes/models.yaml`
+Raytracer scene:
+`cargo run --release -- -s assets/scenes/reflectionScene.yaml`
+
+Pathtracer scene:
+`cargo run --release -- -s assets/scenes/models.yaml -p -r 256`
 
 You can find more scenes under `assets/scenes`
 
