@@ -14,38 +14,38 @@
 # light sources
 # ======================================================
 
-# - define: white-light
-#   value:
-#     emissiveness: [5,5,5]
-#     transparency: 1
-#     refractive-index: 1
+- define: white-light
+  value:
+    emissiveness: [10,10,10]
+    transparency: 1
+    refractive-index: 1
 
-# - define: white-light2
-#   value:
-#     emissiveness: [1,1,1]
-#     transparency: 1
-#     refractive-index: 1
+- define: white-light2
+  value:
+    emissiveness: [2,2,2]
+    transparency: 1
+    refractive-index: 1
         
-# - add: sphere
-#   material: white-light
-#   transform:
-#     - [scale, 50,50,50]
-#     - [translate, 50, 100, -50]  
+- add: sphere
+  material: white-light
+  transform:
+    - [scale, 50,50,50]
+    - [translate, 50, 200, -50]  
 
-# - add: sphere
-#   material: white-light2
-#   transform:
-#     - [scale, 50,50 ,50]
-#     - [translate, -400, 50, -10]  
+- add: sphere
+  material: white-light2
+  transform:
+    - [scale, 50,50 ,50]
+    - [translate, -500, 50, -10]  
 
 - add: light
   at: [50, 100, -50]
   intensity: [1, 1, 1]
 
-# an optional second light for additional illumination
-- add: light
-  at: [-400, 50, -10]
-  intensity: [0.2, 0.2, 0.2]
+# # an optional second light for additional illumination
+# - add: light
+#   at: [-400, 50, -10]
+#   intensity: [0.2, 0.2, 0.2]
 
 # ======================================================
 # define some constants to avoid duplication
