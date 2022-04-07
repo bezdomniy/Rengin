@@ -12,7 +12,7 @@
 - define: white-light
   value:
     color: [1, 1, 1]
-    emissiveness: [8, 8, 8]
+    emissiveness: [6, 6, 6]
 
 - define: base-material
   value:
@@ -32,6 +32,8 @@
   extend: base-material
   value:
     color: [1, 0.42, 0.7]
+    transparency: 0.5
+    refractive-index: 1.655
     reflective: 0.9
 - define: yellow-material
   extend: base-material
@@ -48,9 +50,9 @@
 - define: sphere-material
   extend: base-material
   value:
-    color: [0.1, 0.1, 0.1]
-    reflective: 0.2
-    transparency: 0.2
+    color: [3.0, 3.0, 0.0]
+    reflective: 0.001
+    transparency: 0.8
     refractive-index: 1.5
 - define: standard-transform
   value:
@@ -134,11 +136,11 @@
   #   - [rotate-y, -2.5 ]
   #   - [translate, -0.2, 0.0, 0.5]
 
-- add: cube
-  material: white-light
-  transform:
-    - [scale, 1, 0.1, 1]
-    - [translate, 0, 8, 0]
+# - add: cube
+#   material: white-light
+#   transform:
+#     - [scale, 1, 0.1, 1]
+#     - [translate, 0, 8, 5]
 - add: cube
   material: white-light
   transform:
@@ -159,7 +161,7 @@
 #     - [rotate-x, 1.5708]
 #     - [translate, 0, 0, -3]
 - add: sphere
-  material: sphere-material
+  material: white-light
   transform:
     - [scale, 1, 1, 1]
-    - [translate, -2, 3, 0]
+    - [translate, -5, 6, 3]
