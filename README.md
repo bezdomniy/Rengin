@@ -1,7 +1,7 @@
 # Rengin 
 ## A simple GPU ray tracer 
 ### Description:
-This ray tracer is mostly based on Jamis Buck's The Ray Tracer Challenge. There is also a path tracer rendering option based on Peter Shirley's Ray Tracing in One Weekend.
+This ray tracer is mostly based on Jamis Buck's The Ray Tracer Challenge. There is also a path tracer rendering option based on Peter Shirley's Ray Tracing in One Weekend (use option -p).
 
 It is implemented in Rust using the WGPU library and compute shaders in WGSL.
 ### System requirements:
