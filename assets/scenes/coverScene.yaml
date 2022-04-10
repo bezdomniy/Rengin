@@ -16,27 +16,27 @@
 
 - define: white-light
   value:
-    emissiveness: [10,10,10]
-    transparency: 1
+    emissiveness: [5, 5, 5]
+    # transparency: 1
     refractive-index: 1
 
 - define: white-light2
   value:
-    emissiveness: [2,2,2]
-    transparency: 1
+    emissiveness: [1, 1, 1]
+    # transparency: 1
     refractive-index: 1
-        
+
 - add: sphere
   material: white-light
   transform:
-    - [scale, 50,50,50]
-    - [translate, 50, 200, -50]  
+    - [scale, 50, 50, 50]
+    - [translate, 50, 200, -50]
 
 - add: sphere
   material: white-light2
   transform:
-    - [scale, 50,50 ,50]
-    - [translate, -500, 50, -10]  
+    - [scale, 50, 50, 50]
+    - [translate, -500, 50, -10]
 
 - add: light
   at: [50, 100, -50]
@@ -78,7 +78,6 @@
     - [scale, 0.5, 0.5, 0.5]
     - [translate, 1, -1, 1]
 
-
 - define: large-object
   value:
     - standard-transform
@@ -113,12 +112,12 @@
 
 - add: sphere
   material:
-    color: [0.373, 0.404, 0.550]
+    color: [1, 1, 1]
     diffuse: 0.2
     ambient: 0.0
     specular: 1.0
     shininess: 200
-    reflective: 0.7
+    # reflective: 0.7
     transparency: 0.7
     refractive-index: 1.5
   transform:

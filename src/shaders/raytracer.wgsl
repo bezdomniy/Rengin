@@ -414,7 +414,8 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
     // TODO check that uv only null have using none-uv normalAt version
     hitParams.normalv = 
         normalAt(hitParams.point, intersection, typeEnum);
-    hitParams.eyev = -ray.rayD;
+    // hitParams.eyev = -ray.rayD;
+    hitParams.eyev = -normalize(ray.rayD);
 
     // hitParams.front_face = dot(hitParams.normalv, hitParams.eyev) < 0.0;
     hitParams.front_face = dot(ray.rayD, hitParams.normalv) < 0.0;
@@ -467,7 +468,7 @@ fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
 //     return r0 + (1.0 - r0) * std::pow(1.0 - cos, 5);
 //   }
 
-fn reflectance(cos_i:f32, ref_idx: f32) -> f32 {
+fn schlick(cos_i:f32, ref_idx: f32) -> f32 {
     // Use Schlick's approximation for reflectance.
     let r0 = pow((1.0-ref_idx) / (1.0+ref_idx),2.0);
     return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
@@ -597,15 +598,15 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
                 eta_t=1.0/eta_t;
             }
 
-            var refl = 1.0;
+            var reflectance = 1.0;
             let do_schlick = ob_params.material.transparency > 0.0 && ob_params.material.reflective > 0.0;
             if (do_schlick) {
-                refl = reflectance(cos_i, eta_t);
+                reflectance = schlick(cos_i, eta_t);
             }
 
             if (ob_params.material.reflective > 0.0) {
                 top_stack = top_stack + 1;
-                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,refl * new_ray.reflectance,new_ray.reflective * ob_params.material.reflective,1.0); 
+                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,reflectance * new_ray.reflectance,new_ray.reflective * ob_params.material.reflective,1.0); 
             }
                         
             if (ob_params.material.transparency > 0.0) {
@@ -619,11 +620,11 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
                                 (hitParams.eyev * n_ratio);
 
                     if (do_schlick) {
-                        refl = 1.0-refl;
+                        reflectance = 1.0-reflectance;
                     }
 
                     top_stack = top_stack + 1;
-                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,refl * new_ray.reflectance,1.0,new_ray.transparent * ob_params.material.transparency); 
+                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,reflectance * new_ray.reflectance,1.0,new_ray.transparent * ob_params.material.transparency); 
                 }
             }
         }

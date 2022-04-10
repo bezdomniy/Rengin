@@ -30,7 +30,7 @@
 
 - define: white-light
   value:
-    emissiveness: [10, 10, 10]
+    emissiveness: [12, 12, 12]
     # transparency: 1
     # refractive-index: 1
 
@@ -38,7 +38,7 @@
   material: white-light
   transform:
     - [scale, 1, 1, 1]
-    - [translate, 4.2, 3.9, -4]
+    - [translate, -4.2, 4.9, -4]
 
 # ======================================================
 # define constants to avoid duplication

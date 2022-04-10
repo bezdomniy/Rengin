@@ -439,7 +439,8 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
     // TODO check that uv only null have using none-uv normalAt version
     hitParams.normalv = 
         normalAt(hitParams.point, intersection, typeEnum);
-    hitParams.eyev = -ray.rayD;
+    // hitParams.eyev = -ray.rayD;
+    hitParams.eyev = -normalize(ray.rayD);
 
     // hitParams.front_face = dot(hitParams.normalv, hitParams.eyev) < 0.0;
     hitParams.front_face = dot(ray.rayD, hitParams.normalv) < 0.0;
@@ -449,7 +450,7 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
     }
 
     hitParams.reflectv =
-        reflect(ray.rayD, hitParams.normalv);
+        reflect(normalize(ray.rayD), hitParams.normalv);
     hitParams.overPoint =
         hitParams.point + hitParams.normalv * EPSILON;
     hitParams.underPoint =
@@ -458,7 +459,7 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
     return hitParams;
 }
 
-fn reflectance(cos_i:f32, ref_idx: f32) -> f32 {
+fn schlick(cos_i:f32, ref_idx: f32) -> f32 {
     // Use Schlick's approximation for reflectance.
     let r0 = pow((1.0-ref_idx) / (1.0+ref_idx),2.0);
     return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
@@ -475,12 +476,14 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     var new_ray = init_ray;
 
     var albedo = vec4<f32>(0.0);
+
+    // var ob_params = object_params.ObjectParams[0];
     
     for (var bounce_idx: u32 = 0u; bounce_idx < ubo.ray_bounces; bounce_idx =  bounce_idx + 1u) {
         // Get intersected object ID
         let intersection = intersect(new_ray);
         
-        if (intersection.closestT >= MAXLEN || intersection.id == -1)
+        if (intersection.id == -1 || intersection.closestT >= MAXLEN)
         {
             break;
         }
@@ -488,27 +491,10 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
 
-
-
-        let hitParams: HitParams = getHitParams(new_ray, intersection, ob_params.model_type);
-        // var scatterTarget: vec4<f32> = hitParams.normalv + hemisphericalRand(1.0,hitParams.normalv.xyz,new_ray.rayD.xyz,ubo.rnd_seed);
+        let hitParams = getHitParams(new_ray, intersection, ob_params.model_type);
 
         var scatterTarget = vec3<f32>(0.0);
         var point = hitParams.overPoint;
-        // if (ob_params.material.transparency > 0.0) {
-        //     scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx)));
-        // }
-        // else if (ob_params.material.reflective > 0.0) {
-        //     scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx)));
-        //     //  scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx));
-        // }
-        // else {
-        //     scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx));    
-        //     // Catch degenerate scatter direction
-        //     if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON) {
-        //         scatterTarget = hitParams.normalv;
-        //     }
-        // }
 
         if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
             albedo = ob_params.material.colour;
@@ -516,55 +502,36 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
         }
 
         else if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
-            albedo = vec4<f32>(1.0);
+            // albedo = vec4<f32>(1.0);
+            albedo = ob_params.material.colour;
 
             var eta_i = 1.0;
             var eta_t = ob_params.material.refractive_index;
 
-            var cos_i = clamp(-1.0,1.0,dot(hitParams.eyev,hitParams.normalv));
+            var cos_t = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
 
-            if (!hitParams.front_face) {
-                eta_t=1.0/eta_t;
+            if (hitParams.front_face) {
+                eta_t=eta_i/eta_t;
             }
             
-            let refl = reflectance(cos_i, eta_t);
+            let reflectance = schlick(cos_t, eta_t);
 
-            let n_ratio = eta_i / eta_t;
-            let sin_2t = (n_ratio * n_ratio) * (1.0 - (cos_i * cos_i));
+            let sin_t = sqrt(1.0 - cos_t*cos_t);
 
-            if (sin_2t > 1.0 || refl >= rand(new_ray.rayD.xz,f32(bounce_idx)))
+            let cannot_refract = eta_t * sin_t > 1.0;
+
+            if (cannot_refract || reflectance >= rand(new_ray.rayD.xz,f32(bounce_idx)))
             {
-                scatterTarget = hitParams.reflectv + sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx));
+                // scatterTarget = hitParams.reflectv;
+                scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx)));
             }
             else {
-                let cos_t = sqrt(1.0 - sin_2t);
-                scatterTarget = hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
-                            (hitParams.eyev * n_ratio);
+                let r_out_perp =  eta_t * (normalize(new_ray.rayD) + cos_t * hitParams.normalv);
+                let r_out_parallel = -sqrt(abs(1.0 - pow(length(r_out_perp),2.0))) * hitParams.normalv;
+                scatterTarget = r_out_perp + r_out_parallel;
 
                 point = hitParams.underPoint;
             }
-
-            // // RTIOW implementation - not working yet
-            // var refraction_ratio = ob_params.material.refractive_index;
-            // if (hitParams.front_face) {
-            //     refraction_ratio=1.0/ob_params.material.refractive_index;
-            // }
-
-            // let unit_direction = normalize(new_ray.rayD);
-            // let cos_theta = min(dot(-unit_direction, hitParams.normalv), 1.0);
-            // let sin_theta = sqrt(1.0 - cos_theta*cos_theta);
-
-            // let cannot_refract = refraction_ratio * sin_theta > 1.0;
-
-
-            // if (cannot_refract || reflectance(cos_theta, refraction_ratio) > rand(new_ray.rayD.xz,f32(bounce_idx))) {
-            //     scatterTarget = reflect(unit_direction, hitParams.normalv);
-            // }
-            // else {
-            //     let r_out_perp =  refraction_ratio * (unit_direction + cos_theta*hitParams.normalv);
-            //     let r_out_parallel = -sqrt(abs(1.0 - pow(length(r_out_perp),2.0))) * hitParams.normalv;
-            //     scatterTarget = r_out_perp + r_out_parallel;
-            // }
         }
         else {
             albedo = ob_params.material.colour;
@@ -575,12 +542,6 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
             }
         }
         
-
-        // if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON )
-        // {
-        //     scatterTarget = hitParams.normalv;
-        // }
-
         radiance = radiance + (ob_params.material.emissiveness * throughput);
         throughput = throughput * albedo;
 
