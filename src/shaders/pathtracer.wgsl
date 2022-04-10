@@ -468,11 +468,6 @@ fn reflectance(cosine:f32, ref_idx: f32) -> f32 {
     return r0 + (1.0-r0)*pow((1.0 - cosine),5.0);
 }
 
-struct RenderRet {
-    color: vec4<f32>;
-    ray: Ray;
-    emissive_found: bool;
-};
 
 fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
     var radiance: vec4<f32> = vec4<f32>(0.0);
@@ -500,12 +495,28 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
 
         let hitParams: HitParams = getHitParams(new_ray, intersection, ob_params.model_type);
         // var scatterTarget: vec4<f32> = hitParams.normalv + hemisphericalRand(1.0,hitParams.normalv.xyz,new_ray.rayD.xyz,ubo.rnd_seed);
-        var scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx));
 
-        if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON )
-        {
-            scatterTarget = hitParams.normalv;
+        var scatterTarget = vec3<f32>(0.0);
+        if (ob_params.material.transparency > 0.0) {
+            scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx)));
         }
+        else if (ob_params.material.reflective > 0.0) {
+            scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx)));
+            //  scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx));
+        }
+        else {
+            scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx));    
+            // Catch degenerate scatter direction
+            if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON) {
+                scatterTarget = hitParams.normalv;
+            }
+        }
+        
+
+        // if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON )
+        // {
+        //     scatterTarget = hitParams.normalv;
+        // }
 
         new_ray = Ray(hitParams.overPoint, init_ray.x, scatterTarget, init_ray.y);
 
@@ -540,7 +551,7 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
-    color = (color * (1.0 - scale)) + (ray_color * scale);
+    color = mix(color,ray_color,scale);
 
     color.r = clamp(color.r,0.0,1.0);
     color.g = clamp(color.g,0.0,1.0);
