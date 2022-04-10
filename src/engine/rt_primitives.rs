@@ -212,7 +212,8 @@ impl Camera {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct UBO {
-    light_pos: Vec4,
+    light_pos: Vec3,
+    is_pathtracer: u32,
     width: u32,
     n_objects: u32,
     subpixel_idx: u32,
@@ -233,7 +234,7 @@ pub struct ScreenData {
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
     pub ray_bounces: u32,
-    // _padding: [u32; 1],
+    is_pathtracer: u32,
 }
 
 impl ScreenData {
@@ -246,6 +247,7 @@ impl ScreenData {
         height: u32,
         fov: f32,
         sqrt_rays_per_pixel: u32,
+        is_pathtracer: u32,
     ) -> ScreenData {
         let half_view = (fov / 2f32).tan();
         let aspect = width as f32 / height as f32;
@@ -273,6 +275,7 @@ impl ScreenData {
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
             ray_bounces,
+            is_pathtracer,
         }
     }
 
@@ -298,7 +301,8 @@ impl ScreenData {
 
     pub fn generate_ubo(&self) -> UBO {
         UBO {
-            light_pos: self.light_pos.extend(1.0),
+            light_pos: self.light_pos,
+            is_pathtracer: self.is_pathtracer,
             width: self.width,
             n_objects: self.n_objects,
             subpixel_idx: self.subpixel_idx,

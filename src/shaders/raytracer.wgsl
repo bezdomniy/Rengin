@@ -667,11 +667,5 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
 
     color = mix(color,ray_color,scale);
 
-    color.r = clamp(color.r,0.0,0.999);
-    color.g = clamp(color.g,0.0,0.999);
-    color.b = clamp(color.b,0.0,0.999);
-    color.a = clamp(color.a,0.0,0.999);
-    
-
     textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }

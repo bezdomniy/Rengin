@@ -465,7 +465,7 @@ fn reflectance(cos_i:f32, ref_idx: f32) -> f32 {
 }
 
 
-fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
+fn renderScene(init_ray: Ray) -> vec4<f32> {
     var radiance: vec4<f32> = vec4<f32>(0.0);
     var throughput: vec4<f32> = vec4<f32>(1.0);
 
@@ -612,17 +612,11 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
     }
 
-    let ray_color = renderScene(ray,ubo.subpixel_idx);
+    let ray_color = renderScene(ray);
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
     color = mix(color,ray_color,scale);
-
-    color.r = clamp(color.r,0.0,1.0);
-    color.g = clamp(color.g,0.0,1.0);
-    color.b = clamp(color.b,0.0,1.0);
-    color.a = clamp(color.a,0.0,1.0);
-    
 
     textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }

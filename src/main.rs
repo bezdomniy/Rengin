@@ -74,6 +74,12 @@ impl RenderApp {
         };
 
         let light_value = scene.lights.as_ref().unwrap()[0].at;
+
+        let is_pathtracer = match &renderer_type {
+            RendererType::PathTracer => 1u32,
+            RendererType::RayTracer => 0u32,
+        };
+
         let screen_data = ScreenData::new(
             [light_value[0], light_value[1], light_value[2]],
             game_state.camera.get_inverse_transform(),
@@ -83,6 +89,7 @@ impl RenderApp {
             scene.camera.as_ref().unwrap().height,
             scene.camera.as_ref().unwrap().field_of_view,
             (renderer.rays_per_pixel as f32).sqrt() as u32,
+            is_pathtracer,
         );
 
         let rays = Rays::empty(&renderer.resolution);

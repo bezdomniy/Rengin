@@ -467,6 +467,16 @@ impl RenginWgpu {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                        },
+                        count: None,
+                    },
                 ],
             },
         ));
@@ -529,20 +539,32 @@ impl RenginWgpu {
             .unwrap()
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        self.render_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&compute_target_texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
-            layout: self.render_bind_group_layout.as_ref().unwrap(),
-            label: Some("bind group"),
-        }));
+        self.render_bind_group = Some(
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&compute_target_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("ubo")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                ],
+                layout: self.render_bind_group_layout.as_ref().unwrap(),
+                label: Some("bind group"),
+            }),
+        );
 
         self.compute_bind_group = Some(
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
