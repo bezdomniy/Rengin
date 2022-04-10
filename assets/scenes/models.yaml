@@ -26,14 +26,14 @@
   value:
     color: [0.537, 0.831, 0.914]
     # reflective: 1.0
-    # transparency: 0.5
+    # transparency: 0.2
     # refractive-index: 1.655
 - define: pink-material
   extend: base-material
   value:
     color: [1, 0.42, 0.7]
-    transparency: 0.5
-    refractive-index: 1.655
+    # transparency: 0.01
+    refractive-index: 1.5
     reflective: 0.9
 - define: yellow-material
   extend: base-material
@@ -43,10 +43,12 @@
   extend: base-material
   value:
     color: [0.12, 0.45, 0.15]
+    reflective: 0.9
 - define: red-material
   extend: base-material
   value:
     color: [0.65, 0.05, 0.05]
+    reflective: 0.9
 - define: sphere-material
   extend: base-material
   value:

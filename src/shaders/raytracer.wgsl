@@ -625,8 +625,6 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
                     top_stack = top_stack + 1;
                     stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,refl * new_ray.reflectance,1.0,new_ray.transparent * ob_params.material.transparency); 
                 }
-
-
             }
         }
     }
@@ -667,7 +665,7 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
-    color = (color * (1.0 - scale)) + (ray_color * scale);
+    color = mix(color,ray_color,scale);
 
     color.r = clamp(color.r,0.0,0.999);
     color.g = clamp(color.g,0.0,0.999);

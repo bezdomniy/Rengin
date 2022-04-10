@@ -27,6 +27,19 @@
   at: [0, 6.9, -5]
   intensity: [1, 1, 0.9]
 
+# - define: white-light
+#   value:
+#     emissiveness: [10, 10, 10]
+#     # transparency: 1
+#     # refractive-index: 1
+
+# - add: sphere
+#   material:
+#     emissiveness: [10, 10, 10]
+#   transform:
+#     - [scale, 1, 1, 1]
+#     - [translate, 0, 6.9, -5]
+
 # ======================================================
 # describe the elements of the scene
 # ======================================================
@@ -141,7 +154,7 @@
   shadow: false
   material:
     color: [1, 1, 0.8]
-    emissiveness: [8,8,8]
+    # emissiveness: [8,8,8]
     ambient: 0
     diffuse: 0.3
     specular: 0.9
@@ -232,7 +245,7 @@
     - [translate, -2, 3.5, 9.95]
   material:
     color: [0.3882, 0.2627, 0.1882]
-    emissiveness: [10,10,1]
+    emissiveness: [10, 10, 1]
     diffuse: 0.7
 
 # mirror
@@ -241,10 +254,10 @@
     - [scale, 4.8, 1.4, 0.06]
     - [translate, -2, 3.5, 9.95]
   material:
-    color: [0, 0, 0]
+    color: [1.0, 1.0, 1.0]
     diffuse: 0
     ambient: 0
     specular: 1
     shininess: 300
     reflective: 1
-    # refractive-index: 1
+    refractive-index: 1
