@@ -459,12 +459,24 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
     return hitParams;
 }
 
-fn schlick(cos_i:f32, ref_idx: f32) -> f32 {
-    // Use Schlick's approximation for reflectance.
-    let r0 = pow((1.0-ref_idx) / (1.0+ref_idx),2.0);
-    return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
+fn _schlick(cos_t:f32, r0: f32) -> f32 {
+    return r0 + (1.0-r0)*pow((1.0 - cos_t),5.0);
 }
 
+fn schlick(cos_t:f32, eta_t: f32) -> f32 {
+    // Use Schlick's approximation for reflectance.
+    let r0 = pow((1.0-eta_t) / (1.0+eta_t),2.0);
+    return r0 + (1.0-r0)*pow((1.0 - cos_t),5.0);
+}
+
+fn _schlick_lazanyi(cos_t:f32, eta_t: f32, a: f32, alpha:f32) -> f32 {
+    let r0 = pow((1.0-eta_t) / (1.0+eta_t),2.0);
+    return _schlick(cos_t, r0) - a * cos_t * pow(1.0 - cos_t , alpha);
+}
+
+fn schlick_lazanyi(cos_t:f32, eta_t: f32, k: f32) -> f32 {
+    return (pow(eta_t - 1.0, 2.0) + 4.0 * eta_t * pow(1.0 - cos_t,5.0) + pow(k,2.0)) / (pow(eta_t+1.0,2.0) + pow(k,2.0));
+}
 
 fn renderScene(init_ray: Ray) -> vec4<f32> {
     var radiance: vec4<f32> = vec4<f32>(0.0);
@@ -478,6 +490,8 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     var albedo = vec4<f32>(0.0);
 
     // var ob_params = object_params.ObjectParams[0];
+    let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
+    // let ray_miss_colour = vec4<f32>(0.529, 0.808, 0.922,1.0);
     
     for (var bounce_idx: u32 = 0u; bounce_idx < ubo.ray_bounces; bounce_idx =  bounce_idx + 1u) {
         // Get intersected object ID
@@ -485,6 +499,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
         
         if (intersection.id == -1 || intersection.closestT >= MAXLEN)
         {
+            radiance = radiance + (throughput * ray_miss_colour);
             break;
         }
 
@@ -515,6 +530,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
             }
             
             let reflectance = schlick(cos_t, eta_t);
+            // let reflectance = schlick_lazanyi(cos_t,eta_t,0.0);
 
             let sin_t = sqrt(1.0 - cos_t*cos_t);
 
