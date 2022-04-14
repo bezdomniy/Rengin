@@ -189,27 +189,6 @@ impl RenginWgpu {
         &self,
         renderer_type: RendererType,
     ) -> HashMap<&'static str, ShaderModule> {
-        let cs_module = match renderer_type {
-            RendererType::PathTracer => {
-                self.device
-                    .create_shader_module(&wgpu::ShaderModuleDescriptor {
-                        label: None,
-                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                            "../shaders/pathtracer.wgsl"
-                        ))),
-                    })
-            }
-            RendererType::RayTracer => {
-                self.device
-                    .create_shader_module(&wgpu::ShaderModuleDescriptor {
-                        label: None,
-                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                            "../shaders/raytracer.wgsl"
-                        ))),
-                    })
-            }
-        };
-
         let vt_module = self
             .device
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
@@ -229,7 +208,6 @@ impl RenginWgpu {
             });
 
         let mut shaders: HashMap<&'static str, ShaderModule> = HashMap::new();
-        shaders.insert("comp", cs_module);
         shaders.insert("vert", vt_module);
         shaders.insert("frag", fg_module);
 
