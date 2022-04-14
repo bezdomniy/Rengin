@@ -254,30 +254,6 @@ impl RenderApp {
                             &wgpu::CommandEncoderDescriptor { label: None },
                         );
 
-                        command_encoder.push_debug_group("compute ray trace");
-                        {
-                            // compute pass
-                            let mut cpass = command_encoder
-                                .begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
-                            cpass.set_pipeline(self.renderer.compute_pipeline.as_ref().unwrap());
-                            cpass.set_bind_group(
-                                0,
-                                self.renderer.compute_bind_group.as_ref().unwrap(),
-                                &[],
-                            );
-
-                            // TODO: move ray bounce loop out of shader, and do it here
-
-                            cpass.dispatch(
-                                (self.renderer.physical_size.width / WORKGROUP_SIZE[0])
-                                    + WORKGROUP_SIZE[0],
-                                (self.renderer.physical_size.height / WORKGROUP_SIZE[1])
-                                    + WORKGROUP_SIZE[1],
-                                WORKGROUP_SIZE[2],
-                            );
-                        }
-                        command_encoder.pop_debug_group();
-
                         command_encoder.push_debug_group("render texture");
                         {
                             // render pass
