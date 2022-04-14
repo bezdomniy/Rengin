@@ -312,7 +312,11 @@ impl RenderApp {
                             || (self.screen_data.subpixel_idx == 0
                                 && time_since_last_frame >= target_frametime))
                     {
-                        println!("Drawing ray index: {}", self.screen_data.subpixel_idx);
+                        println!(
+                            "Drawing ray index: {}, framerate: {}",
+                            self.screen_data.subpixel_idx,
+                            1000u128 / time_since_last_frame.as_millis()
+                        );
 
                         last_update_inst = Instant::now();
                     } else {

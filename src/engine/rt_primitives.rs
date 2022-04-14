@@ -368,7 +368,7 @@ pub struct Rays {
 // TODO: implement sorting before output to gpu buffer
 impl Rays {
     pub fn new(size: &PhysicalSize<u32>, resolution: &PhysicalSize<u32>, ubo: &ScreenData) -> Self {
-        println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
+        // println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
         let mut rays = Rays::empty(resolution);
 
         for x in 0..size.width {
