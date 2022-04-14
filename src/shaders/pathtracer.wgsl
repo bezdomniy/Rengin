@@ -46,9 +46,12 @@ struct Material {
 struct UBO {
     _pad1: vec4<u32>;
     width: u32;
+    height: u32;
+    _pad2: vec2<u32>;
     n_objects: i32;
     subpixel_idx: u32;
     ray_bounces: u32;
+    _pad3: u32;
 };
 
 
@@ -131,7 +134,7 @@ fn rand(xy: vec2<f32>, seed: f32) -> f32 {
     return fract(sin(dot(xy +seed,vec2<f32>(12.9898,78.233))) * 43758.5453+seed);
 }
 
-fn rand2(xy: vec2<f32>,seed:f32) -> f32
+fn _rand2(xy: vec2<f32>,seed:f32) -> f32
 {
     let v = 0.152;
     let pos = (xy * v + f32(ubo.subpixel_idx) * 1500. + 50.0);
@@ -490,6 +493,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     var albedo = vec4<f32>(0.0);
 
     // var ob_params = object_params.ObjectParams[0];
+    // let ray_miss_colour = vec4<f32>(1.0);
     let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
     // let ray_miss_colour = vec4<f32>(0.529, 0.808, 0.922,1.0);
     

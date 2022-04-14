@@ -215,9 +215,12 @@ pub struct UBO {
     light_pos: Vec3,
     is_pathtracer: u32,
     width: u32,
+    height: u32,
+    _pad1: [u32; 2],
     n_objects: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
+    _pad2: u32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -225,6 +228,7 @@ pub struct ScreenData {
     // Compute shader uniform block object
     light_pos: Vec3,
     width: u32,
+    height: u32,
     pub inverse_camera_transform: Mat4,
     pixel_size: f32,
     half_width: f32,
@@ -266,6 +270,7 @@ impl ScreenData {
         ScreenData {
             light_pos: const_vec3!(light_pos),
             width,
+            height,
             inverse_camera_transform,
             pixel_size,
             half_width,
@@ -303,10 +308,13 @@ impl ScreenData {
         UBO {
             light_pos: self.light_pos,
             is_pathtracer: self.is_pathtracer,
+            height: self.height,
             width: self.width,
             n_objects: self.n_objects,
             subpixel_idx: self.subpixel_idx,
             ray_bounces: self.ray_bounces,
+            _pad1: [0u32; 2],
+            _pad2: 0u32,
         }
     }
 }
@@ -368,7 +376,7 @@ pub struct Rays {
 // TODO: implement sorting before output to gpu buffer
 impl Rays {
     pub fn new(size: &PhysicalSize<u32>, resolution: &PhysicalSize<u32>, ubo: &ScreenData) -> Self {
-        println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
+        // println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
         let mut rays = Rays::empty(resolution);
 
         for x in 0..size.width {

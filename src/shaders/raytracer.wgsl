@@ -46,11 +46,14 @@ struct Material {
 
 struct UBO {
     lightPos: vec3<f32>;
-    _pad: u32;
+    _pad1: u32;
     width: u32;
+    height: u32;
+    _pad2: vec2<u32>;
     n_objects: i32;
     subpixel_idx: u32;
     _ray_bounces: f32;
+    _pad3: u32;
 };
 
 struct InnerNodes {
