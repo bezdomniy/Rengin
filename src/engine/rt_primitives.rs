@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use wgpu_gecko as wgpu;
+
 use std::f32::consts::FRAC_PI_2;
 
 use glam::{const_vec3, const_vec4, Mat4, Vec3, Vec4, Vec4Swizzles};

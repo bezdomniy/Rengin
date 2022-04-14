@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+pub use wgpu_gecko as wgpu;
+
 mod engine;
 mod renderer;
 mod shaders;
@@ -9,7 +12,12 @@ use winit::event::{
 use winit::event_loop::{ControlFlow, EventLoop};
 
 use std::process::exit;
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
+
+#[cfg(target_arch = "wasm32")]
+use instant::{Duration, Instant};
 
 use clap::Parser;
 use engine::scene_importer::Scene;
@@ -205,7 +213,7 @@ impl RenderApp {
         self.screen_data.subpixel_idx += 1;
     }
 
-    pub fn render(mut self, event_loop: EventLoop<()>) {
+    pub async fn render(mut self, event_loop: EventLoop<()>) {
         let mut last_update_inst = Instant::now();
         let mut left_mouse_down = false;
 
@@ -354,7 +362,7 @@ impl RenderApp {
                             },
                         ..
                     } => {
-                        println!("{:#?}", self.renderer.instance.generate_report());
+                        // println!("{:#?}", self.renderer.instance.generate_report());
                     }
                     _ => {
                         self.update_window_event(event, &mut left_mouse_down);
@@ -391,8 +399,6 @@ struct Args {
 }
 
 fn main() {
-    env_logger::init();
-
     let args = Args::parse();
 
     let renderer_type = if args.pathtracer {
@@ -411,5 +417,26 @@ fn main() {
         args.bounces,
         renderer_type,
     );
-    app.render(event_loop);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        env_logger::init();
+        pollster::block_on(app.render(event_loop));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+        console_log::init().expect("could not initialize logger");
+        use winit::platform::web::WindowExtWebSys;
+        // On wasm, append the canvas to the document body
+        web_sys::window()
+            .and_then(|win| win.document())
+            .and_then(|doc| doc.body())
+            .and_then(|body| {
+                body.append_child(&web_sys::Element::from(app.renderer.window.canvas()))
+                    .ok()
+            })
+            .expect("couldn't append canvas to document body");
+        wasm_bindgen_futures::spawn_local(app.render(event_loop));
+    }
 }
