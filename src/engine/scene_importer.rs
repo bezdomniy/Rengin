@@ -308,7 +308,7 @@ impl Scene {
             serde_yaml::from_reader(f).expect("Failed to load scene description.");
         let (camera, lights, object_params, bvh) = Scene::load_assets(&commands);
 
-        println!(
+        log::debug!(
             "op: {:?}",
             object_params
                 .as_ref()

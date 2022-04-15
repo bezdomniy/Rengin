@@ -13,10 +13,10 @@ use crate::{
 };
 
 use wgpu::{
-    util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device,
-    Instance, Queue, RenderPipeline, Sampler, ShaderModule, Surface, Texture,
+    util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, Device, Instance, Queue,
+    RenderPipeline, ShaderModule, Surface, Texture,
 };
-use winit::{dpi::LogicalSize, dpi::PhysicalSize, event_loop::EventLoop, window::WindowBuilder};
+use winit::{dpi::PhysicalSize, window::Window};
 
 pub struct RenginWgpu {
     pub instance: Instance,
@@ -28,58 +28,48 @@ pub struct RenginWgpu {
     pub render_bind_group: Option<BindGroup>,
     pub buffers: Option<HashMap<&'static str, Buffer>>,
     pub compute_target_texture: Option<Texture>,
-    pub window: winit::window::Window,
     pub window_surface: Surface,
     pub config: wgpu::SurfaceConfiguration,
-    pub physical_size: PhysicalSize<u32>,
-    pub logical_size: LogicalSize<u32>,
-    pub workgroup_size: [u32; 3],
+    // pub physical_size: PhysicalSize<u32>,
+    // pub logical_size: LogicalSize<u32>,
+    // pub workgroup_size: [u32; 3],
     pub continous_motion: bool,
     pub rays_per_pixel: u32,
     pub ray_bounces: u32,
-    pub scale_factor: f64,
-    pub resolution: PhysicalSize<u32>,
+    // pub scale_factor: f64,
+    // pub resolution: PhysicalSize<u32>,
 }
 
-impl RenginWgpu {
-    pub fn update_window_size(&mut self, width: u32, height: u32) {
-        self.physical_size = winit::dpi::PhysicalSize::new(width, height);
-        self.logical_size = self.physical_size.to_logical(self.scale_factor);
+impl<'a> RenginWgpu {
+    pub fn update_window_size(&mut self, physical_size: &PhysicalSize<u32>) {
+        // self.physical_size = winit::dpi::PhysicalSize::new(width, height);
+        // self.logical_size = self.physical_size.to_logical(self.scale_factor);
 
-        self.config.width = self.physical_size.width;
-        self.config.height = self.physical_size.height;
+        self.config.width = physical_size.width;
+        self.config.height = physical_size.height;
+
+        self.window_surface.configure(&self.device, &self.config);
+
+        self.create_bind_groups(physical_size);
     }
 
     pub async fn new(
-        width: u32,
-        height: u32,
-        workgroup_size: [u32; 3],
-        event_loop: &EventLoop<()>,
+        window: &'a Window,
+        // workgroup_size: [u32; 3],
+        // event_loop: &EventLoop<()>,
         continous_motion: bool,
         rays_per_pixel: u32,
         ray_bounces: u32,
     ) -> Self {
-        let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
+        let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
+
+        log::info!("backend: {:?}", backend);
         // let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
         let instance = wgpu::Instance::new(backend);
-
-        // TODO: window might not be on primary monitor
-        let resolution = event_loop.primary_monitor().unwrap().size();
-
-        let scale_factor: f64 = event_loop.primary_monitor().unwrap().scale_factor();
-        let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(width, height);
-        let physical_size: PhysicalSize<u32> = logical_size.to_physical(scale_factor);
-
-        let window = WindowBuilder::new()
-            .with_title("Rengin")
-            .with_resizable(true)
-            .with_inner_size(physical_size)
-            .build(event_loop)
-            .unwrap();
-
-        let size = window.inner_size();
+        log::info!("instance: {:?}", instance);
 
         let window_surface = unsafe { instance.create_surface(&window) };
+        log::info!("window_surface: {:?}", window_surface);
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -88,11 +78,16 @@ impl RenginWgpu {
                 force_fallback_adapter: false,
             })
             .await
-            .unwrap();
+            .expect("No suitable GPU adapters found on the system!");
 
-        let adapter_info = adapter.get_info();
-        println!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
-        println!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
+        log::info!("adapter: {:?}", adapter);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let adapter_info = adapter.get_info();
+            log::info!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
+            log::info!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
+        }
 
         let trace_dir = std::env::var("WGPU_TRACE");
 
@@ -108,6 +103,7 @@ impl RenginWgpu {
             wgpu::Limits {
                 max_push_constant_size: 0,
                 max_storage_buffer_binding_size: 1024 << 20,
+                // ..wgpu::Limits::downlevel_webgl2_defaults()
                 ..wgpu::Limits::default()
             }
         }
@@ -134,18 +130,12 @@ impl RenginWgpu {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: window_surface.get_preferred_format(&adapter).unwrap(),
-            width: size.width,
-            height: size.height,
+            width: window.inner_size().width,
+            height: window.inner_size().height,
             present_mode: wgpu::PresentMode::Fifo,
         };
         // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
-
-        // let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
-
-        let physical_size: PhysicalSize<u32> = winit::dpi::PhysicalSize::new(width, height);
-
-        let logical_size: LogicalSize<u32> = physical_size.to_logical(scale_factor);
 
         RenginWgpu {
             instance: instance,
@@ -157,24 +147,23 @@ impl RenginWgpu {
             render_pipeline: None,
             buffers: None,
             compute_target_texture: None,
-            window: window,
             window_surface,
             config,
-            physical_size,
-            logical_size,
-            workgroup_size,
+            // physical_size,
+            // logical_size,
+            // workgroup_size,
             continous_motion,
             rays_per_pixel,
             ray_bounces,
-            scale_factor,
-            resolution,
+            // scale_factor,
+            // resolution,
         }
     }
 
-    pub fn create_target_textures(&mut self) {
+    pub fn create_target_textures(&mut self, physical_size: &PhysicalSize<u32>) {
         let texture_extent = wgpu::Extent3d {
-            width: self.physical_size.width,
-            height: self.physical_size.height,
+            width: physical_size.width,
+            height: physical_size.height,
             depth_or_array_layers: 1,
         };
 
@@ -427,13 +416,10 @@ impl RenginWgpu {
                 multisample: wgpu::MultisampleState::default(),
             },
         ));
-
-        // TODO: remove buffers as arg and move into RenginWgpu state
-        self.create_bind_groups();
     }
 
-    pub fn create_bind_groups(&mut self) {
-        self.create_target_textures();
+    pub fn create_bind_groups(&mut self, physical_size: &PhysicalSize<u32>) {
+        self.create_target_textures(physical_size);
 
         let compute_target_texture_view = self
             .compute_target_texture
