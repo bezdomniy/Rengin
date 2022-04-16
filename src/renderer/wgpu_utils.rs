@@ -13,8 +13,8 @@ use crate::{
 };
 
 use wgpu::{
-    util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, Device, Instance, Queue,
-    RenderPipeline, ShaderModule, Surface, Texture,
+    util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device,
+    Instance, Queue, RenderPipeline, ShaderModule, Surface, Texture,
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
@@ -23,6 +23,9 @@ pub struct RenginWgpu {
     pub adapter: Adapter,
     pub device: Device,
     pub queue: Queue,
+    pub compute_pipeline: Option<ComputePipeline>,
+    pub compute_bind_group_layout: Option<BindGroupLayout>,
+    pub compute_bind_group: Option<BindGroup>,
     pub render_pipeline: Option<RenderPipeline>,
     pub render_bind_group_layout: Option<BindGroupLayout>,
     pub render_bind_group: Option<BindGroup>,
@@ -56,7 +59,6 @@ impl<'a> RenginWgpu {
     pub async fn new(
         window: &'a Window,
         // workgroup_size: [u32; 3],
-        // event_loop: &EventLoop<()>,
         continous_motion: bool,
         rays_per_pixel: u32,
         ray_bounces: u32,
@@ -103,7 +105,6 @@ impl<'a> RenginWgpu {
             wgpu::Limits {
                 max_push_constant_size: 0,
                 max_storage_buffer_binding_size: 1024 << 20,
-                // ..wgpu::Limits::downlevel_webgl2_defaults()
                 ..wgpu::Limits::default()
             }
         }
@@ -142,6 +143,9 @@ impl<'a> RenginWgpu {
             adapter: adapter,
             device: device,
             queue: queue,
+            compute_bind_group: None,
+            compute_bind_group_layout: None,
+            compute_pipeline: None,
             render_bind_group: None,
             render_bind_group_layout: None,
             render_pipeline: None,
@@ -182,12 +186,33 @@ impl<'a> RenginWgpu {
         &self,
         renderer_type: RendererType,
     ) -> HashMap<&'static str, ShaderModule> {
+        let cs_module = match renderer_type {
+            RendererType::PathTracer => {
+                self.device
+                    .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                        label: None,
+                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                            "../shaders/pathtracer.wgsl"
+                        ))),
+                    })
+            }
+            RendererType::RayTracer => {
+                self.device
+                    .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                        label: None,
+                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                            "../shaders/whitted_raytracer.wgsl"
+                        ))),
+                    })
+            }
+        };
+
         let vt_module = self
             .device
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                    "../shaders/raytracer.vert.wgsl"
+                    "../shaders/render.vert.wgsl"
                 ))),
             });
 
@@ -196,11 +221,12 @@ impl<'a> RenginWgpu {
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                    "../shaders/raytracer.frag.wgsl"
+                    "../shaders/render.frag.wgsl"
                 ))),
             });
 
         let mut shaders: HashMap<&'static str, ShaderModule> = HashMap::new();
+        shaders.insert("comp", cs_module);
         shaders.insert("vert", vt_module);
         shaders.insert("frag", fg_module);
 
@@ -287,6 +313,108 @@ impl<'a> RenginWgpu {
         bvh: &BVH,
         rays: &Rays,
     ) {
+        // create compute pipeline
+        self.compute_bind_group_layout = Some(self.device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::ReadWrite,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (bvh.inner_nodes.len() * mem::size_of::<NodeInner>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (bvh.leaf_nodes.len() * mem::size_of::<NodeLeaf>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (bvh.normal_nodes.len() * mem::size_of::<NodeNormal>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            // min_binding_size: None,
+                            min_binding_size: wgpu::BufferSize::new(
+                                mem::size_of::<ObjectParams>() as _
+                            ),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (rays.data.len() * mem::size_of::<Ray>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+                label: None,
+            },
+        ));
+
+        let compute_pipeline_layout = Some(self.device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("compute"),
+                bind_group_layouts: &[self.compute_bind_group_layout.as_ref().unwrap()],
+                push_constant_ranges: &[],
+            },
+        ));
+
         // create render pipeline
         self.render_bind_group_layout = Some(self.device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
@@ -309,71 +437,6 @@ impl<'a> RenginWgpu {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (bvh.inner_nodes.len() * mem::size_of::<NodeInner>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (bvh.leaf_nodes.len() * mem::size_of::<NodeLeaf>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (bvh.normal_nodes.len() * mem::size_of::<NodeNormal>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            // min_binding_size: None,
-                            min_binding_size: wgpu::BufferSize::new(
-                                mem::size_of::<ObjectParams>() as _
-                            ),
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (rays.data.len() * mem::size_of::<Ray>()) as _,
-                            ),
-                            // min_binding_size: None,
                         },
                         count: None,
                     },
@@ -416,6 +479,15 @@ impl<'a> RenginWgpu {
                 multisample: wgpu::MultisampleState::default(),
             },
         ));
+
+        self.compute_pipeline = Some(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("Compute pipeline"),
+                layout: compute_pipeline_layout.as_ref(),
+                module: shaders.get("comp").as_ref().unwrap(),
+                entry_point: "main",
+            },
+        ));
     }
 
     pub fn create_bind_groups(&mut self, physical_size: &PhysicalSize<u32>) {
@@ -429,6 +501,31 @@ impl<'a> RenginWgpu {
 
         self.render_bind_group = Some(
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&compute_target_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("ubo")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                ],
+                layout: self.render_bind_group_layout.as_ref().unwrap(),
+                label: Some("render bind group"),
+            }),
+        );
+
+        self.compute_bind_group = Some(
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("compute bind group"),
+                layout: self.compute_bind_group_layout.as_ref().unwrap(),
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -495,8 +592,6 @@ impl<'a> RenginWgpu {
                             .as_entire_binding(),
                     },
                 ],
-                layout: self.render_bind_group_layout.as_ref().unwrap(),
-                label: Some("bind group"),
             }),
         );
     }

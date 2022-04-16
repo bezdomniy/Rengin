@@ -1,3 +1,5 @@
+
+
 struct NodeLeaf {
     point1: vec3<f32>;
     pad1: u32;
@@ -506,181 +508,7 @@ fn schlick_lazanyi(cos_t:f32, eta_t: f32, k: f32) -> f32 {
     return (pow(eta_t - 1.0, 2.0) + 4.0 * eta_t * pow(1.0 - cos_t,5.0) + pow(k,2.0)) / (pow(eta_t+1.0,2.0) + pow(k,2.0));
 }
 
-fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
-{
-  let v: vec3<f32> = lightPos - point;
-  let distance: f32 = length(v);
-  let direction: vec3<f32> = normalize(v);
-
-  let intersection: Intersection = intersect(Ray(point,0,direction,0));
-
-  if (intersection.closestT > EPSILON && intersection.closestT < distance)
-  {
-    return true;
-  }
-
-  return false;
-}
-
-
-fn lighting(material: Material, lightPos: vec3<f32>, hitParams: HitParams, shadowed: bool) -> vec4<f32>
-{
-  // return material.colour;
-  var diffuse: vec4<f32>;
-  var specular: vec4<f32>;
-
-  let intensity = vec4<f32>(1.0,1.0,1.0,1.0); // TODO temp placeholder
-
-  let effectiveColour = intensity * material.colour; //* light->intensity;
-
-  let ambient = effectiveColour * material.ambient;
-  // vec4 ambient = vec4(0.3,0.0,0.0,1.0);
-  if (shadowed) {
-    return ambient;
-  }
-
-  let lightv: vec3<f32> = normalize(lightPos - hitParams.overPoint);
-
-  let lightDotNormal: f32 = dot(lightv, hitParams.normalv);
-  if (lightDotNormal < 0.0)
-  {
-    diffuse = vec4<f32>(0.0, 0.0, 0.0,0.0);
-    specular = vec4<f32>(0.0, 0.0, 0.0,0.0);
-  }
-  else
-  {
-    // compute the diffuse contribution​
-    diffuse = effectiveColour * material.diffuse * lightDotNormal;
-
-    // reflect_dot_eye represents the cosine of the angle between the
-    // reflection vector and the eye vector. A negative number means the
-    // light reflects away from the eye.​
-    let reflectv = reflect(-lightv, hitParams.normalv);
-    let reflectDotEye = dot(reflectv, hitParams.eyev);
-
-    if (reflectDotEye <= 0.0)
-    {
-      specular = vec4<f32>(0.0, 0.0, 0.0,0.0);
-    }
-    else
-    {
-      // compute the specular contribution​
-      let factor = pow(reflectDotEye, material.shininess);
-      specular = intensity * material.specular * factor;
-    }
-  }
-
-  return (ambient + diffuse + specular);
-}
-
-struct RenderRay {
-    ray: Ray;
-    bounce_number: u32;
-    reflectance: f32;
-    reflective: f32;
-    transparent: f32;
-};
-
-
-fn renderRtScene(init_ray: Ray) -> vec4<f32> {
-    // int id = 0;
-    var color: vec4<f32> = vec4<f32>(0.0);
-    var uv: vec2<f32>;
-    var t: f32 = MAXLEN;
-
-    // var ray: Ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
-
-    // let init_ray = rayForPixel(pixel,sqrt_rays_per_pixel,current_ray_idx,half_sub_pixel_size);
-    // let init_ray = rays.Rays[(pixel.y * ubo.width) + pixel.x];
-    var type_enum = 0;
-    // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
-
-    var stack: array<RenderRay,MAX_RAY_BOUNCES>;
-    var top_stack = -1;
-
-    top_stack = top_stack + 1;
-    stack[top_stack] = RenderRay (init_ray,0u,1.0,1.0,1.0);
-
-    loop  {
-        if (top_stack < 0) { break }
-
-        let new_ray = stack[top_stack];
-        top_stack = top_stack - 1;
-
-        if (new_ray.bounce_number >= ubo.ray_bounces) { 
-            continue;
-        }
-
-        let intersection = intersect(new_ray.ray);
-        
-        if (intersection.closestT >= MAXLEN || intersection.id == -1)
-        {
-            continue;
-        }
-
-        // TODO: just hard code object type in the intersection rather than looking it up
-        let ob_params = object_params.ObjectParams[intersection.model_id];
-
-
-        let hitParams: HitParams = getHitParams(new_ray.ray, intersection, ob_params.model_type);
-        let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
-        // let shadowed = false;
-        
-        let albedo = lighting(ob_params.material, ubo.lightPos,
-                                hitParams, shadowed) 
-                                * new_ray.reflectance 
-                                * new_ray.reflective 
-                                * new_ray.transparent
-                                ;
-        color = color + albedo;
-
-        if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
-            var eta_i = 1.0;
-            var eta_t = ob_params.material.refractive_index;
-
-            var cos_i = clamp(-1.0,1.0,dot(hitParams.eyev,hitParams.normalv));
-
-            if (!hitParams.front_face) {
-                eta_t=1.0/eta_t;
-            }
-
-            var reflectance = 1.0;
-            let do_schlick = ob_params.material.transparency > 0.0 && ob_params.material.reflective > 0.0;
-            if (do_schlick) {
-                reflectance = schlick(cos_i, eta_t);
-            }
-
-            if (ob_params.material.reflective > 0.0) {
-                top_stack = top_stack + 1;
-                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,reflectance * new_ray.reflectance,new_ray.reflective * ob_params.material.reflective,1.0); 
-            }
-                        
-            if (ob_params.material.transparency > 0.0) {
-                let n_ratio = eta_i / eta_t;
-                let sin_2t = (n_ratio * n_ratio) * (1.0 - (cos_i * cos_i));
-
-                if (sin_2t <= 1.0)
-                {
-                    let cos_t = sqrt(1.0 - sin_2t);
-                    let direction = hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
-                                (hitParams.eyev * n_ratio);
-
-                    if (do_schlick) {
-                        reflectance = 1.0-reflectance;
-                    }
-
-                    top_stack = top_stack + 1;
-                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,reflectance * new_ray.reflectance,1.0,new_ray.transparent * ob_params.material.transparency); 
-                }
-            }
-        }
-    }
- 
-    return color;
-
-}
-
-fn renderPtScene(init_ray: Ray) -> vec4<f32> {
+fn renderScene(init_ray: Ray) -> vec4<f32> {
     var radiance: vec4<f32> = vec4<f32>(0.0);
     var throughput: vec4<f32> = vec4<f32>(1.0);
 
@@ -771,57 +599,31 @@ fn renderPtScene(init_ray: Ray) -> vec4<f32> {
 
 }
 
-[[stage(fragment)]]
-fn main([[location(0)]] inUV: vec2<f32>) -> [[location(0)]] vec4<f32> {
-    // TODO: fix a way to take the scaling into the fragment shader too.
-    //       be sure to exclude the ray bounce accumulation array from PT shader too
-    let xy = vec2<i32>(inUV*vec2<f32>(ubo.resolution));
-
-    // var color = textureLoad(imageData,xy);
-    // if (ubo.is_pathtracer) {
-    //     color = sqrt(color);
-    // }
-    
-    // color = clamp(color,vec4<f32>(0.0),vec4<f32>(0.999));
-    // return to_linear_rgb(color);
-
+[[stage(compute), workgroup_size(16, 16)]]
+fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
+        [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
+        [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
+        ) 
+{
     var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
-    let ray = rays.Rays[(xy.y * i32(ubo.resolution.x)) + xy.x];
+    let ray = rays.Rays[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x];
 
     if (ray.x < 0) {
-        return color;
+        return;
     }
     
 
     // let uv = vec2<u32>(ray.x ,ray.y);
 
     if (ubo.subpixel_idx > 0u) {
-        color = textureLoad(imageData,xy);
+        color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
     }
 
-    var ray_color = vec4<f32>(0.0);
-
-    // ray_color = renderPtScene(ray);
-    // ray_color = renderRtScene(ray);
-
-    // TODO: this branching really slows things down - compile 2 shaders instead
-    if (ubo.is_pathtracer) {
-        ray_color = renderPtScene(ray);
-    }
-    else {
-        ray_color = renderRtScene(ray);
-    }
+    let ray_color = renderScene(ray);
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
     color = mix(color,ray_color,scale);
 
-    textureStore(imageData, xy, color);
-
-    if (ubo.is_pathtracer) {
-        color = sqrt(color);
-    }
-    
-    color = clamp(color,vec4<f32>(0.0),vec4<f32>(0.999));
-    return to_linear_rgb(color);
+    textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }

@@ -53,9 +53,9 @@ struct RenderApp {
     game_state: GameState,
 }
 
-impl<'a> RenderApp {
+impl RenderApp {
     pub fn new(
-        window: &'a Window,
+        window: &Window,
         monitor_scale_factor: f64,
         resolution: &PhysicalSize<u32>,
         scene_path: &str,
@@ -83,6 +83,7 @@ impl<'a> RenderApp {
 
         let mut renderer = executor::block_on(RenginWgpu::new(
             window,
+            // WORKGROUP_SIZE,
             continous_motion,
             rays_per_pixel,
             ray_bounces,
@@ -279,6 +280,30 @@ impl<'a> RenderApp {
                         let mut command_encoder = self.renderer.device.create_command_encoder(
                             &wgpu::CommandEncoderDescriptor { label: None },
                         );
+
+                        command_encoder.push_debug_group("compute ray trace");
+                        {
+                            // compute pass
+                            let mut cpass = command_encoder
+                                .begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+                            cpass.set_pipeline(self.renderer.compute_pipeline.as_ref().unwrap());
+                            cpass.set_bind_group(
+                                0,
+                                self.renderer.compute_bind_group.as_ref().unwrap(),
+                                &[],
+                            );
+
+                            // TODO: move ray bounce loop out of shader, and do it here
+
+                            cpass.dispatch(
+                                (self.screen_data.size.width / WORKGROUP_SIZE[0])
+                                    + WORKGROUP_SIZE[0],
+                                (self.screen_data.size.height / WORKGROUP_SIZE[1])
+                                    + WORKGROUP_SIZE[1],
+                                WORKGROUP_SIZE[2],
+                            );
+                        }
+                        command_encoder.pop_debug_group();
 
                         command_encoder.push_debug_group("render texture");
                         {
