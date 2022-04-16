@@ -123,7 +123,7 @@ let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
-let MAX_RAY_BOUNCES: i32 = 16;
+let MAX_RAY_BOUNCE_ARRAY_SIZE: i32 = 16;
 
 fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
     // let INFINITY: f32 = 1.0 / 0.0;
@@ -518,7 +518,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     var type_enum = 0;
     // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
-    var stack: array<RenderRay,MAX_RAY_BOUNCES>;
+    var stack: array<RenderRay,MAX_RAY_BOUNCE_ARRAY_SIZE>;
     var top_stack = -1;
 
     top_stack = top_stack + 1;
