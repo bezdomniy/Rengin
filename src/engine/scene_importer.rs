@@ -366,7 +366,6 @@ impl Scene {
                     Add::Light(add_light) => {
                         lights.push(*add_light);
                     }
-                    _ => continue,
                 },
                 _ => continue,
             };
@@ -393,7 +392,7 @@ impl Scene {
         (
             camera,
             Some(lights),
-            Some(object_params.into_iter().map(|(k, v)| v).collect()),
+            Some(object_params.into_iter().map(|(_, v)| v).collect()),
             bvh,
         )
     }

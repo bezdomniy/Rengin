@@ -183,9 +183,9 @@ impl BVH {
                         primitive.as_any().downcast_ref::<TrianglePrimitive>()
                     {
                         (triangle.points, triangle.normals)
-                    } else if let Some(p) = primitive.as_any().downcast_ref::<UnitPrimitive>() {
+                    } else if let Some(_) = primitive.as_any().downcast_ref::<UnitPrimitive>() {
                         (Mat3::default(), Mat3::default())
-                    } else if let Some(p) = primitive.as_any().downcast_ref::<PlanePrimitive>() {
+                    } else if let Some(_) = primitive.as_any().downcast_ref::<PlanePrimitive>() {
                         (Mat3::default(), Mat3::default())
                     } else {
                         panic!("Unknown primitive type.")

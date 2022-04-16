@@ -13,7 +13,7 @@ use winit::event::{
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowBuilder};
 
-use std::process::exit;
+// use std::process::exit;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
