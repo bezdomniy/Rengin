@@ -33,7 +33,6 @@ itertools = "0.10.3"
 clap = { version = "3.0.5", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-pollster = "0.2.5"
 futures = { version = "0.3"}
 wgpu = {version="0.12"}
 #renderdoc = "0.10.1"

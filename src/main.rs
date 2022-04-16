@@ -483,7 +483,7 @@ fn main() {
             args.bounces,
             renderer_type,
         );
-        pollster::block_on(app.render(event_loop));
+        executor::block_on(app.render(event_loop));
     }
     #[cfg(target_arch = "wasm32")]
     {
