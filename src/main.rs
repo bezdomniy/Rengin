@@ -110,7 +110,7 @@ impl RenderApp {
             scene.object_params.as_ref().unwrap().len() as u32,
             ray_bounces,
             physical_size,
-            resolution.clone(),
+            *resolution,
             scene.camera.as_ref().unwrap().field_of_view,
             (renderer.rays_per_pixel as f32).sqrt() as u32,
             is_pathtracer,
@@ -366,11 +366,9 @@ impl RenderApp {
                     self.screen_data.subpixel_idx = 0;
                     self.renderer.update_window_size(&size);
                 }
-                Event::DeviceEvent { event, .. } => match event {
-                    _ => {
-                        self.update_device_event(event, &mut left_mouse_down);
-                    }
-                },
+                Event::DeviceEvent { event, .. } => {
+                    self.update_device_event(event, &mut left_mouse_down);
+                }
                 Event::WindowEvent { event, .. } => match event {
                     WindowEvent::KeyboardInput {
                         input:

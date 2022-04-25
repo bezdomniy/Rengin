@@ -4,9 +4,9 @@ use wgpu_gecko as wgpu;
 use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 
 use crate::{
-    engine::rt_primitives::{ObjectParams, Ray, ScreenData, UBO},
+    engine::rt_primitives::{ObjectParams, Ray, ScreenData, Ubo},
     engine::{
-        bvh::{NodeInner, NodeLeaf, NodeNormal, BVH},
+        bvh::{Bvh, NodeInner, NodeLeaf, NodeNormal},
         rt_primitives::Rays,
     },
     RendererType,
@@ -139,10 +139,10 @@ impl<'a> RenginWgpu {
         window_surface.configure(&device, &config);
 
         RenginWgpu {
-            instance: instance,
-            adapter: adapter,
-            device: device,
-            queue: queue,
+            instance,
+            adapter,
+            device,
+            queue,
             compute_bind_group: None,
             compute_bind_group_layout: None,
             compute_pipeline: None,
@@ -235,10 +235,10 @@ impl<'a> RenginWgpu {
 
     pub fn create_buffers(
         &mut self,
-        bvh: &BVH,
+        bvh: &Bvh,
         screen_data: &ScreenData,
         rays: &Rays,
-        object_params: &Vec<ObjectParams>,
+        object_params: &[ObjectParams],
     ) {
         let now = Instant::now();
         log::info!("Creating buffers...");
@@ -310,7 +310,7 @@ impl<'a> RenginWgpu {
         &mut self,
         shaders: &HashMap<&'static str, ShaderModule>,
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
-        bvh: &BVH,
+        bvh: &Bvh,
         rays: &Rays,
     ) {
         // create compute pipeline
@@ -333,7 +333,7 @@ impl<'a> RenginWgpu {
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
                         },
                         count: None,
                     },
@@ -436,7 +436,7 @@ impl<'a> RenginWgpu {
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
                         },
                         count: None,
                     },

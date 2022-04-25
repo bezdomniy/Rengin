@@ -211,7 +211,7 @@ impl Camera {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct UBO {
+pub struct Ubo {
     light_pos: Vec3,
     is_pathtracer: u32,
     width: u32,
@@ -288,7 +288,7 @@ impl ScreenData {
         let half_view = (self.fov / 2f32).tan();
         let aspect = size.width as f32 / size.height as f32;
 
-        self.size = size.clone();
+        self.size = *size;
 
         self.half_width = half_view;
         self.half_height = half_view / aspect;
@@ -304,8 +304,8 @@ impl ScreenData {
     //     self.rnd_seed = rand::thread_rng().gen_range(0.0..1.0);
     // }
 
-    pub fn generate_ubo(&self) -> UBO {
-        UBO {
+    pub fn generate_ubo(&self) -> Ubo {
+        Ubo {
             light_pos: self.light_pos,
             is_pathtracer: self.is_pathtracer,
             width: self.size.width,

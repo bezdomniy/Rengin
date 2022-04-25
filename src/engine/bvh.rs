@@ -49,19 +49,19 @@ pub struct Primitives(Vec<Vec<Box<dyn Bounded>>>);
 
 impl Primitives {
     pub fn new() -> Self {
-        Primitives { 0: vec![] }
+        Primitives(vec![])
     }
 
     #[allow(dead_code)]
-    pub fn extend_from_object_params(&mut self, _object_params: &Vec<ObjectParams>) {
+    pub fn extend_from_object_params(&mut self, _object_params: &[ObjectParams]) {
         // let primitives = vec![Primitive::default()];
         // self.0.push(primitives);
         todo!()
     }
 
-    pub fn extend_from_models(&mut self, paths: &Vec<String>) {
+    pub fn extend_from_models(&mut self, paths: &[String]) {
         let (models, _materials): (Vec<_>, Vec<_>) = paths
-            .into_iter()
+            .iter()
             .map(|path| {
                 println!("Loading {:?}", path);
                 tobj::load_obj(
@@ -133,7 +133,7 @@ impl Primitives {
 
 #[derive(Debug, Default)]
 #[repr(C)]
-pub struct BVH {
+pub struct Bvh {
     pub inner_nodes: Vec<NodeInner>,
     pub leaf_nodes: Vec<NodeLeaf>,
     pub normal_nodes: Vec<NodeNormal>,
@@ -148,12 +148,12 @@ pub struct BVH {
 enum SplitMethod {
     Middle,
     EqualCounts,
-    SAH,
+    Sah,
 }
 
-impl BVH {
+impl Bvh {
     pub fn empty() -> Self {
-        BVH {
+        Bvh {
             inner_nodes: vec![NodeInner::default()],
             leaf_nodes: vec![NodeLeaf::default()],
             normal_nodes: vec![NodeNormal::default()],
@@ -164,7 +164,7 @@ impl BVH {
         }
     }
 
-    pub fn new(paths: &Vec<String>) -> Self {
+    pub fn new(paths: &[String]) -> Self {
         let mut object_inner_nodes: Vec<Vec<NodeInner>> = vec![];
         let mut object_leaf_nodes: Vec<Vec<NodeLeaf>> = vec![];
         let mut object_normal_nodes: Vec<Vec<NodeNormal>> = vec![];
@@ -175,18 +175,21 @@ impl BVH {
         // TODO: take Vec<Primitives> out to have it's own constructor which is then
         //       fed in as the constructor for bvh. That way can can add other shapes to it.
         for next_primitives in primitives.0.iter_mut() {
-            let bounding_boxes = BVH::build(next_primitives);
+            let bounding_boxes = Bvh::build(next_primitives);
 
             let (triangles, normals): (Vec<NodeLeaf>, Vec<NodeNormal>) = next_primitives
-                .into_iter()
+                .iter()
                 .map(|primitive| {
                     let (points, normals) = if let Some(triangle) =
                         primitive.as_any().downcast_ref::<TrianglePrimitive>()
                     {
                         (triangle.points, triangle.normals)
-                    } else if let Some(_) = primitive.as_any().downcast_ref::<UnitPrimitive>() {
-                        (Mat3::default(), Mat3::default())
-                    } else if let Some(_) = primitive.as_any().downcast_ref::<PlanePrimitive>() {
+                    } else if primitive.as_any().downcast_ref::<UnitPrimitive>().is_some()
+                        || primitive
+                            .as_any()
+                            .downcast_ref::<PlanePrimitive>()
+                            .is_some()
+                    {
                         (Mat3::default(), Mat3::default())
                     } else {
                         panic!("Unknown primitive type.")
@@ -203,8 +206,8 @@ impl BVH {
             object_normal_nodes.push(normals);
         }
 
-        if object_inner_nodes.len() == 0 {
-            return BVH::empty();
+        if object_inner_nodes.is_empty() {
+            return Bvh::empty();
         }
 
         let len_inner_nodes: Vec<u32> = object_inner_nodes
@@ -215,7 +218,7 @@ impl BVH {
         let mut offset_inner_nodes: Vec<u32> = len_inner_nodes
             .iter()
             .scan(0, |acc, next_len| {
-                *acc = *acc + next_len;
+                *acc += next_len;
                 Some(*acc)
             })
             .collect();
@@ -226,7 +229,7 @@ impl BVH {
         let mut offset_leaf_nodes: Vec<u32> = object_leaf_nodes
             .iter()
             .scan(0, |acc, next_vec| {
-                *acc = *acc + next_vec.len() as u32;
+                *acc += next_vec.len() as u32;
                 Some(*acc)
             })
             .collect();
@@ -236,7 +239,7 @@ impl BVH {
 
         // let n_objects = object_inner_nodes.len() as u32;
 
-        BVH {
+        Bvh {
             inner_nodes: object_inner_nodes.into_iter().flatten().collect::<Vec<_>>(),
             leaf_nodes: object_leaf_nodes.into_iter().flatten().collect::<Vec<_>>(),
             normal_nodes: object_normal_nodes
@@ -246,17 +249,17 @@ impl BVH {
             offset_inner_nodes,
             len_inner_nodes,
             offset_leaf_nodes,
-            model_tags: paths.clone(),
+            model_tags: paths.to_vec(),
         }
     }
 
-    fn build(triangles: &mut Vec<Box<dyn Bounded>>) -> Vec<NodeInner> {
+    fn build(triangles: &mut [Box<dyn Bounded>]) -> Vec<NodeInner> {
         let mut bounding_boxes: Vec<NodeInner> =
             Vec::with_capacity(triangles.len().next_power_of_two());
 
         let split_method = SplitMethod::EqualCounts;
 
-        BVH::recursive_build(
+        Bvh::recursive_build(
             &mut bounding_boxes,
             triangles,
             0,
@@ -270,7 +273,7 @@ impl BVH {
     // TODO: make this return the skip pointer so it can bubble up
     fn recursive_build(
         bounding_boxes: &mut Vec<NodeInner>,
-        triangle_params_unsorted: &mut Vec<Box<dyn Bounded>>,
+        triangle_params_unsorted: &mut [Box<dyn Bounded>],
         start: usize,
         end: usize,
         split_method: SplitMethod,
@@ -350,7 +353,7 @@ impl BVH {
                 });
             }
 
-            if matches!(split_method, SplitMethod::SAH) {
+            if matches!(split_method, SplitMethod::Sah) {
                 if n_shapes <= 2 {
                     mid = (start + end) / 2;
                     triangle_params_unsorted[start..end].select_nth_unstable_by(
@@ -371,10 +374,9 @@ impl BVH {
                     let n_buckets: usize = 12;
                     let mut buckets = vec![NodeInner::empty(); n_buckets];
 
-                    for i in start..end {
+                    for triangle in triangle_params_unsorted.iter().take(end).skip(start) {
                         let mut b: usize = n_buckets
-                            * centroid_bounds.offset(&triangle_params_unsorted[i].bounds_centroid())
-                                [split_dimension]
+                            * centroid_bounds.offset(&triangle.bounds_centroid())[split_dimension]
                                 .round() as usize;
 
                         if b == n_buckets {
@@ -382,28 +384,28 @@ impl BVH {
                         };
 
                         buckets[b].skip_ptr_or_prim_idx1 += 1; // Using this for the count variable
-                        buckets[b].merge(&triangle_params_unsorted[i].bounds());
+                        buckets[b].merge(&triangle.bounds());
                     }
 
                     let mut cost = vec![0f32; n_buckets - 1];
 
-                    for i in 0..n_buckets - 1 {
+                    for (i, c) in cost.iter_mut().enumerate().take(n_buckets - 1) {
                         let mut b0 = NodeInner::empty();
                         let mut b1 = NodeInner::empty();
                         let mut count0: u32 = 0;
                         let mut count1: u32 = 0;
 
-                        for j in 0..i + 1 {
-                            b0 = b1.merge(&buckets[j]);
-                            count0 += buckets[j].skip_ptr_or_prim_idx1;
+                        for node in buckets.iter().take(i + 1) {
+                            b0 = b1.merge(node);
+                            count0 += node.skip_ptr_or_prim_idx1;
                         }
 
-                        for j in i + 1..n_buckets {
-                            b1 = b1.merge(&buckets[j]);
-                            count1 += buckets[j].skip_ptr_or_prim_idx1;
+                        for node in buckets.iter().take(n_buckets).skip(i + 1) {
+                            b1 = b1.merge(node);
+                            count1 += node.skip_ptr_or_prim_idx1;
                         }
 
-                        cost[i] = 1f32
+                        *c = 1f32
                             + (count0 as f32 * b0.surface_area()
                                 + count1 as f32 * b1.surface_area())
                                 / bounds.surface_area();
@@ -411,9 +413,10 @@ impl BVH {
 
                     let mut min_cost = cost[0];
                     let mut min_cost_split_bucket: usize = 0;
-                    for i in 1..n_buckets - 1 {
+
+                    for (i, c) in cost.iter().enumerate().take(n_buckets - 1).skip(1) {
                         if cost[i] < min_cost {
-                            min_cost = cost[i];
+                            min_cost = *c;
                             min_cost_split_bucket = i;
                         }
                     }
@@ -442,14 +445,14 @@ impl BVH {
             let curr_idx = bounding_boxes.len();
             bounding_boxes.push(bounds);
 
-            BVH::recursive_build(
+            Bvh::recursive_build(
                 bounding_boxes,
                 triangle_params_unsorted,
                 start,
                 mid,
                 split_method,
             );
-            let skip_ptr = BVH::recursive_build(
+            let skip_ptr = Bvh::recursive_build(
                 bounding_boxes,
                 triangle_params_unsorted,
                 mid,
@@ -464,7 +467,7 @@ impl BVH {
             // bounds.skip_ptr_or_prim_idx1 = 2u32.pow((bvh_height - level) as u32) - 1;
             // bounds.skip_ptr_or_prim_idx1 = 1;
         }
-        return bounding_boxes.len() as u32;
+        bounding_boxes.len() as u32
     }
 
     pub fn find_model_locations(&self, tag: &String) -> (u32, u32, u32) {
@@ -602,7 +605,7 @@ impl NodeInner {
 
     pub fn surface_area(&self) -> f32 {
         let d = self.diagonal();
-        2 as f32 * (d.x * d.y + d.x * d.z + d.y * d.z)
+        2_f32 * (d.x * d.y + d.x * d.z + d.y * d.z)
     }
 
     pub fn offset(&self, point: &Vec3) -> Vec3 {
@@ -616,6 +619,6 @@ impl NodeInner {
         if self.second.z > self.first.z {
             o.z /= self.second.z - self.first.z
         };
-        return o;
+        o
     }
 }
