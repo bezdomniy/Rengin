@@ -1,16 +1,13 @@
+#[cfg(target_arch = "wasm32")]
+use wgpu_gecko as wgpu;
+
 use std::f32::consts::FRAC_PI_2;
 
-use glam::{const_vec3, const_vec4, Mat4, Vec3, Vec4, Vec4Swizzles};
-use rand::Rng;
+use glam::{const_vec3, Mat4, Vec3, Vec4, Vec4Swizzles};
+// use rand::Rng;
 use wgpu::SurfaceConfiguration;
-use winit::dpi::{LogicalSize, PhysicalSize};
+use winit::dpi::PhysicalSize;
 
-// pub const OPENGL_TO_WGPU_MATRIX: Mat4 = const_mat4!(
-//     [1.0, 0.0, 0.0, 0.0],
-//     [0.0, 1.0, 0.0, 0.0],
-//     [0.0, 0.0, 0.5, 0.0],
-//     [0.0, 0.0, 0.5, 1.0,]
-// );
 const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 
 #[repr(C)]
@@ -29,6 +26,7 @@ pub struct Material {
 }
 
 impl Material {
+    #![allow(dead_code)]
     pub fn new(
         colour: Vec4,
         emissiveness: Vec4,
@@ -84,6 +82,7 @@ pub struct ObjectParams {
 }
 
 impl ObjectParams {
+    #![allow(dead_code)]
     pub fn new(
         transform: Mat4,
         material: Material,
@@ -174,10 +173,11 @@ impl Camera {
         // println!("{:?}", self.forward);
     }
 
+    #[allow(dead_code)]
     pub fn orbit_centre(&mut self, d_x: f32, d_y: f32, config: &SurfaceConfiguration) {
         self.yaw += d_x as f32;
         self.pitch += d_y as f32;
-        println!("{} {}\n{} {}", d_x, d_y, self.yaw, self.pitch);
+        log::debug!("{} {}\n{} {}", d_x, d_y, self.yaw, self.pitch);
 
         let norm_x = self.yaw / config.width as f32;
         let norm_y = self.pitch / config.height as f32;
@@ -211,20 +211,24 @@ impl Camera {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct UBO {
+pub struct Ubo {
     light_pos: Vec3,
     is_pathtracer: u32,
     width: u32,
+    height: u32,
+    _pad1: [u32; 2],
     n_objects: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
+    _pad2: u32,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct ScreenData {
     // Compute shader uniform block object
     light_pos: Vec3,
-    width: u32,
+    pub size: PhysicalSize<u32>,
+    pub resolution: PhysicalSize<u32>,
     pub inverse_camera_transform: Mat4,
     pixel_size: f32,
     half_width: f32,
@@ -243,14 +247,14 @@ impl ScreenData {
         inverse_camera_transform: Mat4,
         n_objects: u32,
         ray_bounces: u32,
-        width: u32,
-        height: u32,
+        size: PhysicalSize<u32>,
+        resolution: PhysicalSize<u32>,
         fov: f32,
         sqrt_rays_per_pixel: u32,
         is_pathtracer: u32,
     ) -> ScreenData {
         let half_view = (fov / 2f32).tan();
-        let aspect = width as f32 / height as f32;
+        let aspect = size.width as f32 / size.height as f32;
 
         let mut half_width = half_view;
         let mut half_height = half_view / aspect;
@@ -259,13 +263,14 @@ impl ScreenData {
             half_height = half_view;
             half_width = half_view / aspect;
         }
-        let pixel_size = (half_width * 2f32) / width as f32;
+        let pixel_size = (half_width * 2f32) / size.width as f32;
 
-        println!("{width} {height}");
+        log::info!("Window size: {:?}", size);
 
         ScreenData {
             light_pos: const_vec3!(light_pos),
-            width,
+            size,
+            resolution,
             inverse_camera_transform,
             pixel_size,
             half_width,
@@ -283,7 +288,7 @@ impl ScreenData {
         let half_view = (self.fov / 2f32).tan();
         let aspect = size.width as f32 / size.height as f32;
 
-        self.width = size.width;
+        self.size = *size;
 
         self.half_width = half_view;
         self.half_height = half_view / aspect;
@@ -299,14 +304,17 @@ impl ScreenData {
     //     self.rnd_seed = rand::thread_rng().gen_range(0.0..1.0);
     // }
 
-    pub fn generate_ubo(&self) -> UBO {
-        UBO {
+    pub fn generate_ubo(&self) -> Ubo {
+        Ubo {
             light_pos: self.light_pos,
             is_pathtracer: self.is_pathtracer,
-            width: self.width,
+            width: self.size.width,
+            height: self.size.height,
             n_objects: self.n_objects,
             subpixel_idx: self.subpixel_idx,
             ray_bounces: self.ray_bounces,
+            _pad1: [0u32; 2],
+            _pad2: 0u32,
         }
     }
 }

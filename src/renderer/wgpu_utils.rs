@@ -1,86 +1,77 @@
+#[cfg(target_arch = "wasm32")]
+use wgpu_gecko as wgpu;
+
 use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 
 use crate::{
-    engine::rt_primitives::{ObjectParams, Ray, ScreenData, UBO},
+    engine::rt_primitives::{ObjectParams, Ray, ScreenData, Ubo},
     engine::{
-        bvh::{NodeInner, NodeLeaf, NodeNormal, BVH},
+        bvh::{Bvh, NodeInner, NodeLeaf, NodeNormal},
         rt_primitives::Rays,
     },
     RendererType,
 };
+
 use wgpu::{
     util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device,
-    Instance, Queue, RenderPipeline, Sampler, ShaderModule, Surface, Texture,
+    Instance, Queue, RenderPipeline, ShaderModule, Surface, Texture,
 };
-use winit::{dpi::LogicalSize, dpi::PhysicalSize, event_loop::EventLoop, window::WindowBuilder};
+use winit::{dpi::PhysicalSize, window::Window};
 
 pub struct RenginWgpu {
     pub instance: Instance,
     pub adapter: Adapter,
     pub device: Device,
     pub queue: Queue,
-    pub sampler: Sampler,
     pub compute_pipeline: Option<ComputePipeline>,
-    pub render_pipeline: Option<RenderPipeline>,
     pub compute_bind_group_layout: Option<BindGroupLayout>,
     pub compute_bind_group: Option<BindGroup>,
+    pub render_pipeline: Option<RenderPipeline>,
     pub render_bind_group_layout: Option<BindGroupLayout>,
     pub render_bind_group: Option<BindGroup>,
     pub buffers: Option<HashMap<&'static str, Buffer>>,
     pub compute_target_texture: Option<Texture>,
-    // pub previous_frame_texture: Option<Texture>,
-    pub window: winit::window::Window,
     pub window_surface: Surface,
     pub config: wgpu::SurfaceConfiguration,
-    pub physical_size: PhysicalSize<u32>,
-    pub logical_size: LogicalSize<u32>,
-    pub workgroup_size: [u32; 3],
+    // pub physical_size: PhysicalSize<u32>,
+    // pub logical_size: LogicalSize<u32>,
+    // pub workgroup_size: [u32; 3],
     pub continous_motion: bool,
     pub rays_per_pixel: u32,
     pub ray_bounces: u32,
-    pub scale_factor: f64,
-    pub resolution: PhysicalSize<u32>,
+    // pub scale_factor: f64,
+    // pub resolution: PhysicalSize<u32>,
 }
 
-impl RenginWgpu {
-    pub fn update_window_size(&mut self, width: u32, height: u32) {
-        self.physical_size = winit::dpi::PhysicalSize::new(width, height);
-        self.logical_size = self.physical_size.to_logical(self.scale_factor);
+impl<'a> RenginWgpu {
+    pub fn update_window_size(&mut self, physical_size: &PhysicalSize<u32>) {
+        // self.physical_size = winit::dpi::PhysicalSize::new(width, height);
+        // self.logical_size = self.physical_size.to_logical(self.scale_factor);
 
-        self.config.width = self.physical_size.width;
-        self.config.height = self.physical_size.height;
+        self.config.width = physical_size.width;
+        self.config.height = physical_size.height;
+
+        self.window_surface.configure(&self.device, &self.config);
+
+        self.create_bind_groups(physical_size);
     }
 
     pub async fn new(
-        width: u32,
-        height: u32,
-        workgroup_size: [u32; 3],
-        event_loop: &EventLoop<()>,
+        window: &'a Window,
+        // workgroup_size: [u32; 3],
         continous_motion: bool,
         rays_per_pixel: u32,
         ray_bounces: u32,
     ) -> Self {
-        let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
+        let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
+
+        log::info!("backend: {:?}", backend);
         // let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
         let instance = wgpu::Instance::new(backend);
-
-        // TODO: window might not be on primary monitor
-        let resolution = event_loop.primary_monitor().unwrap().size();
-
-        let scale_factor: f64 = event_loop.primary_monitor().unwrap().scale_factor();
-        let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(width, height);
-        let physical_size: PhysicalSize<u32> = logical_size.to_physical(scale_factor);
-
-        let window = WindowBuilder::new()
-            .with_title("Rengin")
-            .with_resizable(true)
-            .with_inner_size(physical_size)
-            .build(event_loop)
-            .unwrap();
-
-        let size = window.inner_size();
+        log::info!("instance: {:?}", instance);
 
         let window_surface = unsafe { instance.create_surface(&window) };
+        log::info!("window_surface: {:?}", window_surface);
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -89,11 +80,16 @@ impl RenginWgpu {
                 force_fallback_adapter: false,
             })
             .await
-            .unwrap();
+            .expect("No suitable GPU adapters found on the system!");
 
-        let adapter_info = adapter.get_info();
-        println!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
-        println!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
+        log::info!("adapter: {:?}", adapter);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let adapter_info = adapter.get_info();
+            log::info!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
+            log::info!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
+        }
 
         let trace_dir = std::env::var("WGPU_TRACE");
 
@@ -135,24 +131,18 @@ impl RenginWgpu {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: window_surface.get_preferred_format(&adapter).unwrap(),
-            width: size.width,
-            height: size.height,
+            width: window.inner_size().width,
+            height: window.inner_size().height,
             present_mode: wgpu::PresentMode::Fifo,
         };
         // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
-
-        let physical_size: PhysicalSize<u32> = winit::dpi::PhysicalSize::new(width, height);
-
-        let logical_size: LogicalSize<u32> = physical_size.to_logical(scale_factor);
-
         RenginWgpu {
-            instance: instance,
-            adapter: adapter,
-            device: device,
-            queue: queue,
+            instance,
+            adapter,
+            device,
+            queue,
             compute_bind_group: None,
             compute_bind_group_layout: None,
             compute_pipeline: None,
@@ -161,26 +151,23 @@ impl RenginWgpu {
             render_pipeline: None,
             buffers: None,
             compute_target_texture: None,
-            // previous_frame_texture: None,
-            sampler,
-            window: window,
             window_surface,
             config,
-            physical_size,
-            logical_size,
-            workgroup_size,
+            // physical_size,
+            // logical_size,
+            // workgroup_size,
             continous_motion,
             rays_per_pixel,
             ray_bounces,
-            scale_factor,
-            resolution,
+            // scale_factor,
+            // resolution,
         }
     }
 
-    pub fn create_target_textures(&mut self) {
+    pub fn create_target_textures(&mut self, physical_size: &PhysicalSize<u32>) {
         let texture_extent = wgpu::Extent3d {
-            width: self.physical_size.width,
-            height: self.physical_size.height,
+            width: physical_size.width,
+            height: physical_size.height,
             depth_or_array_layers: 1,
         };
 
@@ -193,16 +180,6 @@ impl RenginWgpu {
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
             label: None,
         }));
-
-        // self.previous_frame_texture = Some(self.device.create_texture(&wgpu::TextureDescriptor {
-        //     size: texture_extent,
-        //     mip_level_count: 1,
-        //     sample_count: 1,
-        //     dimension: wgpu::TextureDimension::D2,
-        //     format: wgpu::TextureFormat::Rgba8Unorm,
-        //     usage: wgpu::TextureUsages::STORAGE_BINDING,
-        //     label: None,
-        // }));
     }
 
     pub fn create_shaders(
@@ -224,7 +201,7 @@ impl RenginWgpu {
                     .create_shader_module(&wgpu::ShaderModuleDescriptor {
                         label: None,
                         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                            "../shaders/raytracer.wgsl"
+                            "../shaders/whitted_raytracer.wgsl"
                         ))),
                     })
             }
@@ -235,7 +212,7 @@ impl RenginWgpu {
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                    "../shaders/raytracer.vert.wgsl"
+                    "../shaders/render.vert.wgsl"
                 ))),
             });
 
@@ -244,7 +221,7 @@ impl RenginWgpu {
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                    "../shaders/raytracer.frag.wgsl"
+                    "../shaders/render.frag.wgsl"
                 ))),
             });
 
@@ -258,22 +235,13 @@ impl RenginWgpu {
 
     pub fn create_buffers(
         &mut self,
-        bvh: &BVH,
+        bvh: &Bvh,
         screen_data: &ScreenData,
         rays: &Rays,
-        object_params: &Vec<ObjectParams>,
+        object_params: &[ObjectParams],
     ) {
         let now = Instant::now();
         log::info!("Creating buffers...");
-
-        // let bvh = self.objects.as_ref().unwrap().get(0).unwrap();
-
-        // for node in dragon_blas {
-        //     println!("{:?}", node.points);
-        // }
-        // for node in dragon_tlas {
-        //     println!("{:?}", node);
-        // }
 
         let buf_ubo = self
             .device
@@ -342,9 +310,10 @@ impl RenginWgpu {
         &mut self,
         shaders: &HashMap<&'static str, ShaderModule>,
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
-        bvh: &BVH,
+        bvh: &Bvh,
         rays: &Rays,
     ) {
+        // create compute pipeline
         self.compute_bind_group_layout = Some(self.device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
                 entries: &[
@@ -364,7 +333,7 @@ impl RenginWgpu {
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
                         },
                         count: None,
                     },
@@ -454,26 +423,20 @@ impl RenginWgpu {
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::ReadWrite,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
                             view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
                         },
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<UBO>() as _),
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
                         },
                         count: None,
                     },
@@ -525,13 +488,10 @@ impl RenginWgpu {
                 entry_point: "main",
             },
         ));
-
-        // TODO: remove buffers as arg and move into RenginWgpu state
-        self.create_bind_groups();
     }
 
-    pub fn create_bind_groups(&mut self) {
-        self.create_target_textures();
+    pub fn create_bind_groups(&mut self, physical_size: &PhysicalSize<u32>) {
+        self.create_target_textures(physical_size);
 
         let compute_target_texture_view = self
             .compute_target_texture
@@ -548,10 +508,6 @@ impl RenginWgpu {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
                         resource: self
                             .buffers
                             .as_ref()
@@ -562,13 +518,13 @@ impl RenginWgpu {
                     },
                 ],
                 layout: self.render_bind_group_layout.as_ref().unwrap(),
-                label: Some("bind group"),
+                label: Some("render bind group"),
             }),
         );
 
         self.compute_bind_group = Some(
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
+                label: Some("compute bind group"),
                 layout: self.compute_bind_group_layout.as_ref().unwrap(),
                 entries: &[
                     wgpu::BindGroupEntry {

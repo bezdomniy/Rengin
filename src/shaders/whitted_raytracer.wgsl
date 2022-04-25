@@ -1,3 +1,5 @@
+
+
 struct NodeLeaf {
     point1: vec3<f32>;
     pad1: u32;
@@ -46,11 +48,13 @@ struct Material {
 
 struct UBO {
     lightPos: vec3<f32>;
-    _pad: u32;
-    width: u32;
+    is_pathtracer: bool;
+    resolution: vec2<u32>;
+    _pad2: vec2<u32>;
     n_objects: i32;
     subpixel_idx: u32;
-    _ray_bounces: f32;
+    ray_bounces: u32;
+    _pad3: u32;
 };
 
 struct InnerNodes {
@@ -79,7 +83,6 @@ struct ObjectParam {
 
 struct ObjectParams {
     ObjectParams: [[stride(144)]] array<ObjectParam>;
-    // ObjectParams: [[stride(96)]] array<ObjectParam>;
 };
 
 struct Ray {
@@ -119,23 +122,8 @@ let EPSILON:f32 = 0.0001;
 let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
-let RAY_BOUNCES: i32 = 5;
 
-
-// fn rand(xy: vec2<f32>, seed: f32) -> f32 {
-//     return fract(sin(dot(xy +seed,vec2<f32>(12.9898,78.233))) * 43758.5453+seed);
-// }
-
-// fn rand2(xy: vec2<f32>,seed:f32) -> f32
-// {
-//     let v = 0.152;
-//     let pos = (xy * v + ubo.rnd_seed * 1500. + 50.0);
-
-//     var p3 = fract(vec3<f32>(pos.xyx) * 0.1031);
-//     p3 = p3 + dot(p3, p3.yzx + 33.33);
-//     return fract((p3.x + p3.y) * p3.z);
-// }
-
+let MAX_RAY_BOUNCE_ARRAY_SIZE: i32 = 8;
 
 fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
     // let INFINITY: f32 = 1.0 / 0.0;
@@ -189,7 +177,7 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, o
 
     let originCrossE1: vec3<f32>  = cross(p1ToOrigin, e1);
     uv.y = f * dot(ray.rayD, originCrossE1);
-
+    
     let t = f * dot(e2, originCrossE1);
 
     let isHit: bool = (uv.x >= 0.0) && (uv.y >= 0.0)
@@ -201,6 +189,7 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, o
         return Intersection(uv,i32(triangleIdx),t,u32(object_id));
     }
     return inIntersection;
+    // return isHit ? Intersection(uv,inIntersection.id,t) : inIntersection;
 }
 
 fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_idx: i32, max_inner_node_idx: i32, leaf_offset: u32, object_id: i32) -> Intersection {
@@ -317,16 +306,6 @@ fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: i32) -> Inte
     else if (t_max < ret.closestT && t_max > EPSILON) {
         return Intersection(vec2<f32>(0.0),0,t_max,u32(object_id));
     }
-
-    // if (t_min < ret.closestT || t_max < ret.closestT) {
-    //     if (t_min < t_max && t_min > EPSILON) {
-    //         return Intersection(vec2<f32>(0.0),0,t_min,u32(object_id));
-    //     }
-        
-    //     if (t_max > EPSILON) {
-    //         return Intersection(vec2<f32>(0.0),0,t_max,u32(object_id));
-    //     }
-    // }
     return ret;
 }
 
@@ -346,7 +325,7 @@ fn intersect(ray: Ray) -> Intersection {
         }
         else if (ob_params.model_type == 1u) { //Plane
             ret = intersectPlane(nRay,ret, i);
-        }        
+        }
         else if (ob_params.model_type == 2u) { //Cube
             ret = intersectCube(nRay,ret, i);
         }
@@ -357,9 +336,6 @@ fn intersect(ray: Ray) -> Intersection {
 
     }
 
-    // let nRay: Ray = Ray(object_params.ObjectParams[0].inverse_transform * ray.rayO, object_params.ObjectParams[0].inverse_transform * ray.rayD);
-    // ret = intersectInnerNodes(nRay,ret);
-    
     return ret;
 }
 
@@ -368,7 +344,7 @@ fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
     let ret: vec3<f32> = normalize((transpose(object_params.ObjectParams[object_id].inverse_transform) * vec4<f32>(normal,0.0)).xyz);
     // ret.w = 0.0;
     // ret = normalize(ret);
-    
+
 
     return ret;
 }
@@ -425,13 +401,32 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
     }
 
     hitParams.reflectv =
-        reflect(ray.rayD, hitParams.normalv);
+        reflect(normalize(ray.rayD), hitParams.normalv);
     hitParams.overPoint =
         hitParams.point + hitParams.normalv * EPSILON;
     hitParams.underPoint =
         hitParams.point - hitParams.normalv * EPSILON;
 
     return hitParams;
+}
+
+fn _schlick(cos_t:f32, r0: f32) -> f32 {
+    return r0 + (1.0-r0)*pow((1.0 - cos_t),5.0);
+}
+
+fn schlick(cos_t:f32, eta_t: f32) -> f32 {
+    // Use Schlick's approximation for reflectance.
+    let r0 = pow((1.0-eta_t) / (1.0+eta_t),2.0);
+    return r0 + (1.0-r0)*pow((1.0 - cos_t),5.0);
+}
+
+fn _schlick_lazanyi(cos_t:f32, eta_t: f32, a: f32, alpha:f32) -> f32 {
+    let r0 = pow((1.0-eta_t) / (1.0+eta_t),2.0);
+    return _schlick(cos_t, r0) - a * cos_t * pow(1.0 - cos_t , alpha);
+}
+
+fn schlick_lazanyi(cos_t:f32, eta_t: f32, k: f32) -> f32 {
+    return (pow(eta_t - 1.0, 2.0) + 4.0 * eta_t * pow(1.0 - cos_t,5.0) + pow(k,2.0)) / (pow(eta_t+1.0,2.0) + pow(k,2.0));
 }
 
 fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
@@ -450,29 +445,6 @@ fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
   return false;
 }
 
-//   template <typename T>
-//   Float schlick(IntersectionParameters &comps)
-//   {
-//     Float cos = glm::dot(comps.eyev, comps.normalv);
-//     if (comps.n1 > comps.n2)
-//     {
-//       Float n = comps.n1 / comps.n2;
-//       Float sin2T = std::pow(n, 2) * (1.0 - std::pow(cos, 2));
-//       if (sin2T > 1.0)
-//         return 1.0;
-
-//       Float cosT = std::sqrt(1.0 - sin2T);
-//       cos = cosT;
-//     }
-//     Float r0 = std::pow((comps.n1 - comps.n2) / (comps.n1 + comps.n2), 2);
-//     return r0 + (1.0 - r0) * std::pow(1.0 - cos, 5);
-//   }
-
-fn schlick(cos_i:f32, ref_idx: f32) -> f32 {
-    // Use Schlick's approximation for reflectance.
-    let r0 = pow((1.0-ref_idx) / (1.0+ref_idx),2.0);
-    return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
-}
 
 fn lighting(material: Material, lightPos: vec3<f32>, hitParams: HitParams, shadowed: bool) -> vec4<f32>
 {
@@ -533,7 +505,7 @@ struct RenderRay {
 };
 
 
-fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
+fn renderScene(init_ray: Ray) -> vec4<f32> {
     // int id = 0;
     var color: vec4<f32> = vec4<f32>(0.0);
     var uv: vec2<f32>;
@@ -546,22 +518,19 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
     var type_enum = 0;
     // var intersection: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
-    var stack: array<RenderRay,RAY_BOUNCES>;
+    var stack: array<RenderRay,MAX_RAY_BOUNCE_ARRAY_SIZE>;
     var top_stack = -1;
 
     top_stack = top_stack + 1;
     stack[top_stack] = RenderRay (init_ray,0u,1.0,1.0,1.0);
 
-
-// (var bounce_idx: i32 = 0; bounce_idx < RAY_BOUNCES; bounce_idx =  bounce_idx + 1)
-    
     loop  {
         if (top_stack < 0) { break }
 
         let new_ray = stack[top_stack];
         top_stack = top_stack - 1;
 
-        if (new_ray.bounce_number >= u32(RAY_BOUNCES)) { 
+        if (new_ray.bounce_number >= ubo.ray_bounces) { 
             continue;
         }
 
@@ -631,7 +600,6 @@ fn renderScene(init_ray: Ray,current_ray_idx: u32) -> vec4<f32> {
     }
  
     return color;
-
 }
 
 
@@ -649,20 +617,17 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
     // }
     // textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 
-    let ray = rays.Rays[(global_invocation_id.y * ubo.width) + global_invocation_id.x];
+    let ray = rays.Rays[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x];
 
     if (ray.x < 0) {
         return;
     }
 
-    
-    // let uv = vec2<i32>(ray.x ,ray.y);
-
     if (ubo.subpixel_idx > 0u) {
         color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
     }
 
-    let ray_color = renderScene(ray,ubo.subpixel_idx);
+    let ray_color = renderScene(ray);
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 

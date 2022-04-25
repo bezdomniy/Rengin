@@ -1,5 +1,5 @@
 // use super::asset_importer::import_objs;
-use super::{bvh::BVH, rt_primitives::Material, rt_primitives::ObjectParams};
+use super::{bvh::Bvh, rt_primitives::Material, rt_primitives::ObjectParams};
 use glam::{Mat4, Vec3, Vec4};
 use image::{ImageBuffer, Rgba};
 use itertools::Itertools;
@@ -9,7 +9,7 @@ use serde::Deserialize;
 use linked_hash_map::LinkedHashMap;
 use std::{fs::File, path::Path};
 
-static BUILTIN_SHAPES: [&'static str; 6] = ["camera", "light", "sphere", "plane", "cube", "group"];
+static BUILTIN_SHAPES: [&str; 6] = ["camera", "light", "sphere", "plane", "cube", "group"];
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -21,14 +21,14 @@ enum Command {
 
 #[derive(Debug)]
 pub struct Scene {
-    commands: Vec<Command>,
-    pub bvh: Option<BVH>,
+    pub bvh: Option<Bvh>,
     pub camera: Option<CameraValue>,
     pub lights: Option<Vec<LightValue>>,
     pub object_params: Option<Vec<ObjectParams>>,
-    textures: Option<Vec<Texture>>,
+    _textures: Option<Vec<Texture>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct Texture {
     path: String,
@@ -36,6 +36,7 @@ struct Texture {
 }
 
 impl Texture {
+    #[allow(dead_code)]
     pub fn new(file_path: &str) -> Self {
         let img = image::open(file_path).unwrap();
         let buf = img.to_rgba8();
@@ -57,16 +58,16 @@ struct Define {
 type TransformDefinition = Vec<TransformValue>;
 
 trait TransformDefinitionMethods {
-    fn set_inverse_transform(&self, transform: &mut Mat4, commands: &Vec<Command>);
-    fn get_transform(transform_name: &String, commands: &Vec<Command>) -> Mat4;
+    fn set_inverse_transform(&self, transform: &mut Mat4, commands: &[Command]);
+    fn get_transform(transform_name: &str, commands: &[Command]) -> Mat4;
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum DefineValue {
-    ShapeDefinition(ShapeValue),
-    MaterialDefinition(MaterialValue),
-    TransformDefinition(TransformDefinition),
+    Shape(ShapeValue),
+    Material(MaterialValue),
+    Transform(TransformDefinition),
     // Fail(serde_yaml::Value),
 }
 
@@ -99,6 +100,7 @@ pub struct LightValue {
 #[derive(Debug, Deserialize)]
 struct ShapeValue {
     add: String,
+    #[allow(dead_code)]
     args: Option<[f32; 3]>,
     file: Option<String>,
     material: Option<MaterialValue>,
@@ -147,7 +149,7 @@ struct MaterialDefinition {
     reflective: Option<f32>,
     transparency: Option<f32>,
     refractive_index: Option<f32>,
-    pattern: Option<PatternValue>,
+    _pattern: Option<PatternValue>,
 }
 
 impl TransformDefinitionMethods for TransformDefinition {
@@ -155,7 +157,7 @@ impl TransformDefinitionMethods for TransformDefinition {
     //     match self {}
     // }
 
-    fn set_inverse_transform(&self, transform: &mut Mat4, commands: &Vec<Command>) {
+    fn set_inverse_transform(&self, transform: &mut Mat4, commands: &[Command]) {
         let mut out_transform = Mat4::IDENTITY;
         for t in self.iter().rev() {
             out_transform *= match t {
@@ -176,7 +178,7 @@ impl TransformDefinitionMethods for TransformDefinition {
         *transform = out_transform.inverse();
     }
 
-    fn get_transform(transform_name: &String, commands: &Vec<Command>) -> Mat4 {
+    fn get_transform(transform_name: &str, commands: &[Command]) -> Mat4 {
         let mut out_transform = Mat4::IDENTITY;
         for command in commands {
             match command {
@@ -189,7 +191,7 @@ impl TransformDefinitionMethods for TransformDefinition {
                             );
                         }
                         match &define_command.value {
-                            DefineValue::TransformDefinition(transform_def) => {
+                            DefineValue::Transform(transform_def) => {
                                 let mut tranform_val = Mat4::IDENTITY;
                                 transform_def.set_inverse_transform(&mut tranform_val, commands);
                                 out_transform *= tranform_val.inverse();
@@ -205,7 +207,7 @@ impl TransformDefinitionMethods for TransformDefinition {
                 }
             }
         }
-        return out_transform;
+        out_transform
     }
 }
 
@@ -227,25 +229,19 @@ impl MaterialValue {
         commands: &Vec<Command>,
     ) {
         for command in commands {
-            match command {
-                Command::Define(define_command) => {
-                    if define_command.define == *material_name {
-                        if define_command.extend.is_some() {
-                            MaterialValue::_find_definition_and_set_material(
-                                define_command.extend.as_ref().unwrap(),
-                                material,
-                                commands,
-                            );
-                        }
-                        match &define_command.value {
-                            DefineValue::MaterialDefinition(material_def) => {
-                                material_def.set_material(material, commands);
-                            }
-                            _ => {}
-                        }
+            if let Command::Define(define_command) = command {
+                if define_command.define == *material_name {
+                    if define_command.extend.is_some() {
+                        MaterialValue::_find_definition_and_set_material(
+                            define_command.extend.as_ref().unwrap(),
+                            material,
+                            commands,
+                        );
+                    }
+                    if let DefineValue::Material(material_def) = &define_command.value {
+                        material_def.set_material(material, commands);
                     }
                 }
-                _ => {}
             }
         }
     }
@@ -308,7 +304,7 @@ impl Scene {
             serde_yaml::from_reader(f).expect("Failed to load scene description.");
         let (camera, lights, object_params, bvh) = Scene::load_assets(&commands);
 
-        println!(
+        log::debug!(
             "op: {:?}",
             object_params
                 .as_ref()
@@ -318,20 +314,21 @@ impl Scene {
                 .collect::<Vec<Vec4>>()
         );
         Scene {
-            commands,
             bvh,
             lights,
             object_params,
             camera,
-            textures: None,
+            _textures: None,
         }
     }
 
+    #[allow(dead_code)]
     fn validate(&self) {
         todo!();
     }
 
-    fn load_textures(commands: &Vec<Command>) -> Option<Vec<Texture>> {
+    #[allow(dead_code)]
+    fn load_textures(_commands: &[Command]) -> Option<Vec<Texture>> {
         todo!()
     }
 
@@ -341,7 +338,7 @@ impl Scene {
         Option<CameraValue>,
         Option<Vec<LightValue>>,
         Option<Vec<ObjectParams>>,
-        Option<BVH>,
+        Option<Bvh>,
     ) {
         let mut lights: Vec<LightValue> = vec![];
         let mut object_params: LinkedHashMap<(String, String), ObjectParams> = LinkedHashMap::new();
@@ -366,7 +363,6 @@ impl Scene {
                     Add::Light(add_light) => {
                         lights.push(*add_light);
                     }
-                    _ => continue,
                 },
                 _ => continue,
             };
@@ -375,7 +371,7 @@ impl Scene {
         model_paths = model_paths.into_iter().unique().collect();
         println!("{:#?}", model_paths);
 
-        let bvh = Some(BVH::new(&model_paths));
+        let bvh = Some(Bvh::new(&model_paths));
 
         for (i, (obparam_key, obparam_value)) in object_params
             .iter_mut()
@@ -393,13 +389,13 @@ impl Scene {
         (
             camera,
             Some(lights),
-            Some(object_params.into_iter().map(|(k, v)| v).collect()),
+            Some(object_params.into_iter().map(|(_, v)| v).collect()),
             bvh,
         )
     }
 
-    fn _set_primitive_type(type_name: &String, object_param: &mut ObjectParams) {
-        match type_name.as_str() {
+    fn _set_primitive_type(type_name: &str, object_param: &mut ObjectParams) {
+        match type_name {
             "sphere" => {
                 object_param.model_type = 0;
             }
@@ -438,55 +434,48 @@ impl Scene {
         // if !BUILTIN_SHAPES.contains(&curr_shape.add.as_str()) {
         // model_path_found = false;
         for command in commands {
-            match command {
-                Command::Define(define_command) => {
-                    // println!("{:?}", define_command);
-                    if define_command.define == curr_shape.add {
-                        match &define_command.value {
-                            DefineValue::ShapeDefinition(defined_shape) => {
-                                if is_model {
-                                    model_path_found = false;
-                                    if defined_shape.file.is_some() {
-                                        object_map_key =
-                                            defined_shape.file.as_ref().unwrap().clone();
-                                        accum_model_paths.push(object_map_key.clone());
-                                        model_path_found = true;
-                                    }
-                                    object_param.model_type = 10;
-                                } else {
-                                    Scene::_set_primitive_type(&curr_shape.add, &mut object_param);
-                                }
-                                if defined_shape.transform.is_some() {
-                                    defined_shape
-                                        .transform
-                                        .as_ref()
-                                        .unwrap()
-                                        // .clone()
-                                        .set_inverse_transform(
-                                            &mut object_param.inverse_transform,
-                                            commands,
-                                        );
-                                    //todo
-                                }
-                                if defined_shape.material.is_some() {
-                                    defined_shape
-                                        .material
-                                        .as_ref()
-                                        .unwrap()
-                                        .set_material(&mut object_param.material, commands);
-
-                                    // object_param.material.colour.x = 1.0;
-                                    // object_param.material.colour.w = 1.0;
-                                    // object_param.material.ambient = 0.2;
-                                    //todo
-                                }
+            if let Command::Define(define_command) = command {
+                // println!("{:?}", define_command);
+                if define_command.define == curr_shape.add {
+                    if let DefineValue::Shape(defined_shape) = &define_command.value {
+                        if is_model {
+                            model_path_found = false;
+                            if defined_shape.file.is_some() {
+                                object_map_key = defined_shape.file.as_ref().unwrap().clone();
+                                accum_model_paths.push(object_map_key.clone());
+                                model_path_found = true;
                             }
-                            _ => {}
+                            object_param.model_type = 10;
+                        } else {
+                            Scene::_set_primitive_type(&curr_shape.add, &mut object_param);
+                        }
+                        if defined_shape.transform.is_some() {
+                            defined_shape
+                                .transform
+                                .as_ref()
+                                .unwrap()
+                                // .clone()
+                                .set_inverse_transform(
+                                    &mut object_param.inverse_transform,
+                                    commands,
+                                );
+                            //todo
+                        }
+                        if defined_shape.material.is_some() {
+                            defined_shape
+                                .material
+                                .as_ref()
+                                .unwrap()
+                                .set_material(&mut object_param.material, commands);
+
+                            // object_param.material.colour.x = 1.0;
+                            // object_param.material.colour.w = 1.0;
+                            // object_param.material.ambient = 0.2;
+                            //todo
                         }
                     }
                 }
-                _ => {}
-            };
+            }
         }
         // }
 
@@ -523,7 +512,7 @@ impl Scene {
             // println!("{:#?}", object_param.material);
         }
 
-        accum_object_params.insert((object_map_key.clone(), hash.clone()), object_param);
+        accum_object_params.insert((object_map_key, hash), object_param);
 
         if curr_shape.children.is_some() {
             for child in curr_shape.children.as_ref().unwrap() {

@@ -1,10 +1,12 @@
+
+
 struct NodeLeaf {
     point1: vec3<f32>;
-    object_id: u32;
-    point2: vec3<f32>;
     pad1: u32;
-    point3: vec3<f32>;
+    point2: vec3<f32>;
     pad2: u32;
+    point3: vec3<f32>;
+    pad3: u32;
 };
 
 struct Normal {
@@ -43,14 +45,17 @@ struct Material {
     refractive_index: f32;
 };
 
+
 struct UBO {
-    _pad1: vec4<u32>;
-    width: u32;
+    lightPos: vec3<f32>;
+    is_pathtracer: bool;
+    resolution: vec2<u32>;
+    _pad2: vec2<u32>;
     n_objects: i32;
     subpixel_idx: u32;
     ray_bounces: u32;
+    _pad3: u32;
 };
-
 
 struct InnerNodes {
     InnerNodes: [[stride(32)]] array<NodeInner>;
@@ -78,7 +83,6 @@ struct ObjectParam {
 
 struct ObjectParams {
     ObjectParams: [[stride(144)]] array<ObjectParam>;
-    // ObjectParams: [[stride(96)]] array<ObjectParam>;
 };
 
 struct Ray {
@@ -114,6 +118,17 @@ var<storage, read> object_params: ObjectParams;
 [[group(0), binding(6)]]
 var<storage, read_write> rays: Rays;
 
+fn float_to_linear_rgb(x: f32) -> f32 {
+    if (x > 0.04045) {
+        return pow((x + 0.055) / 1.055,2.4);
+    }
+    return x / 12.92;
+}
+
+fn to_linear_rgb(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(float_to_linear_rgb(c.x),float_to_linear_rgb(c.y),float_to_linear_rgb(c.z),1.0);
+}
+
 let EPSILON:f32 = 0.0001;
 let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
@@ -121,7 +136,22 @@ let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
 let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio 
 // let RAYS_PER_PIXEL: u32 = 4u;  
-// let RAY_BOUNCES: i32 = 50;
+let MAX_RAY_BOUNCES: i32 = 16;
+
+// fn jenkinsHash(x: u32) -> u32 {
+//     x += x << 10u;
+//     x ^= x >> 6u;
+//     x += x << 3u;
+//     x ^= x >> 11u;
+//     x += x << 15u;
+//     return x;
+// }
+
+// fn initRNG(pixel: vec2<u32> , width: u32, frame: u32) -> u32 {
+//     let rngState = dot(pixel , uint2(1, width)) ^ jenkinsHash(frame);
+//     return jenkinsHash(rngState);
+// }
+
 
 fn gold_noise(xy: vec2<f32>, seed: f32) -> f32 {
     return fract(tan(distance(xy*PHI, xy)*seed)*xy.x);
@@ -131,7 +161,7 @@ fn rand(xy: vec2<f32>, seed: f32) -> f32 {
     return fract(sin(dot(xy +seed,vec2<f32>(12.9898,78.233))) * 43758.5453+seed);
 }
 
-fn rand2(xy: vec2<f32>,seed:f32) -> f32
+fn _rand2(xy: vec2<f32>,seed:f32) -> f32
 {
     let v = 0.152;
     let pos = (xy * v + f32(ubo.subpixel_idx) * 1500. + 50.0);
@@ -490,6 +520,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     var albedo = vec4<f32>(0.0);
 
     // var ob_params = object_params.ObjectParams[0];
+    // let ray_miss_colour = vec4<f32>(1.0);
     let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
     // let ray_miss_colour = vec4<f32>(0.529, 0.808, 0.922,1.0);
     
@@ -568,7 +599,6 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
 
 }
 
-
 [[stage(compute), workgroup_size(16, 16)]]
 fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
@@ -576,7 +606,7 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         ) 
 {
     var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
-    let ray = rays.Rays[(global_invocation_id.y * ubo.width) + global_invocation_id.x];
+    let ray = rays.Rays[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x];
 
     if (ray.x < 0) {
         return;

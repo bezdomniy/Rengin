@@ -1,15 +1,31 @@
+#[cfg(target_arch = "wasm32")]
+pub use wgpu_gecko as wgpu;
+
 mod engine;
 mod renderer;
 mod shaders;
 
+use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{
     DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode,
     WindowEvent,
 };
 use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::{Window, WindowBuilder};
 
-use std::process::exit;
+// use std::process::exit;
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
+
+#[cfg(target_arch = "wasm32")]
+use instant::{Duration, Instant};
+
+#[cfg(not(target_arch = "wasm32"))]
+use futures::executor;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_rs_async_executor::single_threaded as executor;
 
 use clap::Parser;
 use engine::scene_importer::Scene;
@@ -39,8 +55,10 @@ struct RenderApp {
 
 impl RenderApp {
     pub fn new(
+        window: &Window,
+        monitor_scale_factor: f64,
+        resolution: &PhysicalSize<u32>,
         scene_path: &str,
-        event_loop: &EventLoop<()>,
         continous_motion: bool,
         rays_per_pixel: u32,
         ray_bounces: u32,
@@ -55,11 +73,17 @@ impl RenderApp {
             now.elapsed().as_millis()
         );
 
-        let mut renderer = futures::executor::block_on(RenginWgpu::new(
+        let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(
             scene.camera.as_ref().unwrap().width,
             scene.camera.as_ref().unwrap().height,
-            WORKGROUP_SIZE,
-            event_loop,
+        );
+        let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
+
+        window.set_inner_size(physical_size);
+
+        let mut renderer = executor::block_on(RenginWgpu::new(
+            window,
+            // WORKGROUP_SIZE,
             continous_motion,
             rays_per_pixel,
             ray_bounces,
@@ -85,16 +109,16 @@ impl RenderApp {
             game_state.camera.get_inverse_transform(),
             scene.object_params.as_ref().unwrap().len() as u32,
             ray_bounces,
-            scene.camera.as_ref().unwrap().width,
-            scene.camera.as_ref().unwrap().height,
+            physical_size,
+            *resolution,
             scene.camera.as_ref().unwrap().field_of_view,
             (renderer.rays_per_pixel as f32).sqrt() as u32,
             is_pathtracer,
         );
 
-        let rays = Rays::empty(&renderer.resolution);
+        let rays = Rays::empty(resolution);
 
-        println!("screen_data: {:?}", screen_data);
+        log::debug!("screen_data: {:?}", screen_data);
 
         now = Instant::now();
         log::info!("Building shaders...");
@@ -117,6 +141,9 @@ impl RenderApp {
             scene.bvh.as_ref().unwrap(),
             &rays,
         );
+
+        // TODO: remove buffers as arg and move into RenginWgpu state
+        renderer.create_bind_groups(&physical_size);
 
         Self {
             renderer,
@@ -186,8 +213,8 @@ impl RenderApp {
 
     pub fn update(&mut self) {
         let rays = Rays::new(
-            &self.renderer.physical_size,
-            &self.renderer.resolution,
+            &self.screen_data.size,
+            &self.screen_data.resolution,
             &self.screen_data,
         );
 
@@ -205,7 +232,7 @@ impl RenderApp {
         self.screen_data.subpixel_idx += 1;
     }
 
-    pub fn render(mut self, event_loop: EventLoop<()>) {
+    pub async fn render(mut self, event_loop: EventLoop<()>) {
         let mut last_update_inst = Instant::now();
         let mut left_mouse_down = false;
 
@@ -269,9 +296,9 @@ impl RenderApp {
                             // TODO: move ray bounce loop out of shader, and do it here
 
                             cpass.dispatch(
-                                (self.renderer.physical_size.width / WORKGROUP_SIZE[0])
+                                (self.screen_data.size.width / WORKGROUP_SIZE[0])
                                     + WORKGROUP_SIZE[0],
-                                (self.renderer.physical_size.height / WORKGROUP_SIZE[1])
+                                (self.screen_data.size.height / WORKGROUP_SIZE[1])
                                     + WORKGROUP_SIZE[1],
                                 WORKGROUP_SIZE[2],
                             );
@@ -312,7 +339,7 @@ impl RenderApp {
                             || (self.screen_data.subpixel_idx == 0
                                 && time_since_last_frame >= target_frametime))
                     {
-                        println!(
+                        log::info!(
                             "Drawing ray index: {}, framerate: {}",
                             self.screen_data.subpixel_idx,
                             1000u128 / time_since_last_frame.as_millis()
@@ -335,26 +362,13 @@ impl RenderApp {
                         },
                     ..
                 } => {
+                    self.screen_data.update_dims(&size);
                     self.screen_data.subpixel_idx = 0;
-
-                    self.renderer.update_window_size(size.width, size.height);
-
-                    self.screen_data.update_dims(&self.renderer.physical_size);
-
-                    // println!("l: {} {}", logical_size.width, logical_size.height);
-
-                    self.renderer.create_bind_groups();
-
-                    // println!("{} {}", size.width, size.height);
-                    self.renderer
-                        .window_surface
-                        .configure(&self.renderer.device, &self.renderer.config);
+                    self.renderer.update_window_size(&size);
                 }
-                Event::DeviceEvent { event, .. } => match event {
-                    _ => {
-                        self.update_device_event(event, &mut left_mouse_down);
-                    }
-                },
+                Event::DeviceEvent { event, .. } => {
+                    self.update_device_event(event, &mut left_mouse_down);
+                }
                 Event::WindowEvent { event, .. } => match event {
                     WindowEvent::KeyboardInput {
                         input:
@@ -378,7 +392,7 @@ impl RenderApp {
                             },
                         ..
                     } => {
-                        println!("{:#?}", self.renderer.instance.generate_report());
+                        // println!("{:#?}", self.renderer.instance.generate_report());
                     }
                     _ => {
                         self.update_window_event(event, &mut left_mouse_down);
@@ -415,25 +429,73 @@ struct Args {
 }
 
 fn main() {
-    env_logger::init();
-
-    let args = Args::parse();
-
-    let renderer_type = if args.pathtracer {
-        RendererType::PathTracer
-    } else {
-        RendererType::RayTracer
-    };
-
-    let scene_path = &args.scene;
     let event_loop = EventLoop::new();
-    let app = RenderApp::new(
-        scene_path,
-        &event_loop,
-        !args.draw_on_mouseup,
-        args.rays_per_pixel,
-        args.bounces,
-        renderer_type,
-    );
-    app.render(event_loop);
+    let window = WindowBuilder::new()
+        .with_title("Rengin")
+        .with_resizable(true)
+        // .with_inner_size(physical_size)
+        .build(&event_loop)
+        .unwrap();
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        env_logger::init();
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+        console_log::init().expect("could not initialize logger");
+        use winit::platform::web::WindowExtWebSys;
+
+        // On wasm, append the canvas to the document body
+        web_sys::window()
+            .and_then(|win| win.document())
+            .and_then(|doc| doc.body())
+            .and_then(|body| {
+                body.append_child(&web_sys::Element::from(window.canvas()))
+                    .ok()
+            })
+            .expect("couldn't append canvas to document body");
+    }
+
+    let monitor_scale_factor = event_loop.primary_monitor().unwrap().scale_factor();
+    let resolution = event_loop.primary_monitor().unwrap().size();
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let args = Args::parse();
+        let renderer_type = if args.pathtracer {
+            RendererType::PathTracer
+        } else {
+            RendererType::RayTracer
+        };
+
+        let scene_path = &args.scene;
+        let app = RenderApp::new(
+            &window,
+            monitor_scale_factor,
+            &resolution,
+            scene_path,
+            !args.draw_on_mouseup,
+            args.rays_per_pixel,
+            args.bounces,
+            renderer_type,
+        );
+        executor::block_on(app.render(event_loop));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let app = RenderApp::new(
+            &window,
+            monitor_scale_factor,
+            &resolution,
+            "",
+            true,
+            8,
+            8,
+            RendererType::RayTracer,
+        );
+
+        wasm_bindgen_futures::spawn_local(app.render(event_loop));
+    }
 }

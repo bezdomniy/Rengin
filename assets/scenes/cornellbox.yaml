@@ -68,18 +68,42 @@
     transform:
       - [scale, 0.36, 0.36, 0.36]
 
-- add: lucy
-  material: pink-material
+# - add: lucy
+#   material: pink-material
+#   transform:
+#     - [scale, 0.36, 0.36, 0.36]
+#     - [rotate-y, -1.0]
+#     - [translate, 378, 50, 400]
+
+# - add: sphere
+#   material: blue-material
+#   transform:
+#     - [scale, 80, 80, 80]
+#     - [translate, 200, 80, 400]
+
+- add: cube
+  material: white-material
+  # material:
+  #   color: [1, 1, 1]
+  # #   reflective: 1
+  # #   transparency: 1
+  # #   refractive-index: 1.5
   transform:
-    - [scale, 0.36, 0.36, 0.36]
-    - [rotate-y, -1.0]
-    - [translate, 378, 50, 400]
+    - [scale, 82.5, 165, 82.5]
+    - [rotate-y, 0.261799]
+    - [translate, 347.5, 165, 377.5]
 
 - add: sphere
-  material: blue-material
+  # material: white-material
+  material:
+    color: [1, 1, 1]
+    reflective: 1
+    transparency: 1
+    refractive-index: 1.5
   transform:
-    - [scale, 80, 80, 80]
-    - [translate, 200, 80, 400]
+    - [scale, 82.5, 82.5, 82.5]
+    - [rotate-y, -0.314159]
+    - [translate, 212.5, 82.5, 147.5]
 
 - add: cube
   material: white-material
