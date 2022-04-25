@@ -26,6 +26,7 @@ pub struct Material {
 }
 
 impl Material {
+    #![allow(dead_code)]
     pub fn new(
         colour: Vec4,
         emissiveness: Vec4,
@@ -81,6 +82,7 @@ pub struct ObjectParams {
 }
 
 impl ObjectParams {
+    #![allow(dead_code)]
     pub fn new(
         transform: Mat4,
         material: Material,
@@ -171,6 +173,7 @@ impl Camera {
         // println!("{:?}", self.forward);
     }
 
+    #[allow(dead_code)]
     pub fn orbit_centre(&mut self, d_x: f32, d_y: f32, config: &SurfaceConfiguration) {
         self.yaw += d_x as f32;
         self.pitch += d_y as f32;

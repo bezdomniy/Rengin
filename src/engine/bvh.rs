@@ -52,7 +52,8 @@ impl Primitives {
         Primitives { 0: vec![] }
     }
 
-    pub fn extend_from_object_params(&mut self, object_params: &Vec<ObjectParams>) {
+    #[allow(dead_code)]
+    pub fn extend_from_object_params(&mut self, _object_params: &Vec<ObjectParams>) {
         // let primitives = vec![Primitive::default()];
         // self.0.push(primitives);
         todo!()

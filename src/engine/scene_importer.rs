@@ -21,14 +21,14 @@ enum Command {
 
 #[derive(Debug)]
 pub struct Scene {
-    commands: Vec<Command>,
     pub bvh: Option<BVH>,
     pub camera: Option<CameraValue>,
     pub lights: Option<Vec<LightValue>>,
     pub object_params: Option<Vec<ObjectParams>>,
-    textures: Option<Vec<Texture>>,
+    _textures: Option<Vec<Texture>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct Texture {
     path: String,
@@ -36,6 +36,7 @@ struct Texture {
 }
 
 impl Texture {
+    #[allow(dead_code)]
     pub fn new(file_path: &str) -> Self {
         let img = image::open(file_path).unwrap();
         let buf = img.to_rgba8();
@@ -99,6 +100,7 @@ pub struct LightValue {
 #[derive(Debug, Deserialize)]
 struct ShapeValue {
     add: String,
+    #[allow(dead_code)]
     args: Option<[f32; 3]>,
     file: Option<String>,
     material: Option<MaterialValue>,
@@ -147,7 +149,7 @@ struct MaterialDefinition {
     reflective: Option<f32>,
     transparency: Option<f32>,
     refractive_index: Option<f32>,
-    pattern: Option<PatternValue>,
+    _pattern: Option<PatternValue>,
 }
 
 impl TransformDefinitionMethods for TransformDefinition {
@@ -318,20 +320,21 @@ impl Scene {
                 .collect::<Vec<Vec4>>()
         );
         Scene {
-            commands,
             bvh,
             lights,
             object_params,
             camera,
-            textures: None,
+            _textures: None,
         }
     }
 
+    #[allow(dead_code)]
     fn validate(&self) {
         todo!();
     }
 
-    fn load_textures(commands: &Vec<Command>) -> Option<Vec<Texture>> {
+    #[allow(dead_code)]
+    fn load_textures(_commands: &Vec<Command>) -> Option<Vec<Texture>> {
         todo!()
     }
 
