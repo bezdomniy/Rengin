@@ -414,14 +414,27 @@ fn _schlick(cos_t:f32, r0: f32) -> f32 {
     return r0 + (1.0-r0)*pow((1.0 - cos_t),5.0);
 }
 
-fn schlick(cos_t:f32, eta_t: f32) -> f32 {
+fn schlick(cos_t:f32, eta_t: f32, eta_i: f32) -> f32 {
     // Use Schlick's approximation for reflectance.
-    let r0 = pow((1.0-eta_t) / (1.0+eta_t),2.0);
-    return r0 + (1.0-r0)*pow((1.0 - cos_t),5.0);
+
+    var cos = cos_t;
+    if (eta_i > eta_t)
+    {
+      let n = eta_i / eta_t;
+      let sin2T = pow(n, 2.0) * (1.0 - pow(cos, 2.0));
+      if (sin2T > 1.0) {
+        return 1.0;
+    }
+
+      cos = sqrt(1.0 - sin2T);
+    }
+
+    let r0 = pow((eta_i-eta_t) / (eta_i+eta_t),2.0);
+    return r0 + (1.0-r0)*pow((1.0 - cos),5.0);
 }
 
-fn _schlick_lazanyi(cos_t:f32, eta_t: f32, a: f32, alpha:f32) -> f32 {
-    let r0 = pow((1.0-eta_t) / (1.0+eta_t),2.0);
+fn _schlick_lazanyi(cos_t:f32, eta_t: f32, eta_i: f32, a: f32, alpha:f32) -> f32 {
+    let r0 = pow((eta_i-eta_t) / (eta_i+eta_t),2.0);
     return _schlick(cos_t, r0) - a * cos_t * pow(1.0 - cos_t , alpha);
 }
 
@@ -502,6 +515,7 @@ struct RenderRay {
     reflectance: f32;
     reflective: f32;
     transparent: f32;
+    refractive_index: f32;
 };
 
 
@@ -522,7 +536,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     var top_stack = -1;
 
     top_stack = top_stack + 1;
-    stack[top_stack] = RenderRay (init_ray,0u,1.0,1.0,1.0);
+    stack[top_stack] = RenderRay (init_ray,0u,1.0,1.0,1.0,1.0);
 
     loop  {
         if (top_stack < 0) { break }
@@ -558,28 +572,27 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
         color = color + albedo;
 
         if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
-            var eta_i = 1.0;
             var eta_t = ob_params.material.refractive_index;
 
             var cos_i = clamp(-1.0,1.0,dot(hitParams.eyev,hitParams.normalv));
 
             if (!hitParams.front_face) {
-                eta_t=1.0/eta_t;
+                eta_t=new_ray.refractive_index/eta_t;
             }
 
             var reflectance = 1.0;
             let do_schlick = ob_params.material.transparency > 0.0 && ob_params.material.reflective > 0.0;
             if (do_schlick) {
-                reflectance = schlick(cos_i, eta_t);
+                reflectance = schlick(cos_i, eta_t, new_ray.refractive_index);
             }
 
             if (ob_params.material.reflective > 0.0) {
                 top_stack = top_stack + 1;
-                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,reflectance * new_ray.reflectance,new_ray.reflective * ob_params.material.reflective,1.0); 
+                stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,reflectance * new_ray.reflectance,new_ray.reflective * ob_params.material.reflective,1.0,ob_params.material.refractive_index); 
             }
                         
-            if (ob_params.material.transparency > 0.0) {
-                let n_ratio = eta_i / eta_t;
+            if (ob_params.material.transparency > 0.0 && reflectance < 1.0) {
+                let n_ratio = new_ray.refractive_index / eta_t;
                 let sin_2t = (n_ratio * n_ratio) * (1.0 - (cos_i * cos_i));
 
                 if (sin_2t <= 1.0)
@@ -588,12 +601,8 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
                     let direction = hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
                                 (hitParams.eyev * n_ratio);
 
-                    if (do_schlick) {
-                        reflectance = 1.0-reflectance;
-                    }
-
                     top_stack = top_stack + 1;
-                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,reflectance * new_ray.reflectance,1.0,new_ray.transparent * ob_params.material.transparency); 
+                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,(1.0-reflectance) * new_ray.reflectance,1.0,new_ray.transparent * ob_params.material.transparency,ob_params.material.refractive_index); 
                 }
             }
         }
