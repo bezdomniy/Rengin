@@ -410,36 +410,22 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
     return hitParams;
 }
 
-fn _schlick(cos_t:f32, r0: f32) -> f32 {
-    return r0 + (1.0-r0)*pow((1.0 - cos_t),5.0);
+fn _schlick(cos_i:f32, r0: f32) -> f32 {
+    return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
 }
 
-fn schlick(cos_t:f32, eta_t: f32, eta_i: f32) -> f32 {
-    // Use Schlick's approximation for reflectance.
-
-    var cos = cos_t;
-    if (eta_i > eta_t)
-    {
-      let n = eta_i / eta_t;
-      let sin2T = pow(n, 2.0) * (1.0 - pow(cos, 2.0));
-      if (sin2T > 1.0) {
-        return 1.0;
-    }
-
-      cos = sqrt(1.0 - sin2T);
-    }
-
+fn schlick(cos_i:f32, eta_t: f32, eta_i: f32) -> f32 {
     let r0 = pow((eta_i-eta_t) / (eta_i+eta_t),2.0);
-    return r0 + (1.0-r0)*pow((1.0 - cos),5.0);
+    return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
 }
 
-fn _schlick_lazanyi(cos_t:f32, eta_t: f32, eta_i: f32, a: f32, alpha:f32) -> f32 {
+fn _schlick_lazanyi(cos_i:f32, eta_t: f32, eta_i: f32, a: f32, alpha:f32) -> f32 {
     let r0 = pow((eta_i-eta_t) / (eta_i+eta_t),2.0);
-    return _schlick(cos_t, r0) - a * cos_t * pow(1.0 - cos_t , alpha);
+    return _schlick(cos_i, r0) - a * cos_i * pow(1.0 - cos_i , alpha);
 }
 
-fn schlick_lazanyi(cos_t:f32, eta_t: f32, k: f32) -> f32 {
-    return (pow(eta_t - 1.0, 2.0) + 4.0 * eta_t * pow(1.0 - cos_t,5.0) + pow(k,2.0)) / (pow(eta_t+1.0,2.0) + pow(k,2.0));
+fn schlick_lazanyi(cos_i:f32, eta_t: f32, k: f32) -> f32 {
+    return (pow(eta_t - 1.0, 2.0) + 4.0 * eta_t * pow(1.0 - cos_i,5.0) + pow(k,2.0)) / (pow(eta_t+1.0,2.0) + pow(k,2.0));
 }
 
 fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
@@ -582,6 +568,11 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
 
             var reflectance = 1.0;
             let do_schlick = ob_params.material.transparency > 0.0 && ob_params.material.reflective > 0.0;
+
+            let n_ratio = new_ray.refractive_index / eta_t;
+            let sin_2t = pow(n_ratio,2.0) * (1.0 - pow(cos_i,2.0));
+            let cos_t = sqrt(1.0 - sin_2t);
+
             if (do_schlick) {
                 reflectance = schlick(cos_i, eta_t, new_ray.refractive_index);
             }
@@ -591,19 +582,13 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
                 stack[top_stack] = RenderRay (Ray(hitParams.overPoint, new_ray.ray.x, hitParams.reflectv,new_ray.ray.y),new_ray.bounce_number + 1u,reflectance * new_ray.reflectance,new_ray.reflective * ob_params.material.reflective,1.0,ob_params.material.refractive_index); 
             }
                         
-            if (ob_params.material.transparency > 0.0 && reflectance < 1.0) {
-                let n_ratio = new_ray.refractive_index / eta_t;
-                let sin_2t = (n_ratio * n_ratio) * (1.0 - (cos_i * cos_i));
+            if (sin_2t <= 1.0 && ob_params.material.transparency > 0.0) {
+                let direction = hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
+                            (hitParams.eyev * n_ratio);
 
-                if (sin_2t <= 1.0)
-                {
-                    let cos_t = sqrt(1.0 - sin_2t);
-                    let direction = hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
-                                (hitParams.eyev * n_ratio);
-
-                    top_stack = top_stack + 1;
-                    stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,(1.0-reflectance) * new_ray.reflectance,1.0,new_ray.transparent * ob_params.material.transparency,ob_params.material.refractive_index); 
-                }
+                top_stack = top_stack + 1;
+                stack[top_stack] = RenderRay (Ray(hitParams.underPoint,new_ray.ray.x, direction,new_ray.ray.y),new_ray.bounce_number + 1u,(1.0-reflectance) * new_ray.reflectance,1.0,new_ray.transparent * ob_params.material.transparency,ob_params.material.refractive_index); 
+           
             }
         }
     }

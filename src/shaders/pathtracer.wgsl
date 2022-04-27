@@ -489,24 +489,29 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
     return hitParams;
 }
 
-fn _schlick(cos_t:f32, r0: f32) -> f32 {
-    return r0 + (1.0-r0)*pow((1.0 - cos_t),5.0);
+fn _schlick(cos_i:f32, r0: f32) -> f32 {
+    return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
 }
 
-fn schlick(cos_t:f32, eta_t: f32) -> f32 {
-    // Use Schlick's approximation for reflectance.
-    let r0 = pow((1.0-eta_t) / (1.0+eta_t),2.0);
-    return r0 + (1.0-r0)*pow((1.0 - cos_t),5.0);
+fn schlick(cos_i:f32, eta_t: f32, eta_i: f32) -> f32 {
+    // // Use Schlick's approximation for reflectance.
+    let r0 = pow((eta_i-eta_t) / (eta_i+eta_t),2.0);
+    return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
 }
 
-fn _schlick_lazanyi(cos_t:f32, eta_t: f32, a: f32, alpha:f32) -> f32 {
-    let r0 = pow((1.0-eta_t) / (1.0+eta_t),2.0);
-    return _schlick(cos_t, r0) - a * cos_t * pow(1.0 - cos_t , alpha);
+fn _schlick_lazanyi(cos_i:f32, eta_t: f32, eta_i: f32, a: f32, alpha:f32) -> f32 {
+    let r0 = pow((eta_i-eta_t) / (eta_i+eta_t),2.0);
+    return _schlick(cos_i, r0) - a * cos_i * pow(1.0 - cos_i , alpha);
 }
 
-fn schlick_lazanyi(cos_t:f32, eta_t: f32, k: f32) -> f32 {
-    return (pow(eta_t - 1.0, 2.0) + 4.0 * eta_t * pow(1.0 - cos_t,5.0) + pow(k,2.0)) / (pow(eta_t+1.0,2.0) + pow(k,2.0));
+fn schlick_lazanyi(cos_i:f32, eta_t: f32, k: f32) -> f32 {
+    return (pow(eta_t - 1.0, 2.0) + 4.0 * eta_t * pow(1.0 - cos_i,5.0) + pow(k,2.0)) / (pow(eta_t+1.0,2.0) + pow(k,2.0));
 }
+
+struct RenderRay {
+    ray: Ray;
+    refractive_index: f32;
+};
 
 fn renderScene(init_ray: Ray) -> vec4<f32> {
     var radiance: vec4<f32> = vec4<f32>(0.0);
@@ -515,7 +520,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     var uv: vec2<f32>;
     var t: f32 = MAXLEN;
 
-    var new_ray = init_ray;
+    var new_ray = RenderRay(init_ray,1.0);
 
     var albedo = vec4<f32>(0.0);
 
@@ -526,7 +531,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     
     for (var bounce_idx: u32 = 0u; bounce_idx < ubo.ray_bounces; bounce_idx =  bounce_idx + 1u) {
         // Get intersected object ID
-        let intersection = intersect(new_ray);
+        let intersection = intersect(new_ray.ray);
         
         if (intersection.id == -1 || intersection.closestT >= MAXLEN)
         {
@@ -537,52 +542,51 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
 
-        let hitParams = getHitParams(new_ray, intersection, ob_params.model_type);
+        let hitParams = getHitParams(new_ray.ray, intersection, ob_params.model_type);
 
         var scatterTarget = vec3<f32>(0.0);
         var point = hitParams.overPoint;
 
         if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
             albedo = ob_params.material.colour;
-            scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx)));
+            scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.ray.rayD.xyz,f32(bounce_idx)));
         }
 
         else if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
             // albedo = vec4<f32>(1.0);
             albedo = ob_params.material.colour;
 
-            var eta_i = 1.0;
             var eta_t = ob_params.material.refractive_index;
 
-            var cos_t = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
+            var cos_i = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
 
-            if (hitParams.front_face) {
-                eta_t=eta_i/eta_t;
+            if (!hitParams.front_face) {
+                eta_t=new_ray.refractive_index/eta_t;
             }
-            
-            let reflectance = schlick(cos_t, eta_t);
-            // let reflectance = schlick_lazanyi(cos_t,eta_t,0.0);
 
-            let sin_t = sqrt(1.0 - cos_t*cos_t);
+            let reflectance = schlick(cos_i, eta_t, new_ray.refractive_index);
+            // let reflectance = schlick_lazanyi(cos_i,eta_t,0.0);
 
-            let cannot_refract = eta_t * sin_t > 1.0;
+            let n_ratio = new_ray.refractive_index / eta_t;
+            let sin_2t = pow(n_ratio, 2.0) * (1.0 - pow(cos_i, 2.0));
 
-            if (cannot_refract || reflectance >= rand(new_ray.rayD.xz,f32(bounce_idx)))
+            if (sin_2t > 1.0 || reflectance >= rand(new_ray.ray.rayD.xz,f32(bounce_idx)))
             {
                 // scatterTarget = hitParams.reflectv;
-                scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx)));
+                scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.ray.rayD.xyz,f32(bounce_idx)));
             }
             else {
-                let r_out_perp =  eta_t * (normalize(new_ray.rayD) + cos_t * hitParams.normalv);
-                let r_out_parallel = -sqrt(abs(1.0 - pow(length(r_out_perp),2.0))) * hitParams.normalv;
-                scatterTarget = r_out_perp + r_out_parallel;
+                let cos_t = sqrt(1.0 - sin_2t);
+
+                scatterTarget = hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
+                                (hitParams.eyev * n_ratio);
 
                 point = hitParams.underPoint;
             }
         }
         else {
             albedo = ob_params.material.colour;
-            scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.rayD.xyz,f32(bounce_idx));    
+            scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.ray.rayD.xyz,f32(bounce_idx));    
             // Catch degenerate scatter direction
             if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON) {
                 scatterTarget = hitParams.normalv;
@@ -592,7 +596,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
         radiance = radiance + (ob_params.material.emissiveness * throughput);
         throughput = throughput * albedo;
 
-        new_ray = Ray(point, init_ray.x, scatterTarget, init_ray.y);
+        new_ray = RenderRay(Ray(point, init_ray.x, scatterTarget, init_ray.y), ob_params.material.refractive_index);
     }
  
     return radiance;
