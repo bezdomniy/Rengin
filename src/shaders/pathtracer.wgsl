@@ -134,70 +134,61 @@ let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
-let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio 
-// let RAYS_PER_PIXEL: u32 = 4u;  
 let MAX_RAY_BOUNCES: i32 = 16;
 
-// fn jenkinsHash(x: u32) -> u32 {
-//     x += x << 10u;
-//     x ^= x >> 6u;
-//     x += x << 3u;
-//     x ^= x >> 11u;
-//     x += x << 15u;
-//     return x;
-// }
 
-// fn initRNG(pixel: vec2<u32> , width: u32, frame: u32) -> u32 {
-//     let rngState = dot(pixel , uint2(1, width)) ^ jenkinsHash(frame);
-//     return jenkinsHash(rngState);
-// }
+var<private> rand_pcg4d: vec4<u32>;
 
-
-fn gold_noise(xy: vec2<f32>, seed: f32) -> f32 {
-    return fract(tan(distance(xy*PHI, xy)*seed)*xy.x);
-}
-
-fn rand(xy: vec2<f32>, seed: f32) -> f32 {
-    return fract(sin(dot(xy +seed,vec2<f32>(12.9898,78.233))) * 43758.5453+seed);
-}
-
-fn _rand2(xy: vec2<f32>,seed:f32) -> f32
+fn init_pcg4d(v: vec4<u32>)
 {
-    let v = 0.152;
-    let pos = (xy * v + f32(ubo.subpixel_idx) * 1500. + 50.0);
+    rand_pcg4d = v * 1664525u + 1013904223u;
 
-	var p3 = fract(vec3<f32>(pos.xyx) * 0.1031);
-    p3 = p3 + dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
+    rand_pcg4d.x = rand_pcg4d.x + (rand_pcg4d.y * rand_pcg4d.w);
+    rand_pcg4d.y = rand_pcg4d.y + (rand_pcg4d.z * rand_pcg4d.x);
+    rand_pcg4d.z = rand_pcg4d.z + (rand_pcg4d.x * rand_pcg4d.y);
+    rand_pcg4d.w = rand_pcg4d.w + (rand_pcg4d.y * rand_pcg4d.z);
+
+    let _rand_pcg4d = vec4<u32>(rand_pcg4d.x >> 16u,rand_pcg4d.y >> 16u,rand_pcg4d.z >> 16u,rand_pcg4d.w >> 16u);
+    rand_pcg4d = rand_pcg4d ^ _rand_pcg4d;
+
+    // rand_pcg4d = rand_pcg4d ^ (rand_pcg4d >> 16u);
+    rand_pcg4d.x = rand_pcg4d.x + (rand_pcg4d.y * rand_pcg4d.w);
+    rand_pcg4d.y = rand_pcg4d.y + (rand_pcg4d.z * rand_pcg4d.x);
+    rand_pcg4d.z = rand_pcg4d.z + (rand_pcg4d.x * rand_pcg4d.y);
+    rand_pcg4d.w = rand_pcg4d.w + (rand_pcg4d.y * rand_pcg4d.z);
 }
+
+fn u32_to_f32(x: u32) -> f32 {
+    return bitcast<f32>(0x3f800000u | (x >> 9u)) - 1.0;
+}
+
+// alternative
+fn _u32_to_f32(x: u32) -> f32 {
+    return f32(x) * (1.0/f32(0xffffffffu));
+}
+
+
 
 fn rescale(value: f32, min: f32, max: f32) -> f32 {
     return (value * (max - min)) + min;
-    // return (((value + 1.0) * (max - min)) / 2.0) + min;
 }
 
-fn linearRand(min: f32, max: f32, xy: vec2<f32>, seed: f32) -> f32 {
-    return rescale(rand(xy,seed),min,max);
-    // return rescale(gold_noise(xy,seed),min,max);
-}
 
-fn sphericalRand(radius: f32, xyz: vec3<f32>, seed: f32) -> vec3<f32>
+fn sphericalRand(radius: f32) -> vec3<f32>
 {
-    // let xy = vec2<f32>(seed_xy);
-
-    let theta: f32 = linearRand(0.0, 6.283185307179586476925286766559,xyz.xy,seed);
-    let phi: f32 = acos(linearRand(-1.0, 1.0,xyz.yz,seed));
+    let theta: f32 = rescale(u32_to_f32(rand_pcg4d.x), 0.0, 6.283185307179586476925286766559);
+    let phi: f32 = acos(rescale(u32_to_f32(rand_pcg4d.y), -1.0, 1.0));
 
     let x: f32 = sin(phi) * cos(theta);
     let y: f32 = sin(phi) * sin(theta);
     let z: f32 = cos(phi);
 
-    return vec3<f32>(x,y,z) * radius;
+    return normalize(vec3<f32>(x,y,z) * radius);
 }
 
-fn hemisphericalRand(radius: f32, normal: vec3<f32>, xyz: vec3<f32>, seed: f32) -> vec3<f32>
+fn hemisphericalRand(radius: f32, normal: vec3<f32>) -> vec3<f32>
 {
-    let in_unit_sphere = sphericalRand(radius,xyz,seed);
+    let in_unit_sphere = sphericalRand(radius);
     if (dot(in_unit_sphere, normal) > 0.0) { // In the same hemisphere as the normal
         return in_unit_sphere;
     }
@@ -513,7 +504,7 @@ struct RenderRay {
     refractive_index: f32;
 };
 
-fn renderScene(init_ray: Ray) -> vec4<f32> {
+fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
     var radiance: vec4<f32> = vec4<f32>(0.0);
     var throughput: vec4<f32> = vec4<f32>(1.0);
 
@@ -526,8 +517,8 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
 
     // var ob_params = object_params.ObjectParams[0];
     // let ray_miss_colour = vec4<f32>(1.0);
-    let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
-    // let ray_miss_colour = vec4<f32>(0.529, 0.808, 0.922,1.0);
+    // let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
+    let ray_miss_colour = vec4<f32>(0.0);
     
     for (var bounce_idx: u32 = 0u; bounce_idx < ubo.ray_bounces; bounce_idx =  bounce_idx + 1u) {
         // Get intersected object ID
@@ -539,6 +530,8 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
             break;
         }
 
+        init_pcg4d(vec4<u32>(xy.x, xy.y, ubo.subpixel_idx, bounce_idx));
+
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
 
@@ -549,7 +542,8 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
 
         if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
             albedo = ob_params.material.colour;
-            scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.ray.rayD.xyz,f32(bounce_idx)));
+            scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0));
+            // scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
         }
 
         else if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
@@ -570,10 +564,11 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
             let n_ratio = new_ray.refractive_index / eta_t;
             let sin_2t = pow(n_ratio, 2.0) * (1.0 - pow(cos_i, 2.0));
 
-            if (sin_2t > 1.0 || reflectance >= rand(new_ray.ray.rayD.xz,f32(bounce_idx)))
+            if (sin_2t > 1.0 || reflectance >= u32_to_f32(rand_pcg4d.z))
             {
                 // scatterTarget = hitParams.reflectv;
-                scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0,new_ray.ray.rayD.xyz,f32(bounce_idx)));
+                scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0));
+                // scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
             }
             else {
                 let cos_t = sqrt(1.0 - sin_2t);
@@ -586,11 +581,13 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
         }
         else {
             albedo = ob_params.material.colour;
-            scatterTarget = hitParams.normalv + sphericalRand(1.0,new_ray.ray.rayD.xyz,f32(bounce_idx));    
-            // Catch degenerate scatter direction
-            if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON) {
-                scatterTarget = hitParams.normalv;
-            }
+            scatterTarget = hitParams.normalv + sphericalRand(1.0);
+            // scatterTarget = hitParams.normalv + hemisphericalRand(1.0,hitParams.normalv);  
+        }
+
+        // Catch degenerate scatter direction
+        if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON) {
+            scatterTarget = hitParams.normalv;
         }
         
         radiance = radiance + (ob_params.material.emissiveness * throughput);
@@ -615,15 +612,12 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
     if (ray.x < 0) {
         return;
     }
-    
-
-    // let uv = vec2<u32>(ray.x ,ray.y);
 
     if (ubo.subpixel_idx > 0u) {
         color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
     }
 
-    let ray_color = renderScene(ray);
+    let ray_color = renderScene(ray,global_invocation_id.xy);
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
