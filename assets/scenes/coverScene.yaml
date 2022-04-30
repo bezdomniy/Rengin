@@ -17,26 +17,22 @@
 - define: white-light
   value:
     emissiveness: [5, 5, 5]
-    # transparency: 1
-    refractive-index: 1
 
 - define: white-light2
   value:
     emissiveness: [1, 1, 1]
-    # transparency: 1
-    refractive-index: 1
 
 - add: sphere
   material: white-light
   transform:
     - [scale, 50, 50, 50]
-    - [translate, 50, 200, -50]
+    - [translate, 50, 151, -50]
 
 - add: sphere
   material: white-light2
   transform:
     - [scale, 50, 50, 50]
-    - [translate, -500, 50, -10]
+    - [translate, -400, 50, -10]
 
 - add: light
   at: [50, 100, -50]
@@ -117,7 +113,7 @@
     ambient: 0.0
     specular: 1.0
     shininess: 200
-    # reflective: 0.7
+    reflective: 0.7
     transparency: 0.7
     refractive-index: 1.5
   transform:
