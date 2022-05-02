@@ -134,8 +134,6 @@ let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
-let MAX_RAY_BOUNCES: i32 = 16;
-
 
 var<private> rand_pcg4d: vec4<u32>;
 
@@ -542,6 +540,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
 
         if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
             albedo = ob_params.material.colour;
+            // scatterTarget = hitParams.reflectv;
             scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0));
             // scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
         }
