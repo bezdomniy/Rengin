@@ -18,7 +18,7 @@ webgl = ["glam/libm","wgpu/webgl"]
 [dependencies]
 glam = { version = "0.20.5", default-features = false, features = ["bytemuck"] }
 winit = "0.26"
-tobj = "3.1.0"
+tobj = "3.2.2"
 bincode = "1.3.3"
 env_logger = "0.8"
 log = "0.4"

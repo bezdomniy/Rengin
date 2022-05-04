@@ -67,7 +67,7 @@ impl Primitives {
                 tobj::load_obj(
                     path,
                     &tobj::LoadOptions {
-                        // triangulate: true,
+                        triangulate: true,
                         single_index: true,
                         ..Default::default()
                     },
@@ -78,55 +78,57 @@ impl Primitives {
 
         // TODO: take Vec<Primitives> out to have it's own constructor which is then
         //       fed in as the constructor for bvh. That way can can add other shapes to it.
-        for model in models.iter().flatten() {
-            // println!("{:?}",model.mesh.indices);
-            let primitives: Vec<Box<dyn Bounded>> = model
-                .mesh
-                .indices
-                .chunks_exact(3)
-                .into_iter()
-                .map(|triangle_indices| {
-                    // println!("{:?}", triangle_indices);
-                    Box::new(TrianglePrimitive {
-                        points: const_mat3!(
-                            [
-                                model.mesh.positions[3 * triangle_indices[0] as usize],
-                                model.mesh.positions[(3 * triangle_indices[0] + 1) as usize],
-                                model.mesh.positions[(3 * triangle_indices[0] + 2) as usize],
-                            ],
-                            [
-                                model.mesh.positions[3 * triangle_indices[1] as usize],
-                                model.mesh.positions[(3 * triangle_indices[1] + 1) as usize],
-                                model.mesh.positions[(3 * triangle_indices[1] + 2) as usize],
-                            ],
-                            [
-                                model.mesh.positions[3 * triangle_indices[2] as usize],
-                                model.mesh.positions[(3 * triangle_indices[2] + 1) as usize],
-                                model.mesh.positions[(3 * triangle_indices[2] + 2) as usize],
-                            ]
-                        ),
-                        normals: const_mat3!(
-                            [
-                                model.mesh.normals[3 * triangle_indices[0] as usize],
-                                model.mesh.normals[(3 * triangle_indices[0] + 1) as usize],
-                                model.mesh.normals[(3 * triangle_indices[0] + 2) as usize],
-                            ],
-                            [
-                                model.mesh.normals[3 * triangle_indices[1] as usize],
-                                model.mesh.normals[(3 * triangle_indices[1] + 1) as usize],
-                                model.mesh.normals[(3 * triangle_indices[1] + 2) as usize],
-                            ],
-                            [
-                                model.mesh.normals[3 * triangle_indices[2] as usize],
-                                model.mesh.normals[(3 * triangle_indices[2] + 1) as usize],
-                                model.mesh.normals[(3 * triangle_indices[2] + 2) as usize],
-                            ]
-                        ),
-                    }) as Box<dyn Bounded>
-                })
-                .collect();
+        for model in models.iter() {
+            self.0.push(vec![]);
 
-            self.0.push(primitives);
+            for part in model.iter() {
+                // println!("{:?}",model.mesh.indices);
+                let primitives_iter =
+                    part.mesh
+                        .indices
+                        .chunks_exact(3)
+                        .into_iter()
+                        .map(|triangle_indices| {
+                            // println!("{:?}", triangle_indices);
+                            Box::new(TrianglePrimitive {
+                                points: const_mat3!(
+                                    [
+                                        part.mesh.positions[3 * triangle_indices[0] as usize],
+                                        part.mesh.positions[(3 * triangle_indices[0] + 1) as usize],
+                                        part.mesh.positions[(3 * triangle_indices[0] + 2) as usize],
+                                    ],
+                                    [
+                                        part.mesh.positions[3 * triangle_indices[1] as usize],
+                                        part.mesh.positions[(3 * triangle_indices[1] + 1) as usize],
+                                        part.mesh.positions[(3 * triangle_indices[1] + 2) as usize],
+                                    ],
+                                    [
+                                        part.mesh.positions[3 * triangle_indices[2] as usize],
+                                        part.mesh.positions[(3 * triangle_indices[2] + 1) as usize],
+                                        part.mesh.positions[(3 * triangle_indices[2] + 2) as usize],
+                                    ]
+                                ),
+                                normals: const_mat3!(
+                                    [
+                                        part.mesh.normals[3 * triangle_indices[0] as usize],
+                                        part.mesh.normals[(3 * triangle_indices[0] + 1) as usize],
+                                        part.mesh.normals[(3 * triangle_indices[0] + 2) as usize],
+                                    ],
+                                    [
+                                        part.mesh.normals[3 * triangle_indices[1] as usize],
+                                        part.mesh.normals[(3 * triangle_indices[1] + 1) as usize],
+                                        part.mesh.normals[(3 * triangle_indices[1] + 2) as usize],
+                                    ],
+                                    [
+                                        part.mesh.normals[3 * triangle_indices[2] as usize],
+                                        part.mesh.normals[(3 * triangle_indices[2] + 1) as usize],
+                                        part.mesh.normals[(3 * triangle_indices[2] + 2) as usize],
+                                    ]
+                                ),
+                            }) as Box<dyn Bounded>
+                        });
+                self.0.last_mut().unwrap().extend(primitives_iter);
+            }
         }
     }
 }
