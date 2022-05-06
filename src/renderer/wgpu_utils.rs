@@ -96,12 +96,19 @@ impl<'a> RenginWgpu {
         let optional_features = {
             wgpu::Features::UNSIZED_BINDING_ARRAY
                 | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
-                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
                 | wgpu::Features::PUSH_CONSTANTS
         };
         // let required_features = { wgpu::Features::TEXTURE_BINDING_ARRAY };
-        let required_features = { wgpu::Features::empty() };
-        let required_limits = {
+        let required_features = { wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES };
+        // let required_features = { wgpu::Features::empty() };
+
+        let required_limits = if cfg!(target_arch = "wasm32") {
+            wgpu::Limits {
+                max_push_constant_size: 0,
+                max_storage_buffer_binding_size: 1024 << 20,
+                ..wgpu::Limits::downlevel_webgl2_defaults()
+            }
+        } else {
             wgpu::Limits {
                 max_push_constant_size: 0,
                 max_storage_buffer_binding_size: 1024 << 20,
@@ -109,6 +116,7 @@ impl<'a> RenginWgpu {
             }
         }
         .using_resolution(adapter.limits());
+
         let adapter_features = adapter.features();
         assert!(
             adapter_features.contains(required_features),

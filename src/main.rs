@@ -56,30 +56,14 @@ struct RenderApp {
 impl RenderApp {
     pub fn new(
         window: &Window,
-        monitor_scale_factor: f64,
         resolution: &PhysicalSize<u32>,
-        scene_path: &str,
+        scene: &Scene,
         continous_motion: bool,
         rays_per_pixel: u32,
         ray_bounces: u32,
         renderer_type: RendererType,
     ) -> Self {
-        let mut now = Instant::now();
-        log::info!("Loading models...");
-
-        let scene = Scene::new(scene_path);
-        log::info!(
-            "Finished loading models in {} millis.",
-            now.elapsed().as_millis()
-        );
-
-        let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(
-            scene.camera.as_ref().unwrap().width,
-            scene.camera.as_ref().unwrap().height,
-        );
-        let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
-
-        window.set_inner_size(physical_size);
+        let physical_size = window.inner_size();
 
         let mut renderer = executor::block_on(RenginWgpu::new(
             window,
@@ -120,7 +104,7 @@ impl RenderApp {
 
         log::debug!("screen_data: {:?}", screen_data);
 
-        now = Instant::now();
+        let now = Instant::now();
         log::info!("Building shaders...");
         let shaders = renderer.create_shaders(renderer_type);
         log::info!(
@@ -406,7 +390,7 @@ impl RenderApp {
 }
 
 /// A wgpu ray tracer
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default)]
 #[clap(about, author)]
 struct Args {
     /// Path to scene definition YAML
@@ -429,11 +413,44 @@ struct Args {
 }
 
 fn main() {
+    let args = if cfg!(target_arch = "wasm32") {
+        Args {
+            ..Default::default()
+        }
+    } else {
+        Args::parse()
+    };
+
+    let now = Instant::now();
+    log::info!("Loading models...{}", args.scene);
+
+    let scene = Scene::new(&args.scene);
+    log::info!(
+        "Finished loading models in {} millis.",
+        now.elapsed().as_millis()
+    );
+
     let event_loop = EventLoop::new();
+
+    let monitor_scale_factor = event_loop.primary_monitor().unwrap().scale_factor();
+    let resolution = event_loop.primary_monitor().unwrap().size();
+
+    let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(
+        scene.camera.as_ref().unwrap().width,
+        scene.camera.as_ref().unwrap().height,
+    );
+    let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
+
+    let renderer_type = if args.pathtracer {
+        RendererType::PathTracer
+    } else {
+        RendererType::RayTracer
+    };
+
     let window = WindowBuilder::new()
         .with_title("Rengin")
         .with_resizable(true)
-        // .with_inner_size(physical_size)
+        .with_inner_size(physical_size)
         .build(&event_loop)
         .unwrap();
 
@@ -458,44 +475,22 @@ fn main() {
             .expect("couldn't append canvas to document body");
     }
 
-    let monitor_scale_factor = event_loop.primary_monitor().unwrap().scale_factor();
-    let resolution = event_loop.primary_monitor().unwrap().size();
+    let app = RenderApp::new(
+        &window,
+        &resolution,
+        &scene,
+        !args.draw_on_mouseup,
+        args.rays_per_pixel,
+        args.bounces,
+        renderer_type,
+    );
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let args = Args::parse();
-        let renderer_type = if args.pathtracer {
-            RendererType::PathTracer
-        } else {
-            RendererType::RayTracer
-        };
-
-        let scene_path = &args.scene;
-        let app = RenderApp::new(
-            &window,
-            monitor_scale_factor,
-            &resolution,
-            scene_path,
-            !args.draw_on_mouseup,
-            args.rays_per_pixel,
-            args.bounces,
-            renderer_type,
-        );
         executor::block_on(app.render(event_loop));
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let app = RenderApp::new(
-            &window,
-            monitor_scale_factor,
-            &resolution,
-            "",
-            true,
-            8,
-            8,
-            RendererType::RayTracer,
-        );
-
         wasm_bindgen_futures::spawn_local(app.render(event_loop));
     }
 }
