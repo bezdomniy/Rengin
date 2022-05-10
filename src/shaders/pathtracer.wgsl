@@ -133,6 +133,7 @@ let EPSILON:f32 = 0.0001;
 let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
+let PI: f32 = 3.1415926535897932384626433832795;
 
 
 var<private> rand_pcg4d: vec4<u32>;
@@ -171,18 +172,44 @@ fn rescale(value: f32, min: f32, max: f32) -> f32 {
     return (value * (max - min)) + min;
 }
 
+// fn sphericalRand(radius: f32) -> vec3<f32> {
+//     let r1 = u32_to_f32(rand_pcg4d.x);
+//     let r2 = u32_to_f32(rand_pcg4d.y);
+//     let z = sqrt(1.0-r2);
 
-fn sphericalRand(radius: f32) -> vec3<f32>
-{
-    let theta: f32 = rescale(u32_to_f32(rand_pcg4d.x), 0.0, 6.283185307179586476925286766559);
-    let phi: f32 = acos(rescale(u32_to_f32(rand_pcg4d.y), -1.0, 1.0));
+//     let phi = 2.0*PI*r1;
+//     let x = cos(phi)*sqrt(r2);
+//     let y = sin(phi)*sqrt(r2);
 
-    let x: f32 = sin(phi) * cos(theta);
-    let y: f32 = sin(phi) * sin(theta);
-    let z: f32 = cos(phi);
+//     return normalize(vec3<f32>(x, y, z));
+// }
 
-    return normalize(vec3<f32>(x,y,z) * radius);
+fn sphericalRand(radius: f32) -> vec3<f32> {
+    let phi = 2.0 * PI * u32_to_f32(rand_pcg4d.x);
+    let cos_theta = 2.0 * u32_to_f32(rand_pcg4d.y) - 1.0;
+    let u = u32_to_f32(rand_pcg4d.z);
+
+    let theta = acos(cos_theta);
+    let r = pow(u, 1.0 / 3.0);
+
+    let x = r * sin(theta) * cos(phi);
+    let y = r * sin(theta) * sin(phi);
+    let z = r * cos(theta);
+
+    return vec3<f32>(x, y, z);
 }
+
+// fn sphericalRand(radius: f32) -> vec3<f32>
+// {
+//     let theta: f32 = rescale(u32_to_f32(rand_pcg4d.x), 0.0, PI * 2.0);
+//     let phi: f32 = acos(rescale(u32_to_f32(rand_pcg4d.y), -1.0, 1.0));
+
+//     let x: f32 = sin(phi) * cos(theta);
+//     let y: f32 = sin(phi) * sin(theta);
+//     let z: f32 = cos(phi);
+
+//     return normalize(vec3<f32>(x,y,z) * radius);
+// }
 
 fn hemisphericalRand(radius: f32, normal: vec3<f32>) -> vec3<f32>
 {
@@ -502,6 +529,68 @@ struct RenderRay {
     refractive_index: f32;
 };
 
+
+// fn onb(n: vec3<f32>) -> array<vec3<f32>,3> {
+//     var out: array<vec3<f32>,3>;
+
+//     out[2] = n;
+
+//     if ( n.z >= n.y ) {
+//         let a = 1.0/(1.0 + n.z);
+//         let b = -n.x * n.y * a;
+//         out[0] = vec3<f32>( 1.0 - n.x*n.x*a, b, -n.x );
+//         out[1] = vec3<f32>( b, 1.0 - n.y*n.y*a, -n.y );
+//     } else {
+//         let a = 1.0/(1.0 + n.y);
+//         let b = -n.x*n.z*a;
+//         out[0] = vec3<f32>( b, -n.z, 1.0 - n.z*n.z*a );
+//         out[1] = vec3<f32>( 1.0 - n.x*n.x*a, -n.x, b );
+//     }
+
+//     return out;
+// }
+
+fn onb(n: vec3<f32>) -> array<vec3<f32>,3> {
+    var out: array<vec3<f32>,3>;
+
+    out[2] = n; 
+    if(n.z < -0.99995)
+    {
+        out[0] = vec3<f32>(0.0 , -1.0, 0.0);
+        out[1] = vec3<f32>(-1.0, 0.0, 0.0);
+    }
+    else
+    {
+        let a = 1.0/(1.0 + n.z);
+        let b = -n.x*n.y*a;
+        out[0] = vec3<f32>(1.0 - n.x*n.x*a, b, -n.x);
+        out[1] = vec3<f32>(b, 1.0 - n.y*n.y*a , -n.y);
+    }
+
+    return out;
+}
+
+
+// fn onb(n: vec3<f32>) -> array<vec3<f32>,3> {
+//     var out: array<vec3<f32>,3>;
+//     out[2] = n;
+
+//     if (abs(out[2].x) > 0.9) {
+//         let a = vec3<f32>(0.0,1.0,0.0);
+//     }
+//     else {
+//         let a = vec3<f32>(1.0,0.0,0.0);
+//     }
+//     out[1] = normalize(cross(out[2], a));
+//     out[0] = cross(out[2], out[1]);
+
+//     return out;
+// }
+
+fn onb_local(v: vec3<f32>, onb: array<vec3<f32>,3>) -> vec3<f32> {
+    return v.x*onb[0] + v.y*onb[1] + v.z*onb[2];
+}
+
 fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
     var radiance: vec4<f32> = vec4<f32>(0.0);
     var throughput: vec4<f32> = vec4<f32>(1.0);
@@ -528,27 +617,27 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             break;
         }
 
-        init_pcg4d(vec4<u32>(xy.x, xy.y, ubo.subpixel_idx, bounce_idx));
-
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
-
         let hitParams = getHitParams(new_ray.ray, intersection, ob_params.model_type);
+
+        init_pcg4d(vec4<u32>(xy.x, xy.y, ubo.subpixel_idx, bounce_idx));
+        let onb = onb(hitParams.normalv);
+        let rnd_direction = onb_local(sphericalRand(1.0), onb);
+        // let rnd_direction = sphericalRand(1.0);
 
         var scatterTarget = vec3<f32>(0.0);
         var point = hitParams.overPoint;
 
+        let albedo = ob_params.material.colour;
+
         if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
-            albedo = ob_params.material.colour;
             // scatterTarget = hitParams.reflectv;
-            scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0));
+            scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * rnd_direction);
             // scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
         }
 
         else if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
-            // albedo = vec4<f32>(1.0);
-            albedo = ob_params.material.colour;
-
             var eta_t = ob_params.material.refractive_index;
 
             var cos_i = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
@@ -563,10 +652,10 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             let n_ratio = new_ray.refractive_index / eta_t;
             let sin_2t = pow(n_ratio, 2.0) * (1.0 - pow(cos_i, 2.0));
 
-            if (sin_2t > 1.0 || reflectance >= u32_to_f32(rand_pcg4d.z))
+            if (sin_2t > 1.0 || reflectance >= u32_to_f32(rand_pcg4d.w))
             {
                 // scatterTarget = hitParams.reflectv;
-                scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * sphericalRand(1.0));
+                scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * rnd_direction);
                 // scatterTarget = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
             }
             else {
@@ -579,18 +668,30 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             }
         }
         else {
-            albedo = ob_params.material.colour;
-            scatterTarget = hitParams.normalv + sphericalRand(1.0);
+            scatterTarget = hitParams.normalv + rnd_direction;
             // scatterTarget = hitParams.normalv + hemisphericalRand(1.0,hitParams.normalv);  
         }
 
-        // Catch degenerate scatter direction
-        if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON) {
-            scatterTarget = hitParams.normalv;
+        // // Catch degenerate scatter direction
+        // if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON) {
+        //     scatterTarget = hitParams.normalv;
+        // }
+
+        scatterTarget = normalize(scatterTarget);
+
+
+        let pdf = dot(onb[2], scatterTarget) / PI;
+        // let pdf = dot(hitParams.normalv, scatterTarget) / PI;
+
+        if (pdf < 0.0) {
+            let cosine = 0.0;
         }
-        
+        else {
+            let cosine = pdf;
+        }
+                
         radiance = radiance + (ob_params.material.emissiveness * throughput);
-        throughput = throughput * albedo;
+        throughput = throughput * albedo * cosine / pdf;
 
         new_ray = RenderRay(Ray(point, init_ray.x, scatterTarget, init_ray.y), ob_params.material.refractive_index);
     }
