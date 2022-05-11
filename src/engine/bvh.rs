@@ -5,7 +5,7 @@ static MAX_SHAPES_IN_NODE: usize = 4;
 
 use glam::{const_mat3, const_vec3, const_vec4, Mat3, Vec3, Vec4};
 
-use super::rt_primitives::ObjectParams;
+use super::rt_primitives::ObjectParam;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -53,7 +53,7 @@ impl Primitives {
     }
 
     #[allow(dead_code)]
-    pub fn extend_from_object_params(&mut self, _object_params: &[ObjectParams]) {
+    pub fn extend_from_object_params(&mut self, _object_params: &[ObjectParam]) {
         // let primitives = vec![Primitive::default()];
         // self.0.push(primitives);
         todo!()

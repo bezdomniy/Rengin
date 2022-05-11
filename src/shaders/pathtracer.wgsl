@@ -47,14 +47,14 @@ struct Material {
 
 
 struct UBO {
-    lightPos: vec3<f32>;
+    _pad1: vec3<f32>;
     is_pathtracer: bool;
     resolution: vec2<u32>;
     _pad2: vec2<u32>;
     n_objects: i32;
+    lights_offset: u32;
     subpixel_idx: u32;
     ray_bounces: u32;
-    _pad3: u32;
 };
 
 struct InnerNodes {
@@ -71,6 +71,7 @@ struct Normals {
     Normals: [[stride(48)]] array<Normal>;
 };
 
+// TODO: include surface area here, maybe in material
 struct ObjectParam {
     inverse_transform: mat4x4<f32>;
     material: Material;
@@ -412,8 +413,13 @@ fn intersect(ray: Ray) -> Intersection {
     // TODO: fix loop range - get number of objects
     for (var i: i32 = 0; i < ubo.n_objects; i = i+1) {
         let ob_params = object_params.ObjectParams[i];
-        let nRay: Ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO,1.0)).xyz, ray.x, (ob_params.inverse_transform * vec4<f32>(ray.rayD,0.0)).xyz, ray.y);
 
+        // TODO: clean this up
+        if (ob_params.model_type == 9u) {
+            continue;
+        }
+            
+        let nRay: Ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO,1.0)).xyz, ray.x, (ob_params.inverse_transform * vec4<f32>(ray.rayD,0.0)).xyz, ray.y);
 
         if (ob_params.model_type == 0u) { //Sphere
             ret = intersectSphere(nRay,ret, i);
@@ -428,7 +434,6 @@ fn intersect(ray: Ray) -> Intersection {
             // Triangle mesh
             ret = intersectInnerNodes(nRay,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes,i);
         }
-
     }
 
     return ret;
@@ -591,6 +596,27 @@ fn onb_local(v: vec3<f32>, onb: array<vec3<f32>,3>) -> vec3<f32> {
     return v.x*onb[0] + v.y*onb[1] + v.z*onb[2];
 }
 
+fn point_on_random_light() -> vec3<f32> {
+    let i = u32(rescale(u32_to_f32(rand_pcg4d.x), f32(ubo.lights_offset), f32(ubo.n_objects)));
+    let light = object_params.ObjectParams[i];
+
+    if (light.model_type == 0u) {
+        return vec3<f32>(0.0);
+    }
+    else if (light.model_type == 1u) {
+        return vec3<f32>(0.0);
+    }
+    else if (light.model_type == 2u) {
+        return vec3<f32>(rescale(u32_to_f32(rand_pcg4d.y),213.0,343.0), 555.5, rescale(u32_to_f32(rand_pcg4d.z),227.0,332.0));
+
+        // // TODO: we will have to pass object inverse here too.
+        // return (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
+    }
+
+    // TODO: for model mesh, choose random triangle, then random point on it
+    return vec3<f32>(0.0);
+}
+
 fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
     var radiance: vec4<f32> = vec4<f32>(0.0);
     var throughput: vec4<f32> = vec4<f32>(1.0);
@@ -672,16 +698,33 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             // scatterTarget = hitParams.normalv + hemisphericalRand(1.0,hitParams.normalv);  
         }
 
-        // // Catch degenerate scatter direction
-        // if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON) {
-        //     scatterTarget = hitParams.normalv;
+        // Catch degenerate scatter direction
+        if (abs(scatterTarget.x) < EPSILON && abs(scatterTarget.y) < EPSILON && abs(scatterTarget.z) < EPSILON) {
+            scatterTarget = hitParams.normalv;
+        }
+
+        
+        // let on_light = point_on_random_light();
+        // var to_light = on_light - point;
+        // let distance_squared = pow(length(to_light),2.0);
+        // to_light = normalize(to_light);
+
+        // let light_area = (343.0 - 213.0) * (333.0 - 227.0);
+        // let cosine = abs(to_light.y);
+
+        // let pdf = distance_squared / (cosine * light_area);
+
+        // scatterTarget = to_light;
+
+        // if (dot(to_light, onb[2]) < 0.0 || cosine < EPSILON) {
+        //     radiance = radiance + (ob_params.material.emissiveness * throughput);
+        //     // // throughput = throughput * albedo * cosine / pdf;
+        //     // return radiance;
+        //     break;
         // }
 
         scatterTarget = normalize(scatterTarget);
-
-
         let pdf = dot(onb[2], scatterTarget) / PI;
-        // let pdf = dot(hitParams.normalv, scatterTarget) / PI;
 
         if (pdf < 0.0) {
             let cosine = 0.0;
@@ -692,8 +735,9 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
                 
         radiance = radiance + (ob_params.material.emissiveness * throughput);
         throughput = throughput * albedo * cosine / pdf;
-
         new_ray = RenderRay(Ray(point, init_ray.x, scatterTarget, init_ray.y), ob_params.material.refractive_index);
+
+
     }
  
     return radiance;

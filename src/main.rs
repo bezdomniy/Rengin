@@ -81,17 +81,15 @@ impl RenderApp {
             ),
         };
 
-        let light_value = scene.lights.as_ref().unwrap()[0].at;
-
         let is_pathtracer = match &renderer_type {
             RendererType::PathTracer => 1u32,
             RendererType::RayTracer => 0u32,
         };
 
         let screen_data = ScreenData::new(
-            [light_value[0], light_value[1], light_value[2]],
             game_state.camera.get_inverse_transform(),
             scene.object_params.as_ref().unwrap().len() as u32,
+            scene.lights_offset as u32,
             ray_bounces,
             physical_size,
             *resolution,
@@ -112,6 +110,10 @@ impl RenderApp {
             now.elapsed().as_millis()
         );
 
+        for item in scene.object_params.as_ref().unwrap() {
+            println!("{:?}", item.model_type);
+        }
+
         renderer.create_buffers(
             scene.bvh.as_ref().unwrap(),
             &screen_data,
@@ -119,11 +121,10 @@ impl RenderApp {
             scene.object_params.as_ref().unwrap(),
         );
         renderer.create_pipelines(
-            // &buffers,
             &shaders,
-            // &renderer.target_texture,
             scene.bvh.as_ref().unwrap(),
             &rays,
+            scene.object_params.as_ref().unwrap(),
         );
 
         // TODO: remove buffers as arg and move into RenginWgpu state

@@ -4,7 +4,7 @@ use wgpu_gecko as wgpu;
 use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 
 use crate::{
-    engine::rt_primitives::{ObjectParams, Ray, ScreenData, Ubo},
+    engine::rt_primitives::{ObjectParam, Ray, ScreenData, Ubo},
     engine::{
         bvh::{Bvh, NodeInner, NodeLeaf, NodeNormal},
         rt_primitives::Rays,
@@ -246,7 +246,7 @@ impl<'a> RenginWgpu {
         bvh: &Bvh,
         screen_data: &ScreenData,
         rays: &Rays,
-        object_params: &[ObjectParams],
+        object_params: &[ObjectParam],
     ) {
         let now = Instant::now();
         log::info!("Creating buffers...");
@@ -320,6 +320,7 @@ impl<'a> RenginWgpu {
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
         bvh: &Bvh,
         rays: &Rays,
+        object_params: &[ObjectParam],
     ) {
         // create compute pipeline
         self.compute_bind_group_layout = Some(self.device.create_bind_group_layout(
@@ -392,7 +393,7 @@ impl<'a> RenginWgpu {
                             has_dynamic_offset: false,
                             // min_binding_size: None,
                             min_binding_size: wgpu::BufferSize::new(
-                                mem::size_of::<ObjectParams>() as _
+                                (object_params.len() * mem::size_of::<ObjectParam>()) as _,
                             ),
                         },
                         count: None,

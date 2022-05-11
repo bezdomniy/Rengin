@@ -52,9 +52,9 @@ struct UBO {
     resolution: vec2<u32>;
     _pad2: vec2<u32>;
     n_objects: i32;
+    lights_offset: u32;
     subpixel_idx: u32;
     ray_bounces: u32;
-    _pad3: u32;
 };
 
 struct InnerNodes {
@@ -445,15 +445,15 @@ fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
 }
 
 
-fn lighting(material: Material, lightPos: vec3<f32>, hitParams: HitParams, shadowed: bool) -> vec4<f32>
+fn lighting(material: Material, lightPos: vec3<f32>, light_emissiveness: vec4<f32>, hitParams: HitParams, shadowed: bool) -> vec4<f32>
 {
   // return material.colour;
   var diffuse: vec4<f32>;
   var specular: vec4<f32>;
 
-  let intensity = vec4<f32>(1.0,1.0,1.0,1.0); // TODO temp placeholder
+//   let intensity = vec4<f32>(1.0,1.0,1.0,1.0); // TODO temp placeholder
 
-  let effectiveColour = intensity * material.colour; //* light->intensity;
+  let effectiveColour = light_emissiveness * material.colour; //* light->intensity;
 
   let ambient = effectiveColour * material.ambient;
   // vec4 ambient = vec4(0.3,0.0,0.0,1.0);
@@ -488,7 +488,7 @@ fn lighting(material: Material, lightPos: vec3<f32>, hitParams: HitParams, shado
     {
       // compute the specular contribution​
       let factor = pow(reflectDotEye, material.shininess);
-      specular = intensity * material.specular * factor;
+      specular = light_emissiveness * material.specular * factor;
     }
   }
 
@@ -524,6 +524,12 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     top_stack = top_stack + 1;
     stack[top_stack] = RenderRay (init_ray,0u,1.0,1.0,1.0,1.0);
 
+    // TODO: check this is light model_type (9), currently not compatible with pathtracer scenes
+    let light = object_params.ObjectParams[ubo.lights_offset];
+    // inverse_transform for a light is just the transform (not inversed)
+    let light_position = light.inverse_transform * vec4<f32>(0.0,0.0,0.0,1.0);
+    let light_emissiveness = light.material.emissiveness;
+
     loop  {
         if (top_stack < 0) { break }
 
@@ -546,10 +552,12 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
 
 
         let hitParams: HitParams = getHitParams(new_ray.ray, intersection, ob_params.model_type);
-        let shadowed: bool = isShadowed(hitParams.overPoint, ubo.lightPos);
+        let shadowed: bool = isShadowed(hitParams.overPoint, light_position.xyz);
         // let shadowed = false;
         
-        let albedo = lighting(ob_params.material, ubo.lightPos,
+        let albedo = lighting(ob_params.material,
+                                light_position.xyz,
+                                light_emissiveness,
                                 hitParams, shadowed) 
                                 * new_ray.reflectance 
                                 * new_ray.reflective 
