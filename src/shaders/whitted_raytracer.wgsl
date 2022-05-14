@@ -1,4 +1,4 @@
-
+// TODO: !! fix so only lights get used as lights, not emissive shapes
 
 struct NodeLeaf {
     point1: vec3<f32>;
