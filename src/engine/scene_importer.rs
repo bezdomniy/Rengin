@@ -1,5 +1,5 @@
-// use super::asset_importer::import_objs;
 use super::{bvh::Bvh, rt_primitives::Material, rt_primitives::ObjectParam};
+use crate::RendererType;
 use glam::{const_vec4, Mat4, Vec3, Vec4};
 use image::{ImageBuffer, Rgba};
 use itertools::Itertools;
@@ -58,7 +58,7 @@ struct Define {
 type TransformDefinition = Vec<TransformValue>;
 
 trait TransformDefinitionMethods {
-    fn set_inverse_transform(&self, transform: &mut Mat4, commands: &[Command]);
+    fn set_transform(&self, transform: &mut Mat4, commands: &[Command]);
     fn get_transform(transform_name: &str, commands: &[Command]) -> Mat4;
 }
 
@@ -182,7 +182,7 @@ impl TransformDefinitionMethods for TransformDefinition {
     //     match self {}
     // }
 
-    fn set_inverse_transform(&self, transform: &mut Mat4, commands: &[Command]) {
+    fn set_transform(&self, transform: &mut Mat4, commands: &[Command]) {
         let mut out_transform = Mat4::IDENTITY;
         for t in self.iter().rev() {
             out_transform *= match t {
@@ -200,7 +200,7 @@ impl TransformDefinitionMethods for TransformDefinition {
                 TransformValue::Reference(r) => TransformDefinition::get_transform(r, commands),
             };
         }
-        *transform = out_transform.inverse();
+        *transform = out_transform;
     }
 
     fn get_transform(transform_name: &str, commands: &[Command]) -> Mat4 {
@@ -218,8 +218,8 @@ impl TransformDefinitionMethods for TransformDefinition {
                         match &define_command.value {
                             DefineValue::Transform(transform_def) => {
                                 let mut tranform_val = Mat4::IDENTITY;
-                                transform_def.set_inverse_transform(&mut tranform_val, commands);
-                                out_transform *= tranform_val.inverse();
+                                transform_def.set_transform(&mut tranform_val, commands);
+                                out_transform *= tranform_val;
                             }
                             _ => {
                                 panic!("Transform definition found, but has no transform value.");
@@ -314,7 +314,7 @@ struct PatternValue {}
 
 // TODO: why are transforms in definition and add not combining properly
 impl Scene {
-    pub fn new(file_path: &str) -> Self {
+    pub fn new(file_path: &str, renderer_type: &RendererType) -> Self {
         let path = Path::new(file_path);
         let display = path.display();
 
@@ -327,7 +327,8 @@ impl Scene {
 
         let commands: Vec<Command> =
             serde_yaml::from_reader(f).expect("Failed to load scene description.");
-        let (camera, object_params, bvh, lights_offset) = Scene::load_assets(&commands);
+        let (camera, object_params, bvh, lights_offset) =
+            Scene::load_assets(&commands, renderer_type);
 
         // for item in object_params.as_ref().unwrap() {
         //     println!("{:?}", item.model_type);
@@ -363,6 +364,7 @@ impl Scene {
 
     fn load_assets(
         commands: &Vec<Command>,
+        renderer_type: &RendererType,
     ) -> (
         Option<CameraValue>,
         Option<Vec<ObjectParam>>,
@@ -389,28 +391,31 @@ impl Scene {
                             commands,
                         );
                     }
-                    Add::Light(add_light) => {
-                        let light_shape = (*add_light).into();
+                    Add::Light(add_light) => match renderer_type {
+                        RendererType::RayTracer => {
+                            let light_shape = (*add_light).into();
 
-                        Scene::_get_object_params(
-                            &light_shape,
-                            &mut object_params,
-                            &mut light_params,
-                            &mut model_paths,
-                            commands,
-                        );
-                    }
+                            Scene::_get_object_params(
+                                &light_shape,
+                                &mut object_params,
+                                &mut light_params,
+                                &mut model_paths,
+                                commands,
+                            );
+                        }
+                        RendererType::PathTracer => {}
+                    },
                 },
                 _ => continue,
             };
         }
 
         let lights_offset = object_params.len();
-        light_params.iter_mut().for_each(|(_, v)| {
-            if v.model_type == 9 {
-                v.inverse_transform = v.inverse_transform.inverse()
-            }
-        });
+        // light_params.iter_mut().for_each(|(_, v)| {
+        //     if v.model_type == 9 {
+        //         v.inverse_transform = v.inverse_transform.inverse()
+        //     }
+        // });
 
         // println!("@@ {:?}", light_params.clone());
         object_params.extend(light_params);
@@ -511,10 +516,8 @@ impl Scene {
                                 .as_ref()
                                 .unwrap()
                                 // .clone()
-                                .set_inverse_transform(
-                                    &mut object_param.inverse_transform,
-                                    commands,
-                                );
+                                .set_transform(&mut object_param.transform, commands);
+                            object_param.inverse_transform = object_param.transform.inverse();
                             //todo
                         }
                         if defined_shape.material.is_some() {
@@ -556,7 +559,8 @@ impl Scene {
                 .as_ref()
                 .unwrap()
                 // .clone()
-                .set_inverse_transform(&mut object_param.inverse_transform, commands);
+                .set_transform(&mut object_param.transform, commands);
+            object_param.inverse_transform = object_param.transform.inverse();
             //todo
         }
         if curr_shape.material.is_some() {
@@ -595,7 +599,10 @@ mod tests {
     // use super::Scene;
     #[test]
     fn load_scene() {
-        let scene = Scene::new("./assets/scenes/test.yaml");
+        let scene = Scene::new(
+            "./assets/scenes/test.yaml",
+            &crate::RendererType::PathTracer,
+        );
 
         // let x = scene[0].is_sequence()
         println!("{:#?}", scene);

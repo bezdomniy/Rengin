@@ -36,13 +36,14 @@ struct HitParams {
 struct Material {
     colour: vec4<f32>;
     emissiveness: vec4<f32>;
+    reflective: f32;
+    transparency: f32;
+    refractive_index: f32;
     ambient: f32;
     diffuse: f32;
     specular: f32;
     shininess: f32;
-    reflective: f32;
-    transparency: f32;
-    refractive_index: f32;
+    _pad: u32;
 };
 
 
@@ -72,6 +73,7 @@ struct Normals {
 };
 
 struct ObjectParam {
+    transform: mat4x4<f32>;
     inverse_transform: mat4x4<f32>;
     material: Material;
     offset_inner_nodes: i32;
@@ -82,7 +84,7 @@ struct ObjectParam {
 
 
 struct ObjectParams {
-    ObjectParams: [[stride(144)]] array<ObjectParam>;
+    ObjectParams: [[stride(208)]] array<ObjectParam>;
 };
 
 struct Ray {
@@ -527,7 +529,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     // TODO: check this is light model_type (9), currently not compatible with pathtracer scenes
     let light = object_params.ObjectParams[ubo.lights_offset];
     // inverse_transform for a light is just the transform (not inversed)
-    let light_position = light.inverse_transform * vec4<f32>(0.0,0.0,0.0,1.0);
+    let light_position = light.transform * vec4<f32>(0.0,0.0,0.0,1.0);
     let light_emissiveness = light.material.emissiveness;
 
     loop  {

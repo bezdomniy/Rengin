@@ -422,10 +422,16 @@ fn main() {
         Args::parse()
     };
 
+    let renderer_type = if args.pathtracer {
+        RendererType::PathTracer
+    } else {
+        RendererType::RayTracer
+    };
+
     let now = Instant::now();
     log::info!("Loading models...{}", args.scene);
 
-    let scene = Scene::new(&args.scene);
+    let scene = Scene::new(&args.scene, &renderer_type);
     log::info!(
         "Finished loading models in {} millis.",
         now.elapsed().as_millis()
@@ -441,12 +447,6 @@ fn main() {
         scene.camera.as_ref().unwrap().height,
     );
     let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
-
-    let renderer_type = if args.pathtracer {
-        RendererType::PathTracer
-    } else {
-        RendererType::RayTracer
-    };
 
     let window = WindowBuilder::new()
         .with_title("Rengin")

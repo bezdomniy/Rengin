@@ -15,13 +15,13 @@ const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 pub struct Material {
     pub colour: Vec4,
     pub emissiveness: Vec4,
+    pub reflective: f32,
+    pub transparency: f32,
+    pub refractive_index: f32,
     pub ambient: f32,
     pub diffuse: f32,
     pub specular: f32,
     pub shininess: f32,
-    pub reflective: f32,
-    pub transparency: f32,
-    pub refractive_index: f32,
     _padding: u32,
 }
 
@@ -58,13 +58,13 @@ impl Default for Material {
         Material {
             colour: Vec4::new(0.0, 0.0, 0.0, 0.0),
             emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
+            reflective: 0.0,
+            transparency: 0.0,
+            refractive_index: 1.0,
             ambient: 0.1,
             diffuse: 0.9,
             specular: 0.9,
             shininess: 200.0,
-            reflective: 0.0,
-            transparency: 0.0,
-            refractive_index: 1.0,
             _padding: 0,
         }
     }
@@ -73,6 +73,7 @@ impl Default for Material {
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ObjectParam {
+    pub transform: Mat4,
     pub inverse_transform: Mat4,
     pub material: Material,
     pub offset_inner_nodes: u32,
@@ -92,6 +93,7 @@ impl ObjectParam {
         model_type: u32,
     ) -> Self {
         ObjectParam {
+            transform,
             inverse_transform: transform.inverse(),
             material,
             offset_inner_nodes,
