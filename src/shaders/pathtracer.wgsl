@@ -411,13 +411,13 @@ fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: i32) -> Inte
     return ret;
 }
 
-fn intersect(ray: Ray) -> Intersection {
+fn intersect(ray: Ray,start:i32) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
 
     // TODO: fix loop range - get number of objects
-    for (var i: i32 = 0; i < ubo.n_objects; i = i+1) {
+    for (var i: i32 = start; i < ubo.n_objects; i = i+1) {
         let ob_params = object_params.ObjectParams[i];
 
         // TODO: clean this up
@@ -652,18 +652,18 @@ fn surface_area(object: ObjectParam) -> f32 {
     }
     else if (object.model_type == 1u) {
         // TODO
-        return INFINITY;
+        return 1.0;
     }
     else if (object.model_type == 2u) {
         // return (343.0 - 213.0) * (332.0 - 227.0);
         return 2.0 * ((2.0 * scale.x * scale.z) + (2.0 * scale.z * scale.y) + (2.0 * scale.x * scale.y));
     }
     else if (object.model_type == 9u) {
-        return INFINITY;
+        return 1.0;
     }
 
     // TODO
-    return INFINITY;
+    return 1.0;
 }
 
 fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
@@ -685,7 +685,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
     for (var bounce_idx: u32 = 0u; bounce_idx < ubo.ray_bounces; bounce_idx =  bounce_idx + 1u) {
 
         // Get intersected object ID
-        let intersection = intersect(new_ray.ray);
+        let intersection = intersect(new_ray.ray,0);
         
         if (intersection.id == -1 || intersection.closestT >= MAXLEN)
         {
@@ -696,11 +696,13 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
         // TODO: just hard code object type in the intersection rather than looking it up
         let ob_params = object_params.ObjectParams[intersection.model_id];
 
-        let hitParams = getHitParams(new_ray.ray, intersection, ob_params.model_type);
+        radiance = radiance + (ob_params.material.emissiveness * throughput);
 
         if (ob_params.material.emissiveness.x > 0.0) {
-            return radiance + (ob_params.material.emissiveness * throughput);
+            break;
         }
+
+        let hitParams = getHitParams(new_ray.ray, intersection, ob_params.model_type);
 
         var is_specular = ob_params.material.reflective > 0.0 || ob_params.material.transparency > 0.0;
         var scattering_target =  vec3<f32>(0.0);
@@ -747,7 +749,6 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
                     point = hitParams.underPoint;
                 }
             }
-            radiance = radiance + (ob_params.material.emissiveness * throughput);
             throughput = throughput * albedo;
             new_ray = RenderRay(Ray(point, init_ray.x, normalize(scattering_target), init_ray.y), ob_params.material.refractive_index);
         }
@@ -760,29 +761,22 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             // var distance = intersection.closestT;
             var light_distance = 0.0;
             scattering_target = onb_local(random_cosine_direction(), onb);
-            // var scattered = false;
             // var scattering_pdf = 1.0;
 
 
             if (u32_to_f32(rand_pcg4d.w) < P_SCATTER) {
 
 
-                // Catch degenerate scatter direction
-                if (abs(scattering_target.x) < EPSILON && abs(scattering_target.y) < EPSILON && abs(scattering_target.z) < EPSILON) {
-                    scattering_target = hitParams.normalv;
-                }
+                // // Catch degenerate scatter direction
+                // if (abs(scattering_target.x) < EPSILON && abs(scattering_target.y) < EPSILON && abs(scattering_target.z) < EPSILON) {
+                //     scattering_target = hitParams.normalv;
+                // }
 
                 direction = normalize(scattering_target);
 
-                // TODO: this must check if the hit is a light, not just assume not
-                // light_distance = 0.0;
-
-                // TODO: update intersection records to say if it hit a light
-                let light = random_light();
-                let nRay: Ray = Ray((light.inverse_transform * vec4<f32>(point,1.0)).xyz, 0, (light.inverse_transform * vec4<f32>(direction,0.0)).xyz, 0);
-                var l_ret = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
-                l_ret = intersectCube(nRay,l_ret, 0);
-
+                // Check if we hit a light
+                let ray = Ray(point, init_ray.x, direction, init_ray.y);
+                let l_ret = intersect(ray,i32(ubo.lights_offset));
                 
                 if (l_ret.id == -1 || l_ret.closestT >= MAXLEN)
                 {
@@ -803,25 +797,16 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             }
 
             var scattering_pdf = 0.0;
-            // if (ob_params.material.transparency == 0.0 && ob_params.material.reflective == 0.0) {
-            // if (scattered) {
-                // Lambertian TODO: update the below
-                let scattering_cosine = dot(direction, onb[2]);
-                if (scattering_cosine < 0.0) {
-                    scattering_pdf = 0.0;
-                    // scattering_pdf = 1.0;
-                    // scattering_pdf = -scattering_cosine / PI;
-                }
-                else {
-                    scattering_pdf = scattering_cosine / PI;
-                }
-            // }
+            let scattering_cosine = dot(direction, onb[2]);
+            if (scattering_cosine > 0.0) {
+                scattering_pdf = scattering_cosine / PI;
+            }
 
             let light = random_light();
             let light_area = surface_area(light);
-            let light_cosine = dot(direction,onb[2]) ;
+            // let light_cosine = dot(direction,onb[2]) ;
             // let light_cosine = abs(dot(direction*light_distance, onb[2]) / light_distance);
-            let light_pdf = pow(light_distance,2.0) / (light_cosine * light_area);
+            let light_pdf = pow(light_distance,2.0) / (scattering_cosine * light_area);
 
             let pdf = (P_SCATTER * scattering_pdf) + ((1.0 - P_SCATTER) * light_pdf);
 
@@ -855,25 +840,13 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             // scattering_target = normalize(scattering_target);
             // let cosine_pdf = dot(onb[2], scattering_target) / PI;
                     
-            radiance = radiance + (ob_params.material.emissiveness * throughput);
             throughput = throughput * albedo * scattering_pdf / pdf;
-                
-
-            
 
             new_ray = RenderRay(Ray(point, init_ray.x, direction, init_ray.y), ob_params.material.refractive_index);
-
         }
-        
-        
-
-
-
-
     }
  
     return radiance;
-
 }
 
 [[stage(compute), workgroup_size(16, 16)]]
@@ -893,14 +866,7 @@ fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
     }
 
-
     var ray_color = renderScene(ray,global_invocation_id.xy);
-
-
-    // if (ray_color.r >= INFINITY) {ray_color.r = 0.0;}
-    // if (ray_color.g >= INFINITY) {ray_color.g = 0.0;}
-    // if (ray_color.b >= INFINITY) {ray_color.b = 0.0;}
-
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
     color = mix(color,ray_color,scale);
