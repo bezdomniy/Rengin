@@ -354,7 +354,7 @@ fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
 fn normalAt(point: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32> {
     if (typeEnum == 0u) { //Sphere
         let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(point,1.0)).xyz;
-        return objectPoint;
+        return normalToWorld(objectPoint,intersection.model_id);
     }
     else if (typeEnum == 1u) { //Plane
         return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),intersection.model_id);

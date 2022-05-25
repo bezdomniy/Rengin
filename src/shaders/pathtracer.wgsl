@@ -179,6 +179,13 @@ fn rescale(value: f32, min: f32, max: f32) -> f32 {
     return (value * (max - min)) + min;
 }
 
+fn random_in_unit_sphere() -> vec3<f32> {
+    let x = rescale(u32_to_f32(rand_pcg4d.x), -1.0, 1.0);
+    let y = rescale(u32_to_f32(rand_pcg4d.y), -1.0, 1.0);
+    let z = rescale(u32_to_f32(rand_pcg4d.z), -1.0, 1.0);
+    return vec3<f32>(x,y,z);
+}
+
 fn random_cosine_direction() -> vec3<f32> {
     let r1 = u32_to_f32(rand_pcg4d.x);
     let r2 = u32_to_f32(rand_pcg4d.y);
@@ -458,7 +465,7 @@ fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
 fn normalAt(point: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32> {
     if (typeEnum == 0u) { //Sphere
         let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(point,1.0)).xyz;
-        return objectPoint;
+        return normalToWorld(objectPoint,intersection.model_id);
     }
     else if (typeEnum == 1u) { //Plane
         return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),intersection.model_id);
@@ -490,7 +497,7 @@ fn normalAt(point: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3
 
 fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParams
 {
-    var hitParams: HitParams;
+    var hitParams: HitParams;    
     hitParams.point =
         ray.rayO + normalize(ray.rayD) * intersection.closestT;
     // TODO check that uv only null have using none-uv normalAt version
@@ -712,14 +719,15 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
 
         if (is_specular) {
             if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
-                is_specular = true;
                 // scattering_target = hitParams.reflectv;
-                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction(1.0));
-                // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
+
+                // let onb_reflect = onb(hitParams.reflectv);
+                // let noise_direction = onb_local(random_cosine_direction(), onb_reflect);
+                // scattering_target = ((1.0 - ob_params.material.reflective) * noise_direction);
+                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_in_unit_sphere());
             }
 
-            else if (ob_params.material.transparency > 0.0 || ob_params.material.reflective > 0.0) {
-                is_specular = true;
+            else if (ob_params.material.transparency > 0.0) {
                 var eta_t = ob_params.material.refractive_index;
 
                 var cos_i = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
@@ -737,7 +745,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
                 if (sin_2t > 1.0 || reflectance >= u32_to_f32(rand_pcg4d.w))
                 {
                     // scattering_target = hitParams.reflectv;
-                    scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction(1.0));
+                    scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_in_unit_sphere());
                     // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
                 }
                 else {
@@ -755,7 +763,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
         else {
             let onb = onb(hitParams.normalv);
             // let rnd_direction = onb_local(sphericalRand(1.0), onb);
-            // let rnd_direction = random_uniform_direction(1.0);
+            // scattering_target= random_uniform_direction(1.0);
 
             var direction = vec3<f32>(0.0);
             // var distance = intersection.closestT;
@@ -765,8 +773,6 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
 
 
             if (u32_to_f32(rand_pcg4d.w) < P_SCATTER) {
-
-
                 // // Catch degenerate scatter direction
                 // if (abs(scattering_target.x) < EPSILON && abs(scattering_target.y) < EPSILON && abs(scattering_target.z) < EPSILON) {
                 //     scattering_target = hitParams.normalv;
@@ -841,7 +847,6 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             // let cosine_pdf = dot(onb[2], scattering_target) / PI;
                     
             throughput = throughput * albedo * scattering_pdf / pdf;
-
             new_ray = RenderRay(Ray(point, init_ray.x, direction, init_ray.y), ob_params.material.refractive_index);
         }
     }
