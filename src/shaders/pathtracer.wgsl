@@ -132,7 +132,7 @@ fn to_linear_rgb(c: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(float_to_linear_rgb(c.x),float_to_linear_rgb(c.y),float_to_linear_rgb(c.z),1.0);
 }
 
-let EPSILON:f32 = 0.0001;
+let EPSILON:f32 = 0.001;
 let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;

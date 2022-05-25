@@ -120,7 +120,7 @@ var<storage, read> object_params: ObjectParams;
 [[group(0), binding(6)]]
 var<storage, read_write> rays: Rays;
 
-let EPSILON:f32 = 0.0001;
+let EPSILON:f32 = 0.001;
 let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
