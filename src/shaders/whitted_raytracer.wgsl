@@ -573,7 +573,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
             var cos_i = clamp(-1.0,1.0,dot(hitParams.eyev,hitParams.normalv));
 
             if (!hitParams.front_face) {
-                eta_t=new_ray.refractive_index/eta_t;
+                eta_t=eta_t/new_ray.refractive_index;
             }
 
             var reflectance = 1.0;

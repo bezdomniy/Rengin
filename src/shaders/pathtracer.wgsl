@@ -733,7 +733,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
                 var cos_i = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
 
                 if (!hitParams.front_face) {
-                    eta_t=new_ray.refractive_index/eta_t;
+                    eta_t=eta_t/new_ray.refractive_index;
                 }
 
                 let reflectance = schlick(cos_i, eta_t, new_ray.refractive_index);
