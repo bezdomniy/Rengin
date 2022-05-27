@@ -48,11 +48,11 @@ struct Material {
 
 
 struct UBO {
-    _pad1: vec3<f32>;
-    is_pathtracer: bool;
+    _pad1: vec3<u32>;
+    is_pathtracer: u32;
     resolution: vec2<u32>;
     _pad2: vec2<u32>;
-    n_objects: i32;
+    n_objects: u32;
     lights_offset: u32;
     subpixel_idx: u32;
     ray_bounces: u32;
@@ -77,8 +77,8 @@ struct ObjectParam {
     transform: mat4x4<f32>;
     inverse_transform: mat4x4<f32>;
     material: Material;
-    offset_inner_nodes: i32;
-    len_inner_nodes:i32;
+    offset_inner_nodes: u32;
+    len_inner_nodes:u32;
     offset_leaf_nodes:u32;
     model_type: u32;
 };
@@ -137,11 +137,6 @@ let MAXLEN: f32 = 10000.0;
 let INFINITY: f32 = 340282346638528859811704183484516925440.0;
 let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 let PI: f32 = 3.1415926535897932384626433832795;
-
-let P_SCATTER = 0.5;
-// let P_SCATTER = 1.0;
-// let P_SCATTER = 0.0;
-
 
 var<private> rand_pcg4d: vec4<u32>;
 
@@ -234,7 +229,7 @@ fn hemisphericalRand(radius: f32, normal: vec3<f32>) -> vec3<f32>
     return -in_unit_sphere;
 }
 
-fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
+fn intersectAABB(ray: Ray, aabbIdx: u32) -> bool {
     // let INFINITY: f32 = 1.0 / 0.0;
 
     var t_min: f32 = NEG_INFINITY;
@@ -271,7 +266,7 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
     return true;
 }
 
-fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, object_id: i32) -> Intersection {
+fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, object_id: u32) -> Intersection {
     let triangle = leaf_nodes.LeafNodes[triangleIdx];
     var uv: vec2<f32> = vec2<f32>(0.0);
     let e1: vec3<f32> = triangle.point2 - triangle.point1;
@@ -295,17 +290,17 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, o
                     && (t > EPSILON);
 
     if (isHit) {
-        return Intersection(uv,i32(triangleIdx),t,u32(object_id));
+        return Intersection(uv,i32(triangleIdx),t,object_id);
     }
     return inIntersection;
     // return isHit ? Intersection(uv,inIntersection.id,t) : inIntersection;
 }
 
-fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_idx: i32, max_inner_node_idx: i32, leaf_offset: u32, object_id: i32) -> Intersection {
+fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_idx: u32, max_inner_node_idx: u32, leaf_offset: u32, object_id: u32) -> Intersection {
     // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
     var ret: Intersection = inIntersection;
 
-    var idx: i32 = min_inner_node_idx;
+    var idx = min_inner_node_idx;
     loop  
     {
         if (idx >= max_inner_node_idx ) {break};
@@ -314,7 +309,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
         let leaf_node: bool = current_node.idx2 > 0u;
 
         if (intersectAABB(ray, idx)) {
-            idx = idx + 1;
+            idx = idx + 1u;
             if (leaf_node) {
                 for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1 + leaf_offset; primIdx < current_node.idx2 + leaf_offset; primIdx = primIdx + 1u) {
                     let next_intersection = intersectTriangle(ray, primIdx, ret,object_id);
@@ -327,16 +322,16 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
             
         }
         else if (leaf_node) {
-            idx = idx + 1;
+            idx = idx + 1u;
         }
         else {
-            idx = i32(current_node.skip_ptr_or_prim_idx1) + min_inner_node_idx;
+            idx = current_node.skip_ptr_or_prim_idx1 + min_inner_node_idx;
         }
     }
     return ret;
 }
 
-fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: i32) -> Intersection {
+fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
     // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
     var ret: Intersection = inIntersection;
 
@@ -355,17 +350,17 @@ fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: i32) -> In
 
     if (t1 < ret.closestT || t2 < ret.closestT) {
         if (t1 < t2 && t1 > EPSILON) {
-            return Intersection(vec2<f32>(0.0),0,t1,u32(object_id));
+            return Intersection(vec2<f32>(0.0),0,t1,object_id);
         }
         
         if (t2 > EPSILON) {
-            return Intersection(vec2<f32>(0.0),0,t2,u32(object_id));
+            return Intersection(vec2<f32>(0.0),0,t2,object_id);
         }
     }
     return ret;
 }
 
-fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: i32) -> Intersection {
+fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
     var ret: Intersection = inIntersection;
 
     if (abs(ray.rayD.y) < EPSILON) {
@@ -375,12 +370,12 @@ fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: i32) -> Int
     let t: f32 = -ray.rayO.y / ray.rayD.y;
 
     if (t < ret.closestT && t > EPSILON) {
-        return Intersection(vec2<f32>(0.0),0,t,u32(object_id));
+        return Intersection(vec2<f32>(0.0),0,t,object_id);
     }
     return ret;
 }
 
-fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: i32) -> Intersection {
+fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
     var ret: Intersection = inIntersection;
 
     var t_min: f32 = NEG_INFINITY;
@@ -410,21 +405,21 @@ fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: i32) -> Inte
     }
 
     if (t_min < ret.closestT && t_min > EPSILON) {
-        return Intersection(vec2<f32>(0.0),0,t_min,u32(object_id));
+        return Intersection(vec2<f32>(0.0),0,t_min,object_id);
     }
     else if (t_max < ret.closestT && t_max > EPSILON) {
-        return Intersection(vec2<f32>(0.0),0,t_max,u32(object_id));
+        return Intersection(vec2<f32>(0.0),0,t_max,object_id);
     }
     return ret;
 }
 
-fn intersect(ray: Ray,start:i32) -> Intersection {
+fn intersect(ray: Ray,start:u32) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
 
     // TODO: fix loop range - get number of objects
-    for (var i: i32 = start; i < ubo.n_objects; i = i+1) {
+    for (var i: u32 = start; i < ubo.n_objects; i = i+1u) {
         let ob_params = object_params.ObjectParams[i];
 
         // TODO: clean this up
@@ -674,6 +669,18 @@ fn surface_area(object: ObjectParam) -> f32 {
 }
 
 fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
+    var p_scatter = 0.5;
+    if (ubo.lights_offset == ubo.n_objects) {
+        p_scatter = 1.0;
+    }
+
+    // if (ubo.lights_offset == ubo.n_objects) {
+    //     let p_scatter = 1.0;
+    // }
+    // else {
+    //     let p_scatter = 0.5;
+    // }
+
     var radiance: vec4<f32> = vec4<f32>(0.0);
     var throughput: vec4<f32> = vec4<f32>(1.0);
 
@@ -692,7 +699,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
     for (var bounce_idx: u32 = 0u; bounce_idx < ubo.ray_bounces; bounce_idx =  bounce_idx + 1u) {
 
         // Get intersected object ID
-        let intersection = intersect(new_ray.ray,0);
+        let intersection = intersect(new_ray.ray,0u);
         
         if (intersection.id == -1 || intersection.closestT >= MAXLEN)
         {
@@ -772,7 +779,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             // var scattering_pdf = 1.0;
 
 
-            if (u32_to_f32(rand_pcg4d.w) < P_SCATTER) {
+            if (u32_to_f32(rand_pcg4d.w) < p_scatter) {
                 // // Catch degenerate scatter direction
                 // if (abs(scattering_target.x) < EPSILON && abs(scattering_target.y) < EPSILON && abs(scattering_target.z) < EPSILON) {
                 //     scattering_target = hitParams.normalv;
@@ -782,7 +789,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
 
                 // Check if we hit a light
                 let ray = Ray(point, init_ray.x, direction, init_ray.y);
-                let l_ret = intersect(ray,i32(ubo.lights_offset));
+                let l_ret = intersect(ray,ubo.lights_offset);
                 
                 if (l_ret.id == -1 || l_ret.closestT >= MAXLEN)
                 {
@@ -814,7 +821,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             // let light_cosine = abs(dot(direction*light_distance, onb[2]) / light_distance);
             let light_pdf = pow(light_distance,2.0) / (scattering_cosine * light_area);
 
-            let pdf = (P_SCATTER * scattering_pdf) + ((1.0 - P_SCATTER) * light_pdf);
+            let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * light_pdf);
 
             // let pdf = light_pdf;
             // let pdf = scattering_pdf;
