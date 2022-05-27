@@ -681,9 +681,9 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample:bool) -> vec4<f32> {
     var albedo = vec4<f32>(0.0);
 
     // var ob_params = object_params.ObjectParams[0];
-    let ray_miss_colour = vec4<f32>(1.0);
+    // let ray_miss_colour = vec4<f32>(1.0);
     // let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
-    // let ray_miss_colour = vec4<f32>(0.0);
+    let ray_miss_colour = vec4<f32>(0.0);
     
     for (var bounce_idx: u32 = 0u; bounce_idx < ubo.ray_bounces; bounce_idx =  bounce_idx + 1u) {
 
