@@ -63,7 +63,7 @@ impl Primitives {
         let (models, _materials): (Vec<_>, Vec<_>) = paths
             .iter()
             .map(|path| {
-                println!("Loading {:?}", path);
+                log::info!("Loading {:?}", path);
                 tobj::load_obj(
                     path,
                     &tobj::LoadOptions {
