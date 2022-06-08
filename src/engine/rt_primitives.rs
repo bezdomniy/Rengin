@@ -15,13 +15,13 @@ const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 pub struct Material {
     pub colour: Vec4,
     pub emissiveness: Vec4,
+    pub reflective: f32,
+    pub transparency: f32,
+    pub refractive_index: f32,
     pub ambient: f32,
     pub diffuse: f32,
     pub specular: f32,
     pub shininess: f32,
-    pub reflective: f32,
-    pub transparency: f32,
-    pub refractive_index: f32,
     _padding: u32,
 }
 
@@ -58,13 +58,13 @@ impl Default for Material {
         Material {
             colour: Vec4::new(0.0, 0.0, 0.0, 0.0),
             emissiveness: Vec4::new(0.0, 0.0, 0.0, 0.0),
+            reflective: 0.0,
+            transparency: 0.0,
+            refractive_index: 1.0,
             ambient: 0.1,
             diffuse: 0.9,
             specular: 0.9,
             shininess: 200.0,
-            reflective: 0.0,
-            transparency: 0.0,
-            refractive_index: 1.0,
             _padding: 0,
         }
     }
@@ -72,7 +72,8 @@ impl Default for Material {
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct ObjectParams {
+pub struct ObjectParam {
+    pub transform: Mat4,
     pub inverse_transform: Mat4,
     pub material: Material,
     pub offset_inner_nodes: u32,
@@ -81,7 +82,7 @@ pub struct ObjectParams {
     pub model_type: u32,
 }
 
-impl ObjectParams {
+impl ObjectParam {
     #![allow(dead_code)]
     pub fn new(
         transform: Mat4,
@@ -91,7 +92,8 @@ impl ObjectParams {
         offset_leaf_nodes: u32,
         model_type: u32,
     ) -> Self {
-        ObjectParams {
+        ObjectParam {
+            transform,
             inverse_transform: transform.inverse(),
             material,
             offset_inner_nodes,
@@ -212,21 +214,21 @@ impl Camera {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ubo {
-    light_pos: Vec3,
+    _remove: [u32; 3],
     is_pathtracer: u32,
     width: u32,
     height: u32,
     _pad1: [u32; 2],
     n_objects: u32,
+    lights_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
-    _pad2: u32,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct ScreenData {
     // Compute shader uniform block object
-    light_pos: Vec3,
+    _remove: [u32; 3],
     pub size: PhysicalSize<u32>,
     pub resolution: PhysicalSize<u32>,
     pub inverse_camera_transform: Mat4,
@@ -234,6 +236,7 @@ pub struct ScreenData {
     half_width: f32,
     half_height: f32,
     fov: f32,
+    lights_offset: u32,
     n_objects: u32,
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
@@ -243,9 +246,9 @@ pub struct ScreenData {
 
 impl ScreenData {
     pub fn new(
-        light_pos: [f32; 3],
         inverse_camera_transform: Mat4,
         n_objects: u32,
+        lights_offset: u32,
         ray_bounces: u32,
         size: PhysicalSize<u32>,
         resolution: PhysicalSize<u32>,
@@ -268,7 +271,7 @@ impl ScreenData {
         log::info!("Window size: {:?}", size);
 
         ScreenData {
-            light_pos: const_vec3!(light_pos),
+            _remove: [0u32; 3],
             size,
             resolution,
             inverse_camera_transform,
@@ -277,6 +280,7 @@ impl ScreenData {
             half_height,
             fov,
             n_objects,
+            lights_offset,
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
             ray_bounces,
@@ -306,7 +310,7 @@ impl ScreenData {
 
     pub fn generate_ubo(&self) -> Ubo {
         Ubo {
-            light_pos: self.light_pos,
+            _remove: self._remove,
             is_pathtracer: self.is_pathtracer,
             width: self.size.width,
             height: self.size.height,
@@ -314,7 +318,7 @@ impl ScreenData {
             subpixel_idx: self.subpixel_idx,
             ray_bounces: self.ray_bounces,
             _pad1: [0u32; 2],
-            _pad2: 0u32,
+            lights_offset: self.lights_offset,
         }
     }
 }

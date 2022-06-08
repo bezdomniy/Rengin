@@ -1,6 +1,6 @@
-// use super::asset_importer::import_objs;
-use super::{bvh::Bvh, rt_primitives::Material, rt_primitives::ObjectParams};
-use glam::{Mat4, Vec3, Vec4};
+use super::{bvh::Bvh, rt_primitives::Material, rt_primitives::ObjectParam};
+use crate::RendererType;
+use glam::{const_vec4, Mat4, Vec3, Vec4};
 use image::{ImageBuffer, Rgba};
 use itertools::Itertools;
 use rand::{distributions::Alphanumeric, Rng};
@@ -23,8 +23,8 @@ enum Command {
 pub struct Scene {
     pub bvh: Option<Bvh>,
     pub camera: Option<CameraValue>,
-    pub lights: Option<Vec<LightValue>>,
-    pub object_params: Option<Vec<ObjectParams>>,
+    pub object_params: Option<Vec<ObjectParam>>,
+    pub lights_offset: usize,
     _textures: Option<Vec<Texture>>,
 }
 
@@ -58,7 +58,7 @@ struct Define {
 type TransformDefinition = Vec<TransformValue>;
 
 trait TransformDefinitionMethods {
-    fn set_inverse_transform(&self, transform: &mut Mat4, commands: &[Command]);
+    fn set_transform(&self, transform: &mut Mat4, commands: &[Command]);
     fn get_transform(transform_name: &str, commands: &[Command]) -> Mat4;
 }
 
@@ -97,7 +97,7 @@ pub struct LightValue {
     pub intensity: [f32; 3],
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct ShapeValue {
     add: String,
     #[allow(dead_code)]
@@ -106,6 +106,31 @@ struct ShapeValue {
     material: Option<MaterialValue>,
     transform: Option<TransformDefinition>,
     children: Option<Vec<ShapeValue>>,
+}
+
+impl From<LightValue> for ShapeValue {
+    fn from(light: LightValue) -> Self {
+        let transform = Some(vec![TransformValue::Vector(VectorTransform {
+            name: "translate".to_string(),
+            value1: light.at[0],
+            value2: light.at[1],
+            value3: light.at[2],
+        })]);
+
+        let emissiveness = Some([light.intensity[0], light.intensity[1], light.intensity[2]]);
+
+        let material = Some(MaterialValue::Definition(MaterialDefinition {
+            emissiveness,
+            ..Default::default()
+        }));
+
+        ShapeValue {
+            add: "light".to_string(),
+            transform,
+            material,
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,7 +162,7 @@ struct VectorTransform {
     value3: f32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all(deserialize = "kebab-case"))]
 struct MaterialDefinition {
     color: Option<[f32; 3]>,
@@ -157,7 +182,7 @@ impl TransformDefinitionMethods for TransformDefinition {
     //     match self {}
     // }
 
-    fn set_inverse_transform(&self, transform: &mut Mat4, commands: &[Command]) {
+    fn set_transform(&self, transform: &mut Mat4, commands: &[Command]) {
         let mut out_transform = Mat4::IDENTITY;
         for t in self.iter().rev() {
             out_transform *= match t {
@@ -175,7 +200,7 @@ impl TransformDefinitionMethods for TransformDefinition {
                 TransformValue::Reference(r) => TransformDefinition::get_transform(r, commands),
             };
         }
-        *transform = out_transform.inverse();
+        *transform = out_transform;
     }
 
     fn get_transform(transform_name: &str, commands: &[Command]) -> Mat4 {
@@ -193,8 +218,8 @@ impl TransformDefinitionMethods for TransformDefinition {
                         match &define_command.value {
                             DefineValue::Transform(transform_def) => {
                                 let mut tranform_val = Mat4::IDENTITY;
-                                transform_def.set_inverse_transform(&mut tranform_val, commands);
-                                out_transform *= tranform_val.inverse();
+                                transform_def.set_transform(&mut tranform_val, commands);
+                                out_transform *= tranform_val;
                             }
                             _ => {
                                 panic!("Transform definition found, but has no transform value.");
@@ -289,7 +314,7 @@ struct PatternValue {}
 
 // TODO: why are transforms in definition and add not combining properly
 impl Scene {
-    pub fn new(file_path: &str) -> Self {
+    pub fn new(file_path: &str, renderer_type: &RendererType) -> Self {
         let path = Path::new(file_path);
         let display = path.display();
 
@@ -302,7 +327,12 @@ impl Scene {
 
         let commands: Vec<Command> =
             serde_yaml::from_reader(f).expect("Failed to load scene description.");
-        let (camera, lights, object_params, bvh) = Scene::load_assets(&commands);
+        let (camera, object_params, bvh, lights_offset) =
+            Scene::load_assets(&commands, renderer_type);
+
+        // for item in object_params.as_ref().unwrap() {
+        //     println!("{:?}", item.model_type);
+        // }
 
         log::debug!(
             "op: {:?}",
@@ -315,8 +345,8 @@ impl Scene {
         );
         Scene {
             bvh,
-            lights,
             object_params,
+            lights_offset,
             camera,
             _textures: None,
         }
@@ -334,14 +364,15 @@ impl Scene {
 
     fn load_assets(
         commands: &Vec<Command>,
+        renderer_type: &RendererType,
     ) -> (
         Option<CameraValue>,
-        Option<Vec<LightValue>>,
-        Option<Vec<ObjectParams>>,
+        Option<Vec<ObjectParam>>,
         Option<Bvh>,
+        usize,
     ) {
-        let mut lights: Vec<LightValue> = vec![];
-        let mut object_params: LinkedHashMap<(String, String), ObjectParams> = LinkedHashMap::new();
+        let mut object_params: LinkedHashMap<(String, String), ObjectParam> = LinkedHashMap::new();
+        let mut light_params: LinkedHashMap<(String, String), ObjectParam> = LinkedHashMap::new();
         let mut model_paths: Vec<String> = vec![];
         let mut camera: Option<CameraValue> = None;
 
@@ -352,24 +383,56 @@ impl Scene {
                         camera = Some(add_camera.clone());
                     }
                     Add::Shape(add_shape) => {
+                        let no_emissive_shapes = match renderer_type {
+                            RendererType::RayTracer => true,
+                            RendererType::PathTracer => false,
+                        };
+
                         Scene::_get_object_params(
                             add_shape,
                             &mut object_params,
+                            &mut light_params,
                             &mut model_paths,
                             commands,
+                            no_emissive_shapes,
                         );
-                        // Scene::_get_object_params(add_shape, &mut object_params, commands);
                     }
-                    Add::Light(add_light) => {
-                        lights.push(*add_light);
-                    }
+                    Add::Light(add_light) => match renderer_type {
+                        RendererType::RayTracer => {
+                            let light_shape = (*add_light).into();
+
+                            Scene::_get_object_params(
+                                &light_shape,
+                                &mut object_params,
+                                &mut light_params,
+                                &mut model_paths,
+                                commands,
+                                false,
+                            );
+                        }
+                        RendererType::PathTracer => {}
+                    },
                 },
                 _ => continue,
             };
         }
 
+        let lights_offset = object_params.len();
+        // light_params.iter_mut().for_each(|(_, v)| {
+        //     if v.model_type == 9 {
+        //         v.inverse_transform = v.inverse_transform.inverse()
+        //     }
+        // });
+
+        // println!("@@ {:?}", light_params.clone());
+        object_params.extend(light_params);
+
+        // for item in &object_params {
+        //     println!("{:?}", item.1.model_type);
+        // }
+
         model_paths = model_paths.into_iter().unique().collect();
-        println!("{:#?}", model_paths);
+        // println!("{:#?}", model_paths);
 
         let bvh = Some(Bvh::new(&model_paths));
 
@@ -386,15 +449,16 @@ impl Scene {
             obparam_value.model_type += i as u32;
         }
 
+        // TODO: change so n_objects is calculated here
         (
             camera,
-            Some(lights),
             Some(object_params.into_iter().map(|(_, v)| v).collect()),
             bvh,
+            lights_offset,
         )
     }
 
-    fn _set_primitive_type(type_name: &str, object_param: &mut ObjectParams) {
+    fn _set_primitive_type(type_name: &str, object_param: &mut ObjectParam) {
         match type_name {
             "sphere" => {
                 object_param.model_type = 0;
@@ -408,17 +472,22 @@ impl Scene {
             "group" => {
                 object_param.model_type = 3;
             }
+            "light" => {
+                object_param.model_type = 9;
+            }
             _ => {}
         }
     }
 
     fn _get_object_params(
         curr_shape: &ShapeValue,
-        accum_object_params: &mut LinkedHashMap<(String, String), ObjectParams>,
+        accum_object_params: &mut LinkedHashMap<(String, String), ObjectParam>,
+        accum_light_params: &mut LinkedHashMap<(String, String), ObjectParam>,
         accum_model_paths: &mut Vec<String>,
         commands: &Vec<Command>,
+        no_emissive_shapes: bool,
     ) {
-        let mut object_param: ObjectParams = ObjectParams::default();
+        let mut object_param: ObjectParam = ObjectParam::default();
         let mut model_path_found: bool = true;
 
         let mut object_map_key = curr_shape.add.clone();
@@ -455,10 +524,8 @@ impl Scene {
                                 .as_ref()
                                 .unwrap()
                                 // .clone()
-                                .set_inverse_transform(
-                                    &mut object_param.inverse_transform,
-                                    commands,
-                                );
+                                .set_transform(&mut object_param.transform, commands);
+                            object_param.inverse_transform = object_param.transform.inverse();
                             //todo
                         }
                         if defined_shape.material.is_some() {
@@ -500,7 +567,8 @@ impl Scene {
                 .as_ref()
                 .unwrap()
                 // .clone()
-                .set_inverse_transform(&mut object_param.inverse_transform, commands);
+                .set_transform(&mut object_param.transform, commands);
+            object_param.inverse_transform = object_param.transform.inverse();
             //todo
         }
         if curr_shape.material.is_some() {
@@ -512,11 +580,27 @@ impl Scene {
             // println!("{:#?}", object_param.material);
         }
 
-        accum_object_params.insert((object_map_key, hash), object_param);
+        if object_param.material.emissiveness == const_vec4!([0.0; 4]) {
+            accum_object_params.insert((object_map_key, hash), object_param);
+        } else if !no_emissive_shapes || object_param.model_type == 9 {
+            accum_light_params.insert((object_map_key, hash), object_param);
+        }
+        // // Add this if you want emissive objects to appear in whitted renderer type
+        // else {
+        //     object_param.material.emissiveness = const_vec4!([0.0; 4]);
+        //     accum_object_params.insert((object_map_key, hash), object_param);
+        // }
 
         if curr_shape.children.is_some() {
             for child in curr_shape.children.as_ref().unwrap() {
-                Scene::_get_object_params(child, accum_object_params, accum_model_paths, commands);
+                Scene::_get_object_params(
+                    child,
+                    accum_object_params,
+                    accum_light_params,
+                    accum_model_paths,
+                    commands,
+                    no_emissive_shapes,
+                );
             }
         }
     }
@@ -529,7 +613,10 @@ mod tests {
     // use super::Scene;
     #[test]
     fn load_scene() {
-        let scene = Scene::new("./assets/scenes/test.yaml");
+        let scene = Scene::new(
+            "./assets/scenes/test.yaml",
+            &crate::RendererType::PathTracer,
+        );
 
         // let x = scene[0].is_sequence()
         println!("{:#?}", scene);

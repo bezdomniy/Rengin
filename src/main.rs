@@ -81,17 +81,15 @@ impl RenderApp {
             ),
         };
 
-        let light_value = scene.lights.as_ref().unwrap()[0].at;
-
         let is_pathtracer = match &renderer_type {
             RendererType::PathTracer => 1u32,
             RendererType::RayTracer => 0u32,
         };
 
         let screen_data = ScreenData::new(
-            [light_value[0], light_value[1], light_value[2]],
             game_state.camera.get_inverse_transform(),
             scene.object_params.as_ref().unwrap().len() as u32,
+            scene.lights_offset as u32,
             ray_bounces,
             physical_size,
             *resolution,
@@ -119,11 +117,10 @@ impl RenderApp {
             scene.object_params.as_ref().unwrap(),
         );
         renderer.create_pipelines(
-            // &buffers,
             &shaders,
-            // &renderer.target_texture,
             scene.bvh.as_ref().unwrap(),
             &rays,
+            scene.object_params.as_ref().unwrap(),
         );
 
         // TODO: remove buffers as arg and move into RenginWgpu state
@@ -421,10 +418,16 @@ fn main() {
         Args::parse()
     };
 
+    let renderer_type = if args.pathtracer {
+        RendererType::PathTracer
+    } else {
+        RendererType::RayTracer
+    };
+
     let now = Instant::now();
     log::info!("Loading models...{}", args.scene);
 
-    let scene = Scene::new(&args.scene);
+    let scene = Scene::new(&args.scene, &renderer_type);
     log::info!(
         "Finished loading models in {} millis.",
         now.elapsed().as_millis()
@@ -440,12 +443,6 @@ fn main() {
         scene.camera.as_ref().unwrap().height,
     );
     let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
-
-    let renderer_type = if args.pathtracer {
-        RendererType::PathTracer
-    } else {
-        RendererType::RayTracer
-    };
 
     let window = WindowBuilder::new()
         .with_title("Rengin")
