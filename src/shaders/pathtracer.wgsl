@@ -168,13 +168,25 @@ fn _u32_to_f32(x: u32) -> f32 {
     return f32(x) * (1.0/f32(0xffffffffu));
 }
 
-
-
 fn rescale(value: f32, min: f32, max: f32) -> f32 {
     return (value * (max - min)) + min;
 }
 
 fn random_in_unit_sphere() -> vec3<f32> {
+    let phi = 2.0 * PI * u32_to_f32(rand_pcg4d.x);
+    let cos_theta = 2.0 * u32_to_f32(rand_pcg4d.y) - 1.0;
+    let u = u32_to_f32(rand_pcg4d.z);
+
+    let theta = acos(cos_theta);
+    let r = pow(u, 1.0 / 3.0);
+
+    let x = r * sin(theta) * cos(phi);
+    let y = r * sin(theta) * sin(phi);
+    let z = r * cos(theta);
+    return vec3<f32>(x,y,z);
+}
+
+fn random_in_cube() -> vec3<f32> {
     let x = rescale(u32_to_f32(rand_pcg4d.x), -1.0, 1.0);
     let y = rescale(u32_to_f32(rand_pcg4d.y), -1.0, 1.0);
     let z = rescale(u32_to_f32(rand_pcg4d.z), -1.0, 1.0);
@@ -193,17 +205,24 @@ fn random_cosine_direction() -> vec3<f32> {
     return vec3<f32>(x, y, z);
 }
 
-fn random_uniform_direction(radius: f32) -> vec3<f32> {
-    let phi = 2.0 * PI * u32_to_f32(rand_pcg4d.x);
-    let cos_theta = 2.0 * u32_to_f32(rand_pcg4d.y) - 1.0;
-    let u = u32_to_f32(rand_pcg4d.z);
+fn random_to_sphere(radius: f32, distance_squared: f32) -> vec3<f32> {
+    let r1 = u32_to_f32(rand_pcg4d.x);
+    let r2 = u32_to_f32(rand_pcg4d.y);
+    let z = 1.0 + r2*(sqrt(1.0-radius*radius/distance_squared) - 1.0);
 
-    let theta = acos(cos_theta);
-    let r = pow(u, 1.0 / 3.0);
+    let phi = 2.0*PI*r1;
+    let x = cos(phi)*sqrt(1.0-(z*z));
+    let y = sin(phi)*sqrt(1.0-(z*z));
 
-    let x = r * sin(theta) * cos(phi);
-    let y = r * sin(theta) * sin(phi);
-    let z = r * cos(theta);
+    return vec3<f32>(x, y, z);
+}
+
+fn random_uniform_direction() -> vec3<f32> {
+    let r1 = u32_to_f32(rand_pcg4d.x);
+    let r2 = u32_to_f32(rand_pcg4d.y);
+    let x = cos(2.0*PI*r1)*2.0*sqrt(r2*(1.0-r2));
+    let y = sin(2.0*PI*r1)*2.0*sqrt(r2*(1.0-r2));
+    let z = 1.0 - 2.0*r2;
 
     return vec3<f32>(x, y, z);
 }
@@ -220,9 +239,9 @@ fn random_uniform_direction(radius: f32) -> vec3<f32> {
 //     return normalize(vec3<f32>(x,y,z) * radius);
 // }
 
-fn hemisphericalRand(radius: f32, normal: vec3<f32>) -> vec3<f32>
+fn hemisphericalRand(normal: vec3<f32>) -> vec3<f32>
 {
-    let in_unit_sphere = random_uniform_direction(radius);
+    let in_unit_sphere = random_uniform_direction();
     if (dot(in_unit_sphere, normal) > 0.0) { // In the same hemisphere as the normal
         return in_unit_sphere;
     }
@@ -613,37 +632,38 @@ fn random_light() -> ObjectParam {
     return object_params.ObjectParams[i];
 }
 
-fn random_point_on_light(light: ObjectParam) -> vec3<f32> {
+fn random_point_on_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
     if (light.model_type == 0u) {
-        let r = random_uniform_direction(1.0);
+        // let r = random_cosine_direction();
+        let r = random_in_unit_sphere();
+        // let r = random_uniform_direction();
         return (light.transform * vec4<f32>(r,1.0)).xyz;
     }
     else if (light.model_type == 1u) {
         return vec3<f32>(0.0);
     }
     else if (light.model_type == 2u) {
-        // return vec3<f32>(rescale(u32_to_f32(rand_pcg4d.y),279.1,280.0), 555.5, rescale(u32_to_f32(rand_pcg4d.z),279.1,280.0));
         
-        // return vec3<f32>(rescale(u32_to_f32(rand_pcg4d.y),213.0,343.0), 555.5, rescale(u32_to_f32(rand_pcg4d.z),227.0,332.0));
-        // let r = random_uniform_direction(1.0);
-        
-        let random_side = rand_pcg4d.z % 6u;
-        let axis = random_side % 3u;
+        let r = random_in_cube();
+        return (light.transform * vec4<f32>(r,1.0)).xyz; 
 
-        if (random_side > 2u) {
-            let c = 1.0;
-        }
-        else {
-            let c = 0.0;
-        }
+        // // this is random on cube surface
+        // let random_side = rand_pcg4d.z % 6u;
+        // let axis = random_side % 3u;
 
-        var r = vec3<f32>(0.0);
-        r[axis] = c;
-        r[(axis + 1u) % 3u] = (u32_to_f32(rand_pcg4d.x) * 2.0) - 1.0;
-        r[(axis + 2u) % 3u] = (u32_to_f32(rand_pcg4d.y) * 2.0) - 1.0;
-        
+        // if (random_side > 2u) {
+        //     let c = 1.0;
+        // }
+        // else {
+        //     let c = -1.0;
+        // }
 
-        return (light.transform * vec4<f32>(r,1.0)).xyz;
+        // var r = vec3<f32>(0.0);
+        // r[axis] = c;
+        // r[(axis + 1u) % 3u] = (u32_to_f32(rand_pcg4d.x) * 2.0) - 1.0;
+        // r[(axis + 2u) % 3u] = (u32_to_f32(rand_pcg4d.y) * 2.0) - 1.0;
+
+        // return (light.transform * vec4<f32>(r,1.0)).xyz;
     }
 
     // TODO: for model mesh, choose random triangle, then random point on it
@@ -674,16 +694,14 @@ fn surface_area(object: ObjectParam) -> f32 {
 
 fn light_pdf(ray: Ray, light: ObjectParam, distance: f32, cosine: f32) -> f32 {
     if (light.model_type == 0u) {
-        //TODO: update to sphere pdf - this doesn't work properly
-        let light_area = surface_area(light);
-        return pow(distance,2.0) / (cosine * light_area);
+        let scale = vec3<f32>(length(light.transform[0].xyz),length(light.transform[1].xyz),length(light.transform[2].xyz));
+        let radius = max(max(scale.x,scale.y),scale.z);
+        let center = (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
+        let o = ray.rayO;
 
-        // let radius = 1.0;
-        // let center = (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
-        // let on_light = ray.rayO + (normalize(ray.rayD) * distance);
-        // let cos_theta_max = sqrt(1.0 - (radius*radius/pow(length(center-on_light),2.0)));
-        // let solid_angle = 2.0*PI*(1.0-cos_theta_max);
-        // return 1.0 / solid_angle;
+        let cos_theta_max = sqrt(1.0 - (radius*radius/pow(length(center-o),2.0)));
+        let solid_angle = 2.0*PI*(1.0-cos_theta_max);
+        return 1.0 / solid_angle;
     }
     else if (light.model_type == 1u) {
         // TODO
@@ -691,9 +709,6 @@ fn light_pdf(ray: Ray, light: ObjectParam, distance: f32, cosine: f32) -> f32 {
     }
     else if (light.model_type == 2u) {
         let light_area = surface_area(light);
-        // let light_cosine = dot(direction,onb[2]) ;
-        // let light_cosine = abs(dot(direction*light_distance, onb[2]) / light_distance);
-        // let light_pdf = 
         return pow(distance,2.0) / (cosine * light_area);
     }
     else if (light.model_type == 9u) {
@@ -760,7 +775,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
                 // let onb_reflect = onb(hitParams.reflectv);
                 // let noise_direction = onb_local(random_cosine_direction(), onb_reflect);
                 // scattering_target = ((1.0 - ob_params.material.reflective) * noise_direction);
-                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_in_unit_sphere());
+                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
             }
 
             else if (ob_params.material.transparency > 0.0) {
@@ -781,7 +796,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
                 if (sin_2t > 1.0 || reflectance >= u32_to_f32(rand_pcg4d.w))
                 {
                     // scattering_target = hitParams.reflectv;
-                    scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_in_unit_sphere());
+                    scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
                     // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
                 }
                 else {
@@ -801,7 +816,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
 
             if (u32_to_f32(rand_pcg4d.w) < p_scatter) {
                 let light = random_light();
-                let on_light = random_point_on_light(light);
+                let on_light = random_point_on_light(light, point);
                 scattering_target = on_light - point;
             }
             else {
@@ -818,14 +833,13 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
 
 
             let ray = Ray(point, init_ray.x, direction, init_ray.y);
-            var start = ubo.lights_offset;
             var v_light_pdf = 0.0;
-            loop {
-                let l_intersection = intersect(ray,start,true);
+            for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
+                let l_intersection = intersect(ray,i_light,true);
                 if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
-                    break;
+                    continue;
                 }
-                start = start + 1u;
+                
                 let l_ob_params = object_params.ObjectParams[l_intersection.model_id];
                 v_light_pdf = v_light_pdf + light_pdf(ray, l_ob_params, l_intersection.closestT, scattering_cosine);
             }

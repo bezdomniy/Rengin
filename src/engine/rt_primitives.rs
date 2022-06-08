@@ -214,7 +214,7 @@ impl Camera {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ubo {
-    _remove: Vec3,
+    _remove: [u32; 3],
     is_pathtracer: u32,
     width: u32,
     height: u32,
@@ -228,7 +228,7 @@ pub struct Ubo {
 #[derive(Debug, Copy, Clone)]
 pub struct ScreenData {
     // Compute shader uniform block object
-    _remove: Vec3,
+    _remove: [u32; 3],
     pub size: PhysicalSize<u32>,
     pub resolution: PhysicalSize<u32>,
     pub inverse_camera_transform: Mat4,
@@ -271,7 +271,7 @@ impl ScreenData {
         log::info!("Window size: {:?}", size);
 
         ScreenData {
-            _remove: const_vec3!([0f32; 3]),
+            _remove: [0u32; 3],
             size,
             resolution,
             inverse_camera_transform,
