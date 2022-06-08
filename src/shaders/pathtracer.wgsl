@@ -719,7 +719,7 @@ fn light_pdf(ray: Ray, light: ObjectParam, distance: f32, cosine: f32) -> f32 {
     return 0.0;
 }
 
-fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
+fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
     var p_scatter = 0.5;
     if (ubo.lights_offset == ubo.n_objects) {
         p_scatter = 1.0;
@@ -814,7 +814,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
         else {
             let onb = onb(hitParams.normalv);
 
-            if (u32_to_f32(rand_pcg4d.w) < p_scatter) {
+            if (light_sample && u32_to_f32(rand_pcg4d.w) < p_scatter) {
                 let light = random_light();
                 let on_light = random_point_on_light(light, point);
                 scattering_target = on_light - point;
@@ -830,7 +830,6 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
             if (scattering_cosine > 0.0) {
                 scattering_pdf = scattering_cosine / PI;
             }
-
 
             let ray = Ray(point, init_ray.x, direction, init_ray.y);
             var v_light_pdf = 0.0;
@@ -854,24 +853,32 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>) -> vec4<f32> {
     return radiance;
 }
 
+
+
 [[stage(compute), workgroup_size(16, 16)]]
 fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
         [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
         [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
         ) 
 {
-    var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
     let ray = rays.Rays[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x];
 
     if (ray.x < 0) {
         return;
     }
 
+    var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
     if (ubo.subpixel_idx > 0u) {
         color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
     }
 
-    var ray_color = renderScene(ray,global_invocation_id.xy);
+    
+    var light_sample = true;
+    if (ubo.lights_offset == ubo.n_objects) {
+        light_sample = false;
+    }
+    
+    var ray_color = renderScene(ray,global_invocation_id.xy,light_sample);
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
     color = mix(color,ray_color,scale);

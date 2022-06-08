@@ -383,12 +383,18 @@ impl Scene {
                         camera = Some(add_camera.clone());
                     }
                     Add::Shape(add_shape) => {
+                        let no_emissive_shapes = match renderer_type {
+                            RendererType::RayTracer => true,
+                            RendererType::PathTracer => false,
+                        };
+
                         Scene::_get_object_params(
                             add_shape,
                             &mut object_params,
                             &mut light_params,
                             &mut model_paths,
                             commands,
+                            no_emissive_shapes,
                         );
                     }
                     Add::Light(add_light) => match renderer_type {
@@ -401,6 +407,7 @@ impl Scene {
                                 &mut light_params,
                                 &mut model_paths,
                                 commands,
+                                false,
                             );
                         }
                         RendererType::PathTracer => {}
@@ -478,6 +485,7 @@ impl Scene {
         accum_light_params: &mut LinkedHashMap<(String, String), ObjectParam>,
         accum_model_paths: &mut Vec<String>,
         commands: &Vec<Command>,
+        no_emissive_shapes: bool,
     ) {
         let mut object_param: ObjectParam = ObjectParam::default();
         let mut model_path_found: bool = true;
@@ -572,11 +580,16 @@ impl Scene {
             // println!("{:#?}", object_param.material);
         }
 
-        if object_param.material.emissiveness != const_vec4!([0.0; 4]) {
-            accum_light_params.insert((object_map_key, hash), object_param);
-        } else {
+        if object_param.material.emissiveness == const_vec4!([0.0; 4]) {
             accum_object_params.insert((object_map_key, hash), object_param);
+        } else if !no_emissive_shapes || object_param.model_type == 9 {
+            accum_light_params.insert((object_map_key, hash), object_param);
         }
+        // // Add this if you want emissive objects to appear in whitted renderer type
+        // else {
+        //     object_param.material.emissiveness = const_vec4!([0.0; 4]);
+        //     accum_object_params.insert((object_map_key, hash), object_param);
+        // }
 
         if curr_shape.children.is_some() {
             for child in curr_shape.children.as_ref().unwrap() {
@@ -586,6 +599,7 @@ impl Scene {
                     accum_light_params,
                     accum_model_paths,
                     commands,
+                    no_emissive_shapes,
                 );
             }
         }

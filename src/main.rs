@@ -110,10 +110,6 @@ impl RenderApp {
             now.elapsed().as_millis()
         );
 
-        for item in scene.object_params.as_ref().unwrap() {
-            println!("{:?}", item.model_type);
-        }
-
         renderer.create_buffers(
             scene.bvh.as_ref().unwrap(),
             &screen_data,
