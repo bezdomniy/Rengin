@@ -18,6 +18,8 @@ use wgpu::{
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
+use super::{RenginRenderer, RenginShaderModule};
+
 pub struct RenginWgpu {
     pub instance: Instance,
     pub adapter: Adapter,
@@ -31,8 +33,9 @@ pub struct RenginWgpu {
     pub render_bind_group: Option<BindGroup>,
     pub buffers: Option<HashMap<&'static str, Buffer>>,
     pub compute_target_texture: Option<Texture>,
-    pub window_surface: Surface,
+    pub surface: Surface,
     pub config: wgpu::SurfaceConfiguration,
+    pub shaders: Option<HashMap<&'static str, RenginShaderModule>>,
     // pub physical_size: PhysicalSize<u32>,
     // pub logical_size: LogicalSize<u32>,
     // pub workgroup_size: [u32; 3],
@@ -43,21 +46,9 @@ pub struct RenginWgpu {
     // pub resolution: PhysicalSize<u32>,
 }
 
-impl<'a> RenginWgpu {
-    pub fn update_window_size(&mut self, physical_size: &PhysicalSize<u32>) {
-        // self.physical_size = winit::dpi::PhysicalSize::new(width, height);
-        // self.logical_size = self.physical_size.to_logical(self.scale_factor);
-
-        self.config.width = physical_size.width;
-        self.config.height = physical_size.height;
-
-        self.window_surface.configure(&self.device, &self.config);
-
-        self.create_bind_groups(physical_size);
-    }
-
+impl RenginWgpu {
     pub async fn new(
-        window: &'a Window,
+        window: &Window,
         // workgroup_size: [u32; 3],
         continous_motion: bool,
         rays_per_pixel: u32,
@@ -159,8 +150,9 @@ impl<'a> RenginWgpu {
             render_pipeline: None,
             buffers: None,
             compute_target_texture: None,
-            window_surface,
+            surface: window_surface,
             config,
+            shaders: None,
             // physical_size,
             // logical_size,
             // workgroup_size,
@@ -171,8 +163,22 @@ impl<'a> RenginWgpu {
             // resolution,
         }
     }
+}
 
-    pub fn create_target_textures(&mut self, physical_size: &PhysicalSize<u32>) {
+impl RenginRenderer for RenginWgpu {
+    fn update_window_size(&mut self, physical_size: &PhysicalSize<u32>) {
+        // self.physical_size = winit::dpi::PhysicalSize::new(width, height);
+        // self.logical_size = self.physical_size.to_logical(self.scale_factor);
+
+        self.config.width = physical_size.width;
+        self.config.height = physical_size.height;
+
+        self.surface.configure(&self.device, &self.config);
+
+        self.create_bind_groups(physical_size);
+    }
+
+    fn create_target_textures(&mut self, physical_size: &PhysicalSize<u32>) {
         let texture_extent = wgpu::Extent3d {
             width: physical_size.width,
             height: physical_size.height,
@@ -190,10 +196,7 @@ impl<'a> RenginWgpu {
         }));
     }
 
-    pub fn create_shaders(
-        &self,
-        renderer_type: RendererType,
-    ) -> HashMap<&'static str, ShaderModule> {
+    fn create_shaders(&mut self, renderer_type: RendererType) {
         let cs_module = match renderer_type {
             RendererType::PathTracer => {
                 self.device
@@ -233,15 +236,15 @@ impl<'a> RenginWgpu {
                 ))),
             });
 
-        let mut shaders: HashMap<&'static str, ShaderModule> = HashMap::new();
-        shaders.insert("comp", cs_module);
-        shaders.insert("vert", vt_module);
-        shaders.insert("frag", fg_module);
+        let mut shaders = HashMap::new();
+        shaders.insert("comp", RenginShaderModule::WgpuShaderModule(cs_module));
+        shaders.insert("vert", RenginShaderModule::WgpuShaderModule(vt_module));
+        shaders.insert("frag", RenginShaderModule::WgpuShaderModule(fg_module));
 
-        shaders
+        self.shaders = Some(shaders);
     }
 
-    pub fn create_buffers(
+    fn create_buffers(
         &mut self,
         bvh: &Bvh,
         screen_data: &ScreenData,
@@ -314,9 +317,8 @@ impl<'a> RenginWgpu {
         ]));
     }
 
-    pub fn create_pipelines(
+    fn create_pipelines(
         &mut self,
-        shaders: &HashMap<&'static str, ShaderModule>,
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
         bvh: &Bvh,
         rays: &Rays,
@@ -467,12 +469,18 @@ impl<'a> RenginWgpu {
                 layout: render_pipeline_layout.as_ref(),
                 multiview: None,
                 vertex: wgpu::VertexState {
-                    module: shaders.get("vert").as_ref().unwrap(),
+                    module: match self.shaders.as_ref().unwrap().get("vert") {
+                        Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+                        _ => panic!("Invalid WGPU vertex shader passed to render pipeline."),
+                    },
                     entry_point: "main",
                     buffers: &[],
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: shaders.get("frag").as_ref().unwrap(),
+                    module: match self.shaders.as_ref().unwrap().get("frag") {
+                        Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+                        _ => panic!("Invalid WGPU fragment shader passed to render pipeline."),
+                    },
                     entry_point: "main",
                     targets: &[wgpu::ColorTargetState {
                         format: self.config.format,
@@ -493,13 +501,16 @@ impl<'a> RenginWgpu {
             &wgpu::ComputePipelineDescriptor {
                 label: Some("Compute pipeline"),
                 layout: compute_pipeline_layout.as_ref(),
-                module: shaders.get("comp").as_ref().unwrap(),
+                module: match self.shaders.as_ref().unwrap().get("comp") {
+                    Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+                    _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
+                },
                 entry_point: "main",
             },
         ));
     }
 
-    pub fn create_bind_groups(&mut self, physical_size: &PhysicalSize<u32>) {
+    fn create_bind_groups(&mut self, physical_size: &PhysicalSize<u32>) {
         self.create_target_textures(physical_size);
 
         let compute_target_texture_view = self

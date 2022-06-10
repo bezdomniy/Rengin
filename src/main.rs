@@ -3,7 +3,6 @@ pub use wgpu_gecko as wgpu;
 
 mod engine;
 mod renderer;
-mod shaders;
 
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{
@@ -31,7 +30,7 @@ use clap::Parser;
 use engine::scene_importer::Scene;
 
 use crate::engine::rt_primitives::Rays;
-use crate::renderer::wgpu_utils::RenginWgpu;
+use crate::renderer::{vk_utils::RenginVk, wgpu_utils::RenginWgpu, RenginRenderer};
 use engine::rt_primitives::{Camera, ScreenData};
 
 static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
@@ -117,7 +116,6 @@ impl RenderApp {
             scene.object_params.as_ref().unwrap(),
         );
         renderer.create_pipelines(
-            &shaders,
             scene.bvh.as_ref().unwrap(),
             &rays,
             scene.object_params.as_ref().unwrap(),
@@ -224,14 +222,14 @@ impl RenderApp {
                     if self.screen_data.subpixel_idx < self.renderer.rays_per_pixel {
                         self.update();
 
-                        let frame = match self.renderer.window_surface.get_current_texture() {
+                        let frame = match self.renderer.surface.get_current_texture() {
                             Ok(frame) => frame,
                             Err(_) => {
                                 self.renderer
-                                    .window_surface
+                                    .surface
                                     .configure(&self.renderer.device, &self.renderer.config);
                                 self.renderer
-                                    .window_surface
+                                    .surface
                                     .get_current_texture()
                                     .expect("Failed to acquire next surface texture!")
                             }
