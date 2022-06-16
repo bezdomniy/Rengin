@@ -797,6 +797,8 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
         let albedo = ob_params.material.colour;
         init_pcg4d(vec4<u32>(xy.x, xy.y, ubo.subpixel_idx, bounce_idx));
 
+        var pdf_adj = 1.0;
+
         if (is_specular) {
             if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
                 // scattering_target = hitParams.reflectv;
@@ -837,8 +839,8 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
                     point = hitParams.underPoint;
                 }
             }
-            throughput = throughput * albedo;
-            new_ray = RenderRay(Ray(point, init_ray.x, normalize(scattering_target), init_ray.y), ob_params.material.refractive_index);
+            let ray = Ray(point, init_ray.x, normalize(scattering_target), init_ray.y);
+            new_ray = RenderRay(ray, ob_params.material.refractive_index);
         }
         else {
             let onb = onb(hitParams.normalv);
@@ -853,14 +855,13 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
             }
 
             let direction = normalize(scattering_target);
-
-            var scattering_pdf = 0.0;
-            let scattering_cosine = dot(direction, onb[2]);
-            if (scattering_cosine > 0.0) {
-                scattering_pdf = scattering_cosine / PI;
-            }
-
             let ray = Ray(point, init_ray.x, direction, init_ray.y);
+            new_ray = RenderRay(ray, ob_params.material.refractive_index);   
+
+            
+            let scattering_cosine = dot(direction, onb[2]);
+            let scattering_pdf = scattering_cosine / PI;
+
             var v_light_pdf = 0.0;
             for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
                 let l_intersection = intersect(ray,i_light,true);
@@ -868,15 +869,20 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
                     continue;
                 }
                 
-                
                 v_light_pdf = v_light_pdf + light_pdf(ray, l_intersection, scattering_cosine);
             }
             
             let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
 
-            new_ray = RenderRay(ray, ob_params.material.refractive_index);                    
-            throughput = throughput * albedo * scattering_pdf / pdf;
+            if (pdf > 0.0) {
+                pdf_adj = scattering_pdf / pdf;
+            }
+            else {
+                pdf_adj = scattering_pdf;
+            }
         }
+
+        throughput = throughput * albedo * pdf_adj;
     }
  
     return radiance;
