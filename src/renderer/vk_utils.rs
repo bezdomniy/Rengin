@@ -23,8 +23,8 @@ use ash::{
     },
     util::{read_spv, Align},
     vk::{
-        KhrGetPhysicalDeviceProperties2Fn, KhrPortabilityEnumerationFn, KhrPortabilitySubsetFn,
-        PhysicalDeviceMemoryProperties, RenderPass,
+        ImageView, KhrGetPhysicalDeviceProperties2Fn, KhrPortabilityEnumerationFn,
+        KhrPortabilitySubsetFn, PhysicalDeviceMemoryProperties, Pipeline, RenderPass,
     },
 };
 
@@ -192,6 +192,11 @@ pub struct RenginVk {
 
     pub buffers: Option<HashMap<&'static str, vk::Buffer>>,
     pub buffers_memory: Option<HashMap<&'static str, vk::DeviceMemory>>,
+
+    pub graphic_pipeline: Option<Pipeline>,
+    pub compute_pipeline: Option<Pipeline>,
+
+    pub target_image_view: Option<ImageView>,
 
     pub shaders: Option<HashMap<&'static str, RenginShaderModule>>,
 
@@ -634,6 +639,9 @@ impl RenginVk {
                 buffers: None,
                 buffers_memory: None,
                 shaders: None,
+                compute_pipeline: None,
+                graphic_pipeline: None,
+                target_image_view: None,
                 continous_motion,
                 rays_per_pixel,
                 ray_bounces,
@@ -684,6 +692,97 @@ impl RenginVk {
             .unwrap();
 
         (buffer, buffer_memory)
+    }
+
+    unsafe fn create_graphics_descriptor_sets(&self) {
+        // let descriptor_sizes = [
+        //     vk::DescriptorPoolSize {
+        //         ty: vk::DescriptorType::UNIFORM_BUFFER,
+        //         descriptor_count: 1,
+        //     },
+        //     vk::DescriptorPoolSize {
+        //         ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        //         descriptor_count: 1,
+        //     },
+        // ];
+        // let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
+        //     .pool_sizes(&descriptor_sizes)
+        //     .max_sets(1);
+
+        // let descriptor_pool = self
+        //     .device
+        //     .create_descriptor_pool(&descriptor_pool_info, None)
+        //     .unwrap();
+        // let desc_layout_bindings = [
+        //     vk::DescriptorSetLayoutBinding {
+        //         descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+        //         descriptor_count: 1,
+        //         stage_flags: vk::ShaderStageFlags::FRAGMENT,
+        //         ..Default::default()
+        //     },
+        //     vk::DescriptorSetLayoutBinding {
+        //         binding: 1,
+        //         descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        //         descriptor_count: 1,
+        //         stage_flags: vk::ShaderStageFlags::FRAGMENT,
+        //         ..Default::default()
+        //     },
+        // ];
+        // let descriptor_info =
+        //     vk::DescriptorSetLayoutCreateInfo::builder().bindings(&desc_layout_bindings);
+
+        // let desc_set_layouts = [self
+        //     .device
+        //     .create_descriptor_set_layout(&descriptor_info, None)
+        //     .unwrap()];
+
+        // let desc_alloc_info = vk::DescriptorSetAllocateInfo::builder()
+        //     .descriptor_pool(descriptor_pool)
+        //     .set_layouts(&desc_set_layouts);
+        // let descriptor_sets = self
+        //     .device
+        //     .allocate_descriptor_sets(&desc_alloc_info)
+        //     .unwrap();
+
+        // let uniform_color_buffer_descriptor = vk::DescriptorBufferInfo {
+        //     buffer: uniform_color_buffer,
+        //     offset: 0,
+        //     range: mem::size_of_val(&uniform_color_buffer_data) as u64,
+        // };
+
+        // let tex_descriptor = vk::DescriptorBufferInfo {
+        //     buffer: uniform_color_buffer,
+        //     offset: 0,
+        //     range: mem::size_of_val(&uniform_color_buffer_data) as u64,
+        //     // image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        //     // image_view: tex_image_view,
+        //     // sampler,
+        // };
+
+        // let write_desc_sets = [
+        //     vk::WriteDescriptorSet {
+        //         dst_set: descriptor_sets[0],
+        //         descriptor_count: 1,
+        //         descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+        //         p_buffer_info: &uniform_color_buffer_descriptor,
+        //         ..Default::default()
+        //     },
+        //     vk::WriteDescriptorSet {
+        //         dst_set: descriptor_sets[0],
+        //         dst_binding: 1,
+        //         descriptor_count: 1,
+        //         descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+        //         p_image_info: &tex_descriptor,
+        //         ..Default::default()
+        //     },
+        // ];
+        // self.device.update_descriptor_sets(&write_desc_sets, &[]);
+
+        ()
+    }
+
+    fn create_compute_descriptor_sets(&self) {
+        ()
     }
 }
 
@@ -736,6 +835,70 @@ impl RenginRenderer for RenginVk {
     }
 
     fn create_target_textures(&mut self, physical_size: &PhysicalSize<u32>) {
+        unsafe {
+            let texture_create_info = vk::ImageCreateInfo {
+                image_type: vk::ImageType::TYPE_2D,
+                format: vk::Format::R8G8B8A8_UNORM,
+                extent: self.surface_resolution.into(),
+                mip_levels: 1,
+                array_layers: 1,
+                samples: vk::SampleCountFlags::TYPE_1,
+                tiling: vk::ImageTiling::OPTIMAL,
+                usage: vk::ImageUsageFlags::STORAGE,
+                sharing_mode: vk::SharingMode::EXCLUSIVE,
+                ..Default::default()
+            };
+
+            let texture_image = self
+                .device
+                .create_image(&texture_create_info, None)
+                .unwrap();
+            let texture_memory_req = self.device.get_image_memory_requirements(texture_image);
+            let texture_memory_index = find_memorytype_index(
+                &texture_memory_req,
+                &self.device_memory_properties,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            )
+            .expect("Unable to find suitable memory index for target image.");
+
+            let texture_allocate_info = vk::MemoryAllocateInfo {
+                allocation_size: texture_memory_req.size,
+                memory_type_index: texture_memory_index,
+                ..Default::default()
+            };
+            let texture_memory = self
+                .device
+                .allocate_memory(&texture_allocate_info, None)
+                .unwrap();
+            self.device
+                .bind_image_memory(texture_image, texture_memory, 0)
+                .expect("Unable to bind depth image memory");
+
+            let target_image_view_info = vk::ImageViewCreateInfo {
+                view_type: vk::ImageViewType::TYPE_2D,
+                format: texture_create_info.format,
+                components: vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::R,
+                    g: vk::ComponentSwizzle::G,
+                    b: vk::ComponentSwizzle::B,
+                    a: vk::ComponentSwizzle::A,
+                },
+                subresource_range: vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    level_count: 1,
+                    layer_count: 1,
+                    ..Default::default()
+                },
+                image: texture_image,
+                ..Default::default()
+            };
+
+            self.target_image_view = Some(
+                self.device
+                    .create_image_view(&target_image_view_info, None)
+                    .unwrap(),
+            );
+        }
         ()
     }
 
@@ -757,7 +920,26 @@ impl RenginRenderer for RenginVk {
             self.create_buffer(
                 screen_data_bytes,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
-                vk::MemoryPropertyFlags::HOST_COHERENT,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            );
+
+            // TODO: update to use staging buffer and copy to device local memory
+            self.create_buffer(
+                bvh_bytes,
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            );
+
+            self.create_buffer(
+                rays_bytes,
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            );
+
+            self.create_buffer(
+                object_params_bytes,
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             );
         }
     }
@@ -808,6 +990,11 @@ impl RenginRenderer for RenginVk {
     }
 
     fn create_pipelines(&mut self, bvh: &Bvh, rays: &Rays, object_params: &[ObjectParam]) {
+        unsafe {
+            self.create_graphics_descriptor_sets();
+        }
+        self.create_compute_descriptor_sets();
+
         unsafe {
             let layout_create_info = vk::PipelineLayoutCreateInfo::default();
 
@@ -935,6 +1122,9 @@ impl RenginRenderer for RenginVk {
                 .layout(pipeline_layout)
                 .render_pass(self.renderpass);
 
+            // TODO
+            let compute_pipeline_info = vk::ComputePipelineCreateInfo::builder();
+
             let graphics_pipelines = self
                 .device
                 .create_graphics_pipelines(
@@ -944,7 +1134,7 @@ impl RenginRenderer for RenginVk {
                 )
                 .expect("Unable to create graphics pipeline");
 
-            let graphic_pipeline = graphics_pipelines[0];
+            self.graphic_pipeline = Some(graphics_pipelines[0]);
         }
         ()
     }
