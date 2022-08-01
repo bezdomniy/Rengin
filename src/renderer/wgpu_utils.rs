@@ -14,7 +14,7 @@ use crate::{
 
 use wgpu::{
     util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device,
-    Instance, Queue, RenderPipeline, ShaderModule, Surface, Texture,
+    Instance, Queue, RenderPipeline, Surface, Texture,
 };
 use winit::{dpi::PhysicalSize, window::Window};
 

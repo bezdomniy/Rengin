@@ -1,7 +1,7 @@
-pub mod vk_utils;
+// pub mod vk_utils;
 pub mod wgpu_utils;
 
-use ash::vk;
+// use ash::vk;
 use winit::dpi::PhysicalSize;
 
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
 
 pub enum RenginShaderModule {
     WgpuShaderModule(wgpu::ShaderModule),
-    VkShaderModule(vk::ShaderModule),
+    // VkShaderModule(vk::ShaderModule),
 }
 
 pub trait RenginRenderer {

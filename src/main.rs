@@ -30,7 +30,11 @@ use clap::Parser;
 use engine::scene_importer::Scene;
 
 use crate::engine::rt_primitives::Rays;
-use crate::renderer::{vk_utils::RenginVk, wgpu_utils::RenginWgpu, RenginRenderer};
+use crate::renderer::{
+    // vk_utils::RenginVk,
+    wgpu_utils::RenginWgpu,
+    RenginRenderer,
+};
 use engine::rt_primitives::{Camera, ScreenData};
 
 static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
@@ -103,7 +107,7 @@ impl RenderApp {
 
         let now = Instant::now();
         log::info!("Building shaders...");
-        let shaders = renderer.create_shaders(renderer_type);
+        renderer.create_shaders(renderer_type);
         log::info!(
             "Finshed building shaders in {} millis",
             now.elapsed().as_millis()
