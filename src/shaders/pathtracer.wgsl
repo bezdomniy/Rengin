@@ -227,6 +227,18 @@ fn random_uniform_direction() -> vec3<f32> {
     return vec3<f32>(x, y, z);
 }
 
+fn random_uniform_on_hemisphere() -> vec3<f32> {
+    let azimuthal = 2.0*PI*u32_to_f32(rand_pcg4d.x);
+    let z = u32_to_f32(rand_pcg4d.y);
+
+    let xyproj = sqrt(1.0-(z*z));
+
+    let x = cos(azimuthal)*xyproj;
+    let y = sin(azimuthal)*xyproj;
+
+    return vec3<f32>(x, y, z);
+}
+
 // fn random_uniform_direction(radius: f32) -> vec3<f32>
 // {
 //     let theta: f32 = rescale(u32_to_f32(rand_pcg4d.x), 0.0, PI * 2.0);
@@ -635,8 +647,14 @@ fn random_light() -> ObjectParam {
 fn random_point_on_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
     if (light.model_type == 0u) {
         // let r = random_cosine_direction();
+        // let r = random_uniform_on_hemisphere();
         let r = random_in_unit_sphere();
-        // let r = random_uniform_direction();
+        
+        // let center = (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
+        // let to_light = -normalize(center - origin);
+        // let onb = onb(to_light);
+        // let r = onb_local(random_uniform_on_hemisphere(),onb);
+
         return (light.transform * vec4<f32>(r,1.0)).xyz;
     }
     else if (light.model_type == 1u) {
@@ -692,16 +710,27 @@ fn surface_area(object: ObjectParam) -> f32 {
     return 1.0;
 }
 
-fn light_pdf(ray: Ray, light: ObjectParam, distance: f32, cosine: f32) -> f32 {
+fn light_pdf(ray: Ray, intersection: Intersection, cosine: f32) -> f32 {
+    let light = object_params.ObjectParams[intersection.model_id];
     if (light.model_type == 0u) {
-        let scale = vec3<f32>(length(light.transform[0].xyz),length(light.transform[1].xyz),length(light.transform[2].xyz));
-        let radius = max(max(scale.x,scale.y),scale.z);
-        let center = (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
-        let o = ray.rayO;
+        // let scale = vec3<f32>(length(light.transform[0].xyz),length(light.transform[1].xyz),length(light.transform[2].xyz));
+        // let radius = max(max(scale.x,scale.y),scale.z);
+        // let center = (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
+        // let o = ray.rayO;
 
-        let cos_theta_max = sqrt(1.0 - (radius*radius/pow(length(center-o),2.0)));
-        let solid_angle = 2.0*PI*(1.0-cos_theta_max);
-        return 1.0 / solid_angle;
+        // let cos_theta_max = sqrt(1.0 - (radius*radius/pow(length(center-o),2.0)));
+        // let solid_angle = 2.0*PI*(1.0-cos_theta_max);
+        // return 1.0 / solid_angle;
+
+
+        let light_area = surface_area(light);
+        return pow(intersection.closestT,2.0) / (cosine * light_area);
+
+        // let light_area = surface_area(light);
+        // let point = ray.rayO + normalize(ray.rayD) * intersection.closestT;
+        // let n_light = normalAt(point, intersection,0u);
+        // let solid_angle = (light_area * dot(n_light, ray.rayD)) / pow(intersection.closestT,2.0);
+        // return 1.0 / solid_angle;
     }
     else if (light.model_type == 1u) {
         // TODO
@@ -709,7 +738,7 @@ fn light_pdf(ray: Ray, light: ObjectParam, distance: f32, cosine: f32) -> f32 {
     }
     else if (light.model_type == 2u) {
         let light_area = surface_area(light);
-        return pow(distance,2.0) / (cosine * light_area);
+        return pow(intersection.closestT,2.0) / (cosine * light_area);
     }
     else if (light.model_type == 9u) {
         return 0.0;
@@ -768,6 +797,8 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
         let albedo = ob_params.material.colour;
         init_pcg4d(vec4<u32>(xy.x, xy.y, ubo.subpixel_idx, bounce_idx));
 
+        var pdf_adj = 1.0;
+
         if (is_specular) {
             if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
                 // scattering_target = hitParams.reflectv;
@@ -808,8 +839,8 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
                     point = hitParams.underPoint;
                 }
             }
-            throughput = throughput * albedo;
-            new_ray = RenderRay(Ray(point, init_ray.x, normalize(scattering_target), init_ray.y), ob_params.material.refractive_index);
+            let ray = Ray(point, init_ray.x, normalize(scattering_target), init_ray.y);
+            new_ray = RenderRay(ray, ob_params.material.refractive_index);
         }
         else {
             let onb = onb(hitParams.normalv);
@@ -824,14 +855,13 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
             }
 
             let direction = normalize(scattering_target);
-
-            var scattering_pdf = 0.0;
-            let scattering_cosine = dot(direction, onb[2]);
-            if (scattering_cosine > 0.0) {
-                scattering_pdf = scattering_cosine / PI;
-            }
-
             let ray = Ray(point, init_ray.x, direction, init_ray.y);
+            new_ray = RenderRay(ray, ob_params.material.refractive_index);   
+
+            
+            let scattering_cosine = dot(direction, onb[2]);
+            let scattering_pdf = scattering_cosine / PI;
+
             var v_light_pdf = 0.0;
             for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
                 let l_intersection = intersect(ray,i_light,true);
@@ -839,15 +869,20 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
                     continue;
                 }
                 
-                let l_ob_params = object_params.ObjectParams[l_intersection.model_id];
-                v_light_pdf = v_light_pdf + light_pdf(ray, l_ob_params, l_intersection.closestT, scattering_cosine);
+                v_light_pdf = v_light_pdf + light_pdf(ray, l_intersection, scattering_cosine);
             }
             
             let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
 
-            new_ray = RenderRay(ray, ob_params.material.refractive_index);                    
-            throughput = throughput * albedo * scattering_pdf / pdf;
+            if (pdf > 0.0) {
+                pdf_adj = scattering_pdf / pdf;
+            }
+            else {
+                pdf_adj = scattering_pdf;
+            }
         }
+
+        throughput = throughput * albedo * pdf_adj;
     }
  
     return radiance;

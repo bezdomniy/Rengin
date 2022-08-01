@@ -35,6 +35,8 @@ clap = { version = "3.0.5", features = ["derive"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures = { version = "0.3"}
 wgpu = {version="0.12"}
+# ash =  { version="0.37", default-features = false, features = ["linked", "debug"] }
+# ash-window = "0.10"
 #renderdoc = "0.10.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
