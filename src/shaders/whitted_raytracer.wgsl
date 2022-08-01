@@ -1,123 +1,123 @@
 // TODO: !! fix so only lights get used as lights, not emissive shapes
 
 struct NodeLeaf {
-    point1: vec3<f32>;
-    pad1: u32;
-    point2: vec3<f32>;
-    pad2: u32;
-    point3: vec3<f32>;
-    pad3: u32;
+    point1: vec3<f32>,
+    pad1: u32,
+    point2: vec3<f32>,
+    pad2: u32,
+    point3: vec3<f32>,
+    pad3: u32,
 };
 
 struct Normal {
-    normal1: vec4<f32>;
-    normal2: vec4<f32>;
-    normal3: vec4<f32>;
+    normal1: vec4<f32>,
+    normal2: vec4<f32>,
+    normal3: vec4<f32>,
 };
 
 struct NodeInner {
-    first: vec3<f32>;
-    skip_ptr_or_prim_idx1: u32;
-    second: vec3<f32>;
-    idx2: u32;
+    first: vec3<f32>,
+    skip_ptr_or_prim_idx1: u32,
+    second: vec3<f32>,
+    idx2: u32,
 };
 
 
 struct HitParams {
-    point: vec3<f32>;
-    normalv: vec3<f32>;
-    eyev: vec3<f32>;
-    reflectv: vec3<f32>;
-    overPoint: vec3<f32>;
-    underPoint: vec3<f32>;
-    front_face: bool;
+    p: vec3<f32>,
+    normalv: vec3<f32>,
+    eyev: vec3<f32>,
+    reflectv: vec3<f32>,
+    overPoint: vec3<f32>,
+    underPoint: vec3<f32>,
+    front_face: bool,
 };
 
 struct Material {
-    colour: vec4<f32>;
-    emissiveness: vec4<f32>;
-    reflective: f32;
-    transparency: f32;
-    refractive_index: f32;
-    ambient: f32;
-    diffuse: f32;
-    specular: f32;
-    shininess: f32;
-    _pad: u32;
+    colour: vec4<f32>,
+    emissiveness: vec4<f32>,
+    reflective: f32,
+    transparency: f32,
+    refractive_index: f32,
+    ambient: f32,
+    diffuse: f32,
+    specular: f32,
+    shininess: f32,
+    _pad: u32,
 };
 
 
 struct UBO {
-    lightPos: vec3<f32>;
-    is_pathtracer: bool;
-    resolution: vec2<u32>;
-    _pad2: vec2<u32>;
-    n_objects: i32;
-    lights_offset: u32;
-    subpixel_idx: u32;
-    ray_bounces: u32;
+    lightPos: vec3<f32>,
+    is_pathtracer: u32,
+    resolution: vec2<u32>,
+    _pad2: vec2<u32>,
+    n_objects: i32,
+    lights_offset: u32,
+    subpixel_idx: u32,
+    ray_bounces: u32,
 };
 
 struct InnerNodes {
-    InnerNodes: [[stride(32)]] array<NodeInner>;
+    InnerNodes: array<NodeInner>,
 };
 
 
 struct LeafNodes {
-    LeafNodes: [[stride(48)]] array<NodeLeaf>;
+    LeafNodes: array<NodeLeaf>,
 };
 
 
 struct Normals {
-    Normals: [[stride(48)]] array<Normal>;
+    Normals: array<Normal>,
 };
 
 struct ObjectParam {
-    transform: mat4x4<f32>;
-    inverse_transform: mat4x4<f32>;
-    material: Material;
-    offset_inner_nodes: i32;
-    len_inner_nodes:i32;
-    offset_leaf_nodes:u32;
-    model_type: u32;
+    transform: mat4x4<f32>,
+    inverse_transform: mat4x4<f32>,
+    material: Material,
+    offset_inner_nodes: i32,
+    len_inner_nodes:i32,
+    offset_leaf_nodes:u32,
+    model_type: u32,
 };
 
 
 struct ObjectParams {
-    ObjectParams: [[stride(208)]] array<ObjectParam>;
+    ObjectParams: array<ObjectParam>,
 };
 
 struct Ray {
-    rayO: vec3<f32>;
-    x: i32;
-    rayD: vec3<f32>;
-    y: i32;
+    rayO: vec3<f32>,
+    x: i32,
+    rayD: vec3<f32>,
+    y: i32,
 };
 
 struct Rays {
-    Rays: [[stride(32)]] array<Ray>;
+    Rays: array<Ray>,
 };
 
 struct Intersection {
-    uv: vec2<f32>;
-    id: i32;
-    closestT: f32;
-    model_id: u32;
+    uv: vec2<f32>,
+    id: i32,
+    closestT: f32,
+    model_id: u32,
 };
 
-[[group(0), binding(0)]]
+@group(0) @binding(0)
 var imageData: texture_storage_2d<rgba8unorm,read_write>;
-[[group(0), binding(1)]]
+@group(0) @binding(1)
 var<uniform> ubo: UBO;
-[[group(0), binding(2)]]
+@group(0) @binding(2)
 var<storage, read> inner_nodes: InnerNodes;
-[[group(0), binding(3)]]
+@group(0) @binding(3)
 var<storage, read> leaf_nodes: LeafNodes;
-[[group(0), binding(4)]]
+@group(0) @binding(4)
 var<storage, read> normal_nodes: Normals;
-[[group(0), binding(5)]]
+@group(0) @binding(5)
 var<storage, read> object_params: ObjectParams;
-[[group(0), binding(6)]]
+@group(0) @binding(6)
 var<storage, read_write> rays: Rays;
 
 let EPSILON:f32 = 0.001;
@@ -165,16 +165,16 @@ fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
 }
 
 fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, object_id: i32) -> Intersection {
-    let triangle = leaf_nodes.LeafNodes[triangleIdx];
+    let tri = leaf_nodes.LeafNodes[triangleIdx];
     var uv: vec2<f32> = vec2<f32>(0.0);
-    let e1: vec3<f32> = triangle.point2 - triangle.point1;
-    let e2: vec3<f32> = triangle.point3 - triangle.point1;
+    let e1: vec3<f32> = tri.point2 - tri.point1;
+    let e2: vec3<f32> = tri.point3 - tri.point1;
 
     let dirCrossE2: vec3<f32> = cross(ray.rayD, e2);
     let det: f32 = dot(e1, dirCrossE2);
 
     let f: f32 = 1.0 / det;
-    let p1ToOrigin: vec3<f32> = (ray.rayO - triangle.point1);
+    let p1ToOrigin: vec3<f32> = (ray.rayO - tri.point1);
     uv.x = f * dot(p1ToOrigin, dirCrossE2);
 
     let originCrossE1: vec3<f32>  = cross(p1ToOrigin, e1);
@@ -351,16 +351,16 @@ fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
     return ret;
 }
 
-fn normalAt(point: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32> {
+fn normalAt(p: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32> {
     if (typeEnum == 0u) { //Sphere
-        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(point,1.0)).xyz;
+        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(p,1.0)).xyz;
         return normalToWorld(objectPoint,intersection.model_id);
     }
     else if (typeEnum == 1u) { //Plane
         return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),intersection.model_id);
     }
     else if (typeEnum == 2u) { //Cube
-        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(point,1.0)).xyz;
+        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(p,1.0)).xyz;
         let p1 = abs(objectPoint.x);
         let p2 = abs(objectPoint.y);
         let p3 = abs(objectPoint.z);
@@ -387,11 +387,11 @@ fn normalAt(point: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3
 fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParams
 {
     var hitParams: HitParams;
-    hitParams.point =
+    hitParams.p =
         ray.rayO + normalize(ray.rayD) * intersection.closestT;
     // TODO check that uv only null have using none-uv normalAt version
     hitParams.normalv = 
-        normalAt(hitParams.point, intersection, typeEnum);
+        normalAt(hitParams.p, intersection, typeEnum);
     // hitParams.eyev = -ray.rayD;
     hitParams.eyev = -normalize(ray.rayD);
 
@@ -405,9 +405,9 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
     hitParams.reflectv =
         reflect(normalize(ray.rayD), hitParams.normalv);
     hitParams.overPoint =
-        hitParams.point + hitParams.normalv * EPSILON;
+        hitParams.p + hitParams.normalv * EPSILON;
     hitParams.underPoint =
-        hitParams.point - hitParams.normalv * EPSILON;
+        hitParams.p - hitParams.normalv * EPSILON;
 
     return hitParams;
 }
@@ -430,13 +430,13 @@ fn schlick_lazanyi(cos_i:f32, eta_t: f32, k: f32) -> f32 {
     return (pow(eta_t - 1.0, 2.0) + 4.0 * eta_t * pow(1.0 - cos_i,5.0) + pow(k,2.0)) / (pow(eta_t+1.0,2.0) + pow(k,2.0));
 }
 
-fn isShadowed(point: vec3<f32>, lightPos: vec3<f32>) -> bool
+fn isShadowed(p: vec3<f32>, lightPos: vec3<f32>) -> bool
 {
-  let v: vec3<f32> = lightPos - point;
+  let v: vec3<f32> = lightPos - p;
   let distance: f32 = length(v);
   let direction: vec3<f32> = normalize(v);
 
-  let intersection: Intersection = intersect(Ray(point,0,direction,0));
+  let intersection: Intersection = intersect(Ray(p,0,direction,0));
 
   if (intersection.closestT > EPSILON && intersection.closestT < distance)
   {
@@ -498,12 +498,12 @@ fn lighting(material: Material, lightPos: vec3<f32>, light_emissiveness: vec4<f3
 }
 
 struct RenderRay {
-    ray: Ray;
-    bounce_number: u32;
-    reflectance: f32;
-    reflective: f32;
-    transparent: f32;
-    refractive_index: f32;
+    ray: Ray,
+    bounce_number: u32,
+    reflectance: f32,
+    reflective: f32,
+    transparent: f32,
+    refractive_index: f32,
 };
 
 
@@ -607,10 +607,10 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
 }
 
 
-[[stage(compute), workgroup_size(16, 16)]]
-fn main([[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
-        [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
-        [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
+@compute @workgroup_size(16, 16)
+fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
+        @builtin(global_invocation_id) global_invocation_id: vec3<u32>,
+        @builtin(workgroup_id) workgroup_id: vec3<u32>
         ) 
 {
     // var color: vec4<f32> = vec4<f32>(f32((workgroup_id.x * workgroup_id.y) % 4u) / 4.0,0.0,0.0,1.0);
