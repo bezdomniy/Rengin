@@ -1,10 +1,10 @@
 struct VertexOutput {
-    [[builtin(position)]] position: vec4<f32>;
-    [[location(0)]] tex_coords: vec2<f32>;
+    @builtin(position) position: vec4<f32>,
+    @location(0) tex_coords: vec2<f32>,
 };
 
-[[stage(vertex)]]
-fn main([[builtin(vertex_index)]] vertex_index: u32) -> VertexOutput {
+@vertex
+fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     let x: f32 = f32(i32(vertex_index & 1u) << 2u) - 1.0;
     let y: f32 = f32(i32(vertex_index & 2u) << 1u) - 1.0;
     var output: VertexOutput;

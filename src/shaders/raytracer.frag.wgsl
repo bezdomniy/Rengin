@@ -1,3 +1,4 @@
+// TODO: wont work - using 0.12 wgpu syntax
 struct NodeLeaf {
     point1: vec3<f32>;
     pad1: u32;

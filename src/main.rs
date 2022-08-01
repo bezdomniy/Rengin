@@ -245,7 +245,7 @@ impl RenderApp {
                         // TODO: create send texture to use to keep track of previous frame
 
                         // create render pass descriptor and its color attachments
-                        let color_attachments = [wgpu::RenderPassColorAttachment {
+                        let color_attachments = [Some(wgpu::RenderPassColorAttachment {
                             view: &view,
                             resolve_target: None,
                             ops: wgpu::Operations {
@@ -253,7 +253,7 @@ impl RenderApp {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                 store: true,
                             },
-                        }];
+                        })];
                         let render_pass_descriptor = wgpu::RenderPassDescriptor {
                             label: None,
                             color_attachments: &color_attachments,
@@ -278,7 +278,7 @@ impl RenderApp {
 
                             // TODO: move ray bounce loop out of shader, and do it here
 
-                            cpass.dispatch(
+                            cpass.dispatch_workgroups(
                                 (self.screen_data.size.width / WORKGROUP_SIZE[0])
                                     + WORKGROUP_SIZE[0],
                                 (self.screen_data.size.height / WORKGROUP_SIZE[1])

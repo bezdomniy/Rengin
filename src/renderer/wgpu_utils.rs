@@ -85,8 +85,7 @@ impl RenginWgpu {
         let trace_dir = std::env::var("WGPU_TRACE");
 
         let optional_features = {
-            wgpu::Features::UNSIZED_BINDING_ARRAY
-                | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
+            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
                 | wgpu::Features::PUSH_CONSTANTS
         };
         // let required_features = { wgpu::Features::TEXTURE_BINDING_ARRAY };
@@ -129,7 +128,7 @@ impl RenginWgpu {
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: window_surface.get_preferred_format(&adapter).unwrap(),
+            format: window_surface.get_supported_formats(&adapter)[0],
             width: window.inner_size().width,
             height: window.inner_size().height,
             present_mode: wgpu::PresentMode::Fifo,
@@ -200,7 +199,7 @@ impl RenginRenderer for RenginWgpu {
         let cs_module = match renderer_type {
             RendererType::PathTracer => {
                 self.device
-                    .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                    .create_shader_module(wgpu::ShaderModuleDescriptor {
                         label: None,
                         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                             "../shaders/pathtracer.wgsl"
@@ -209,7 +208,7 @@ impl RenginRenderer for RenginWgpu {
             }
             RendererType::RayTracer => {
                 self.device
-                    .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                    .create_shader_module(wgpu::ShaderModuleDescriptor {
                         label: None,
                         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                             "../shaders/whitted_raytracer.wgsl"
@@ -220,7 +219,7 @@ impl RenginRenderer for RenginWgpu {
 
         let vt_module = self
             .device
-            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                     "../shaders/render.vert.wgsl"
@@ -229,7 +228,7 @@ impl RenginRenderer for RenginWgpu {
 
         let fg_module = self
             .device
-            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                     "../shaders/render.frag.wgsl"
@@ -482,13 +481,13 @@ impl RenginRenderer for RenginWgpu {
                         _ => panic!("Invalid WGPU fragment shader passed to render pipeline."),
                     },
                     entry_point: "main",
-                    targets: &[wgpu::ColorTargetState {
+                    targets: &[Some(wgpu::ColorTargetState {
                         format: self.config.format,
                         // TODO: change subpixel to blending, rather than doing it in shader
                         blend: Some(wgpu::BlendState::REPLACE),
                         // blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
-                    }],
+                    })],
                     // targets: &[self.renderer.config.format.into()],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
