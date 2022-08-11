@@ -91,35 +91,23 @@
     color: [1, 1, 1]
     reflective: 1
     transparency: 1
-    refractive-index: 1.52
+    refractive-index: 1.5
   transform:
     - [scale, 82.5, 82.5, 82.5]
     - [rotate-y, -0.314159]
     - [translate, 212.5, 82.5, 147.5]
 
-- add: sphere
-  # material: white-material
-  material:
-    color: [1, 1, 1]
-    reflective: 1
-    transparency: 1
-    refractive-index: 1
-  transform:
-    - [scale, 80.5, 80.5, 80.5]
-    - [rotate-y, -0.314159]
-    - [translate, 212.5, 82.5, 147.5]
-- add: cube
-  # material: white-material
-  material:
-    emissiveness: [1000,1000,1000]
-    color: [1, 1, 1]
-    # reflective: 1
-    # transparency: 1
-    # refractive-index: 1
-  transform:
-    - [scale, 2.7321, 2.7321, 2.7321]
-    - [rotate-y, -0.314159]
-    - [translate, 212.5, 82.5, 147.5]
+# - add: sphere
+#   # material: white-material
+#   material:
+#     color: [1, 1, 1]
+#     reflective: 1
+#     transparency: 1
+#     refractive-index: 1
+#   transform:
+#     - [scale, 80.5, 80.5, 80.5]
+#     - [rotate-y, -0.314159]
+#     - [translate, 212.5, 82.5, 147.5]
 - add: cube
   material: white-material
   transform:
@@ -154,8 +142,9 @@
 - add: light
   at: [278, 500, 278]
   intensity: [1, 1, 1]
-# - add: cube
-#   material: white-light
-#   transform:
-#     - [scale, 65, 1, 53]
-#     - [translate, 278, 554, 278]
+- add: cube
+  material: white-light
+  transform:
+    # - [scale, 65, 1, 53]
+    - [scale, 65, 0.01, 53]
+    - [translate, 278, 554, 278]
