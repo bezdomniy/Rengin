@@ -32,6 +32,7 @@ pub trait RenginRenderer {
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
         bvh: &Bvh,
         rays: &Rays,
+        screen_data: &ScreenData,
         object_params: &[ObjectParam],
     );
     fn create_bind_groups(&mut self, physical_size: &PhysicalSize<u32>);

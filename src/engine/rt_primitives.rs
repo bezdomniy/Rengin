@@ -327,9 +327,9 @@ impl ScreenData {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ray {
     origin: Vec3,
-    x: i32,
+    refractive_index: f32,
     direction: Vec3,
-    y: i32,
+    active: i32,
 }
 
 impl Ray {
@@ -353,9 +353,9 @@ impl Ray {
 
         Ray {
             origin: ray_o.xyz(),
-            x,
+            refractive_index: 1f32,
             direction: (pixel - ray_o).normalize().xyz(),
-            y,
+            active: 1,
         }
     }
 }
@@ -363,8 +363,8 @@ impl Ray {
 impl Default for Ray {
     fn default() -> Self {
         Ray {
-            x: -1,
-            y: -1,
+            refractive_index: -1f32,
+            active: -1,
             direction: Vec3::default(),
             origin: Vec3::default(),
         }

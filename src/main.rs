@@ -122,6 +122,7 @@ impl RenderApp {
         renderer.create_pipelines(
             scene.bvh.as_ref().unwrap(),
             &rays,
+            &screen_data,
             scene.object_params.as_ref().unwrap(),
         );
 
@@ -278,13 +279,15 @@ impl RenderApp {
 
                             // TODO: move ray bounce loop out of shader, and do it here
 
-                            cpass.dispatch_workgroups(
-                                (self.screen_data.size.width / WORKGROUP_SIZE[0])
-                                    + WORKGROUP_SIZE[0],
-                                (self.screen_data.size.height / WORKGROUP_SIZE[1])
-                                    + WORKGROUP_SIZE[1],
-                                WORKGROUP_SIZE[2],
-                            );
+                            for _ in 0..self.renderer.ray_bounces {
+                                cpass.dispatch_workgroups(
+                                    (self.screen_data.size.width / WORKGROUP_SIZE[0])
+                                        + WORKGROUP_SIZE[0],
+                                    (self.screen_data.size.height / WORKGROUP_SIZE[1])
+                                        + WORKGROUP_SIZE[1],
+                                    WORKGROUP_SIZE[2],
+                                );
+                            }
                         }
                         command_encoder.pop_debug_group();
 

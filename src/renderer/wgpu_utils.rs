@@ -190,7 +190,7 @@ impl RenginRenderer for RenginWgpu {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::STORAGE_BINDING,
             label: None,
         }));
     }
@@ -293,6 +293,22 @@ impl RenginRenderer for RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
+        let buf_throughput = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Pixel throughput storage Buffer"),
+                contents: bytemuck::cast_slice(&vec![
+                    1f32;
+                    (screen_data.size.width * screen_data.size.height * 4)
+                        as usize
+                ]),
+                // contents: &vec![
+                //     0u8;
+                //     (screen_data.size.width * screen_data.size.height * 4 * 4) as usize
+                // ],
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+
         let buf_rays = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -311,6 +327,7 @@ impl RenginRenderer for RenginWgpu {
             ("tlas", buf_tlas),
             ("blas", buf_blas),
             ("normals", buf_normals),
+            ("throughput", buf_throughput),
             ("object_params", buf_op),
             ("rays", buf_rays),
         ]));
@@ -321,6 +338,7 @@ impl RenginRenderer for RenginWgpu {
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
         bvh: &Bvh,
         rays: &Rays,
+        screen_data: &ScreenData,
         object_params: &[ObjectParam],
     ) {
         // create compute pipeline
@@ -407,6 +425,19 @@ impl RenginRenderer for RenginWgpu {
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(
                                 (rays.data.len() * mem::size_of::<Ray>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (screen_data.size.width * screen_data.size.height * 4 * 4) as _,
                             ),
                             // min_binding_size: None,
                         },
@@ -607,6 +638,16 @@ impl RenginRenderer for RenginWgpu {
                             .as_ref()
                             .unwrap()
                             .get("rays")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("throughput")
                             .unwrap()
                             .as_entire_binding(),
                     },
