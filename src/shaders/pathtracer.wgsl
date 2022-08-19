@@ -741,7 +741,7 @@ fn light_pdf(ray: Ray, intersection: Intersection, cosine: f32) -> f32 {
     return 0.0;
 }
 
-fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> bool {
+fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
     var p_scatter = 0.5;
     if (ubo.lights_offset == ubo.n_objects) {
         p_scatter = 1.0;
@@ -767,8 +767,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> bool {
     if (intersection.id == -1 || intersection.closestT >= MAXLEN)
     {
         rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1);
-        throughput[offset] = throughput[offset] * ray_miss_colour;
-        return true;
+        return throughput[offset] * ray_miss_colour;
     }
 
     // TODO: just hard code object type in the intersection rather than looking it up
@@ -776,8 +775,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> bool {
 
     if (ob_params.material.emissiveness.x > 0.0) {
         rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1);
-        throughput[offset] = throughput[offset] * ob_params.material.emissiveness;
-        return true;
+        return throughput[offset] * ob_params.material.emissiveness;
     }
 
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
@@ -873,7 +871,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> bool {
     
     throughput[offset] = throughput[offset] * albedo * pdf_adj;
     // return albedo * pdf_adj;
-    return false;
+    return vec4<f32>(-1f);
 }
 
 
@@ -897,16 +895,15 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
     }
     
     init_pcg4d(vec4<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx, u32(ray.bounce_idx)));
-    var finished = renderScene(ray,offset,light_sample);
+    let ray_color = renderScene(ray,offset,light_sample);
 
-// TODO check if end of bounces too
-    if (finished) { // || ubo.ray_bounces == u32(ray.bounce_idx + 1)) {
+// TODO return color instead of bool to avoid array lookup
+    if (ray_color.w > 0f) { // || ubo.ray_bounces == u32(ray.bounce_idx + 1)) {
         var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
         if (ubo.subpixel_idx > 0u) {
             color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
         }
 
-        let ray_color = throughput[offset];
         let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
         color = mix(color,ray_color,scale);
         textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
@@ -916,6 +913,4 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
         let color = mix(textureLoad(imageData,vec2<i32>(global_invocation_id.xy)),vec4<f32>(0.0),scale);
         textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
     }
-
-
 }
