@@ -196,16 +196,26 @@ impl RenderApp {
     }
 
     pub fn update(&mut self) {
-        let rays = Rays::new(
-            &self.screen_data.size,
-            &self.screen_data.resolution,
-            &self.screen_data,
-        );
+        let rays = Rays::new(&self.screen_data);
 
         self.renderer.queue.write_buffer(
             self.renderer.buffers.as_ref().unwrap().get("rays").unwrap(),
             0,
             bytemuck::cast_slice(&rays.data),
+        );
+        self.renderer.queue.write_buffer(
+            self.renderer
+                .buffers
+                .as_ref()
+                .unwrap()
+                .get("throughput")
+                .unwrap(),
+            0,
+            bytemuck::cast_slice(&vec![
+                1f32;
+                (self.screen_data.size.width * self.screen_data.size.height * 4)
+                    as usize
+            ]),
         );
         self.renderer.queue.write_buffer(
             self.renderer.buffers.as_ref().unwrap().get("ubo").unwrap(),

@@ -1,12 +1,12 @@
 struct UBO {
-    lightPos: vec3<f32>,
+    _pad1: vec3<f32>,
     is_pathtracer: u32,
     resolution: vec2<u32>,
     _pad2: vec2<u32>,
-    n_objects: i32,
+    n_objects: u32,
+    _pad3: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
-    _pad3: u32,
 };
 
 @group(0) @binding(0)

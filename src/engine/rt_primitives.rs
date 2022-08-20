@@ -333,23 +333,23 @@ pub struct Ray {
 }
 
 impl Ray {
-    pub fn new(x: i32, y: i32, ubo: &ScreenData) -> Self {
-        let half_sub_pixel_size = 1.0 / (ubo.sqrt_rays_per_pixel as f32) / 2.0;
+    pub fn new(x: i32, y: i32, screen_data: &ScreenData) -> Self {
+        let half_sub_pixel_size = 1.0 / (screen_data.sqrt_rays_per_pixel as f32) / 2.0;
 
-        let sub_pixel_row_number: u32 = ubo.subpixel_idx / ubo.sqrt_rays_per_pixel;
-        let sub_pixel_col_number: u32 = ubo.subpixel_idx % ubo.sqrt_rays_per_pixel;
+        let sub_pixel_row_number: u32 = screen_data.subpixel_idx / screen_data.sqrt_rays_per_pixel;
+        let sub_pixel_col_number: u32 = screen_data.subpixel_idx % screen_data.sqrt_rays_per_pixel;
         let sub_pixel_x_offset: f32 = half_sub_pixel_size * (sub_pixel_col_number as f32);
         let sub_pixel_y_offset: f32 = half_sub_pixel_size * (sub_pixel_row_number as f32);
 
-        let x_offset: f32 = ((x as f32) + sub_pixel_x_offset) * ubo.pixel_size;
-        let y_offset: f32 = ((y as f32) + sub_pixel_y_offset) * ubo.pixel_size;
+        let x_offset: f32 = ((x as f32) + sub_pixel_x_offset) * screen_data.pixel_size;
+        let y_offset: f32 = ((y as f32) + sub_pixel_y_offset) * screen_data.pixel_size;
 
-        let world_x: f32 = ubo.half_width - x_offset;
-        let world_y: f32 = ubo.half_height - y_offset;
+        let world_x: f32 = screen_data.half_width - x_offset;
+        let world_y: f32 = screen_data.half_height - y_offset;
 
-        let pixel = ubo.inverse_camera_transform * Vec4::new(world_x, world_y, -1.0, 1.0);
+        let pixel = screen_data.inverse_camera_transform * Vec4::new(world_x, world_y, -1.0, 1.0);
 
-        let ray_o = ubo.inverse_camera_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
+        let ray_o = screen_data.inverse_camera_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
 
         Ray {
             origin: ray_o.xyz(),
@@ -379,14 +379,15 @@ pub struct Rays {
 
 // TODO: implement sorting before output to gpu buffer
 impl Rays {
-    pub fn new(size: &PhysicalSize<u32>, resolution: &PhysicalSize<u32>, ubo: &ScreenData) -> Self {
+    pub fn new(screen_data: &ScreenData) -> Self {
         // println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
-        let mut rays = Rays::empty(resolution);
+        let mut rays = Rays::empty(&screen_data.resolution);
 
-        for x in 0..size.width {
-            for y in 0..size.height {
+        for x in 0..screen_data.size.width {
+            for y in 0..screen_data.size.height {
                 // TODO: fix this so size is never bigger than resolution
-                rays.data[((y * size.width) + x) as usize] = Ray::new(x as i32, y as i32, ubo);
+                rays.data[((y * screen_data.size.width) + x) as usize] =
+                    Ray::new(x as i32, y as i32, screen_data);
             }
         }
 

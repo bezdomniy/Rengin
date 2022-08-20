@@ -302,11 +302,7 @@ impl RenginRenderer for RenginWgpu {
                     (screen_data.size.width * screen_data.size.height * 4)
                         as usize
                 ]),
-                // contents: &vec![
-                //     0u8;
-                //     (screen_data.size.width * screen_data.size.height * 4 * 4) as usize
-                // ],
-                usage: wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
 
         let buf_rays = self
