@@ -7,7 +7,7 @@ use winit::dpi::PhysicalSize;
 use crate::{
     engine::{
         bvh::Bvh,
-        rt_primitives::{ObjectParam, Rays, ScreenData},
+        rt_primitives::{ObjectParam, ScreenData},
     },
     RendererType,
 };

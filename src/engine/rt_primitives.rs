@@ -3,7 +3,7 @@ use wgpu_gecko as wgpu;
 
 use std::f32::consts::FRAC_PI_2;
 
-use glam::{const_vec3, Mat4, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{const_vec3, Mat4, Vec2, Vec3, Vec4};
 // use rand::Rng;
 use wgpu::SurfaceConfiguration;
 use winit::dpi::PhysicalSize;
@@ -214,21 +214,23 @@ impl Camera {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ubo {
-    _remove: [u32; 3],
-    is_pathtracer: u32,
+    inverse_camera_transform: [f32; 16],
+    half_width_height: [f32; 2],
+    pixel_size: f32,
+    sqrt_rays_per_pixel: u32,
     width: u32,
     height: u32,
-    _pad1: [u32; 2],
     n_objects: u32,
     lights_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
+    is_pathtracer: u32,
+    _pad1: u32,
 }
 
 #[derive(Debug)]
 pub struct ScreenData {
     // Compute shader uniform block object
-    _remove: [u32; 3],
     pub size: PhysicalSize<u32>,
     pub resolution: PhysicalSize<u32>,
     pub inverse_camera_transform: Mat4,
@@ -239,7 +241,6 @@ pub struct ScreenData {
     n_objects: u32,
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
-    half_sub_pixel_size: f32,
     pub ray_bounces: u32,
     is_pathtracer: u32,
     pub rays: Rays,
@@ -271,7 +272,6 @@ impl ScreenData {
         log::info!("Window size: {:?}", size);
 
         ScreenData {
-            _remove: [0u32; 3],
             size,
             resolution,
             inverse_camera_transform,
@@ -282,7 +282,6 @@ impl ScreenData {
             lights_offset,
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
-            half_sub_pixel_size: 1.0 / (sqrt_rays_per_pixel as f32) / 2.0,
             ray_bounces,
             is_pathtracer,
             rays: Rays::new(&resolution),
@@ -306,57 +305,20 @@ impl ScreenData {
         self.pixel_size = (self.half_width_height.x * 2f32) / size.width as f32;
     }
 
-    pub fn set_ray(&mut self, ray_ref: &mut Ray, xy: Vec2, ray_o: &Vec4, sub_pixel_offset: Vec2) {
-        let offset = (xy + sub_pixel_offset) * self.pixel_size;
-
-        let world = self.half_width_height - offset;
-
-        let pixel = self.inverse_camera_transform * Vec4::new(world.x, world.y, -1.0, 1.0);
-
-        // let ray_ref = &mut self.rays.data[rays_offset];
-
-        ray_ref.origin = ray_o.xyz();
-        ray_ref.direction = (pixel - *ray_o).normalize().xyz();
-        ray_ref.refractive_index = 1f32;
-        ray_ref.bounce_idx = 1;
-    }
-
-    pub fn update_rays(&mut self) {
-        // println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
-
-        let sub_pixel = UVec2::new(
-            self.subpixel_idx / self.sqrt_rays_per_pixel,
-            self.subpixel_idx % self.sqrt_rays_per_pixel,
-        );
-
-        let sub_pixel_offset = self.half_sub_pixel_size * sub_pixel.as_vec2();
-
-        let origin = self.inverse_camera_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
-
-        for x in 0..self.size.width {
-            for y in 0..self.size.height {
-                let offset = (Vec2::new(x as f32, y as f32) + sub_pixel_offset) * self.pixel_size;
-                let world = self.half_width_height - offset;
-                let pixel = self.inverse_camera_transform * Vec4::new(world.x, world.y, -1.0, 1.0);
-                let direction = (pixel - origin).normalize().xyz();
-
-                self.rays.data[((y * self.size.width) + x) as usize].set(origin.xyz(), direction);
-                // TODO: fix this so size is never bigger than resolution
-            }
-        }
-    }
-
     pub fn generate_ubo(&self) -> Ubo {
         Ubo {
-            _remove: self._remove,
+            inverse_camera_transform: self.inverse_camera_transform.to_cols_array(),
+            half_width_height: self.half_width_height.to_array(),
+            pixel_size: self.pixel_size,
+            sqrt_rays_per_pixel: self.sqrt_rays_per_pixel,
             is_pathtracer: self.is_pathtracer,
             width: self.size.width,
             height: self.size.height,
             n_objects: self.n_objects,
             subpixel_idx: self.subpixel_idx,
             ray_bounces: self.ray_bounces,
-            _pad1: [0u32; 2],
             lights_offset: self.lights_offset,
+            _pad1: 0u32,
         }
     }
 }
@@ -368,15 +330,7 @@ pub struct Ray {
     refractive_index: f32,
     direction: Vec3,
     bounce_idx: i32,
-}
-
-impl Ray {
-    pub fn set(&mut self, origin: Vec3, direction: Vec3) {
-        self.origin = origin;
-        self.direction = direction;
-        self.refractive_index = 1f32;
-        self.bounce_idx = 1;
-    }
+    throughput: Vec4,
 }
 
 impl Default for Ray {
@@ -386,6 +340,7 @@ impl Default for Ray {
             refractive_index: -1f32,
             direction: Vec3::default(),
             bounce_idx: -1,
+            throughput: Vec4::new(1f32, 1f32, 1f32, 1f32),
         }
     }
 }

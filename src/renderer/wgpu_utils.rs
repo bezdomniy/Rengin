@@ -4,11 +4,8 @@ use wgpu_gecko as wgpu;
 use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 
 use crate::{
+    engine::bvh::{Bvh, NodeInner, NodeLeaf, NodeNormal},
     engine::rt_primitives::{ObjectParam, Ray, ScreenData, Ubo},
-    engine::{
-        bvh::{Bvh, NodeInner, NodeLeaf, NodeNormal},
-        rt_primitives::Rays,
-    },
     RendererType,
 };
 
@@ -25,6 +22,9 @@ pub struct RenginWgpu {
     pub adapter: Adapter,
     pub device: Device,
     pub queue: Queue,
+    pub raygen_pipeline: Option<ComputePipeline>,
+    pub raygen_bind_group_layout: Option<BindGroupLayout>,
+    pub raygen_bind_group: Option<BindGroup>,
     pub compute_pipeline: Option<ComputePipeline>,
     pub compute_bind_group_layout: Option<BindGroupLayout>,
     pub compute_bind_group: Option<BindGroup>,
@@ -141,6 +141,9 @@ impl RenginWgpu {
             adapter,
             device,
             queue,
+            raygen_bind_group: None,
+            raygen_bind_group_layout: None,
+            raygen_pipeline: None,
             compute_bind_group: None,
             compute_bind_group_layout: None,
             compute_pipeline: None,
@@ -217,6 +220,15 @@ impl RenginRenderer for RenginWgpu {
             }
         };
 
+        let raygen_module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "../shaders/raygen.wgsl"
+                ))),
+            });
+
         let vt_module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -236,6 +248,10 @@ impl RenginRenderer for RenginWgpu {
             });
 
         let mut shaders = HashMap::new();
+        shaders.insert(
+            "raygen",
+            RenginShaderModule::WgpuShaderModule(raygen_module),
+        );
         shaders.insert("comp", RenginShaderModule::WgpuShaderModule(cs_module));
         shaders.insert("vert", RenginShaderModule::WgpuShaderModule(vt_module));
         shaders.insert("frag", RenginShaderModule::WgpuShaderModule(fg_module));
@@ -292,18 +308,6 @@ impl RenginRenderer for RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
-        let buf_throughput = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Pixel throughput storage Buffer"),
-                contents: bytemuck::cast_slice(&vec![
-                    1f32;
-                    (screen_data.size.width * screen_data.size.height * 4)
-                        as usize
-                ]),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            });
-
         let buf_rays = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -322,7 +326,6 @@ impl RenginRenderer for RenginWgpu {
             ("tlas", buf_tlas),
             ("blas", buf_blas),
             ("normals", buf_normals),
-            ("throughput", buf_throughput),
             ("object_params", buf_op),
             ("rays", buf_rays),
         ]));
@@ -335,6 +338,45 @@ impl RenginRenderer for RenginWgpu {
         screen_data: &ScreenData,
         object_params: &[ObjectParam],
     ) {
+        // create raygen pipeline
+        self.raygen_bind_group_layout = Some(self.device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (screen_data.rays.data.len() * mem::size_of::<Ray>()) as _,
+                            ),
+                        },
+                        count: None,
+                    },
+                ],
+                label: None,
+            },
+        ));
+
+        let raygen_pipeline_layout = Some(self.device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("raygen"),
+                bind_group_layouts: &[self.raygen_bind_group_layout.as_ref().unwrap()],
+                push_constant_ranges: &[],
+            },
+        ));
+
         // create compute pipeline
         self.compute_bind_group_layout = Some(self.device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
@@ -424,19 +466,19 @@ impl RenginRenderer for RenginWgpu {
                         },
                         count: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 7,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (screen_data.size.width * screen_data.size.height * 4 * 4) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
+                    // wgpu::BindGroupLayoutEntry {
+                    //     binding: 7,
+                    //     visibility: wgpu::ShaderStages::COMPUTE,
+                    //     ty: wgpu::BindingType::Buffer {
+                    //         ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    //         has_dynamic_offset: false,
+                    //         min_binding_size: wgpu::BufferSize::new(
+                    //             (screen_data.size.width * screen_data.size.height * 4 * 4) as _,
+                    //         ),
+                    //         // min_binding_size: None,
+                    //     },
+                    //     count: None,
+                    // },
                 ],
                 label: None,
             },
@@ -521,6 +563,18 @@ impl RenginRenderer for RenginWgpu {
             },
         ));
 
+        self.raygen_pipeline = Some(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("Raygen pipeline"),
+                layout: raygen_pipeline_layout.as_ref(),
+                module: match self.shaders.as_ref().unwrap().get("raygen") {
+                    Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+                    _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
+                },
+                entry_point: "main",
+            },
+        ));
+
         self.compute_pipeline = Some(self.device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
                 label: Some("Compute pipeline"),
@@ -563,6 +617,35 @@ impl RenginRenderer for RenginWgpu {
                 ],
                 layout: self.render_bind_group_layout.as_ref().unwrap(),
                 label: Some("render bind group"),
+            }),
+        );
+
+        self.raygen_bind_group = Some(
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("raygen bind group"),
+                layout: self.raygen_bind_group_layout.as_ref().unwrap(),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("ubo")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("rays")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                ],
             }),
         );
 
@@ -632,16 +715,6 @@ impl RenginRenderer for RenginWgpu {
                             .as_ref()
                             .unwrap()
                             .get("rays")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("throughput")
                             .unwrap()
                             .as_entire_binding(),
                     },

@@ -26,16 +26,14 @@ use futures::executor;
 #[cfg(target_arch = "wasm32")]
 use wasm_rs_async_executor::single_threaded as executor;
 
-use clap::Parser;
-use engine::scene_importer::Scene;
-
-use crate::engine::rt_primitives::Rays;
 use crate::renderer::{
     // vk_utils::RenginVk,
     wgpu_utils::RenginWgpu,
     RenginRenderer,
 };
+use clap::Parser;
 use engine::rt_primitives::{Camera, ScreenData};
+use engine::scene_importer::Scene;
 
 static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
 
@@ -192,27 +190,6 @@ impl RenderApp {
     }
 
     pub fn update(&mut self) {
-        self.screen_data.update_rays();
-
-        self.renderer.queue.write_buffer(
-            self.renderer.buffers.as_ref().unwrap().get("rays").unwrap(),
-            0,
-            bytemuck::cast_slice(&self.screen_data.rays.data),
-        );
-        self.renderer.queue.write_buffer(
-            self.renderer
-                .buffers
-                .as_ref()
-                .unwrap()
-                .get("throughput")
-                .unwrap(),
-            0,
-            bytemuck::cast_slice(&vec![
-                1f32;
-                (self.screen_data.size.width * self.screen_data.size.height * 4)
-                    as usize
-            ]),
-        );
         self.renderer.queue.write_buffer(
             self.renderer.buffers.as_ref().unwrap().get("ubo").unwrap(),
             0,
@@ -220,6 +197,39 @@ impl RenderApp {
         );
 
         self.screen_data.subpixel_idx += 1;
+
+        self.generate_primary_rays();
+    }
+
+    fn generate_primary_rays(&self) {
+        let mut command_encoder = self
+            .renderer
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        command_encoder.push_debug_group("raygen");
+        {
+            // compute pass
+            let mut cpass =
+                command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+            cpass.set_pipeline(self.renderer.raygen_pipeline.as_ref().unwrap());
+            cpass.set_bind_group(0, self.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
+
+            cpass.dispatch_workgroups(
+                self.screen_data.size.width / WORKGROUP_SIZE[0],
+                // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
+                self.screen_data.size.height / WORKGROUP_SIZE[1],
+                // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
+                WORKGROUP_SIZE[2],
+            );
+        }
+        command_encoder.pop_debug_group();
+
+        self.renderer
+            .queue
+            .submit(std::iter::once(command_encoder.finish()));
+
+        self.renderer.device.poll(wgpu::Maintain::Wait);
     }
 
     pub async fn render(mut self, event_loop: EventLoop<()>) {
@@ -283,13 +293,11 @@ impl RenderApp {
                                 &[],
                             );
 
-                            // TODO: move ray bounce loop out of shader, and do it here
-
                             for _ in 0..self.renderer.ray_bounces {
                                 cpass.dispatch_workgroups(
-                                    (self.screen_data.size.width / WORKGROUP_SIZE[0]),
+                                    self.screen_data.size.width / WORKGROUP_SIZE[0],
                                     // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
-                                    (self.screen_data.size.height / WORKGROUP_SIZE[1]),
+                                    self.screen_data.size.height / WORKGROUP_SIZE[1],
                                     // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
                                     WORKGROUP_SIZE[2],
                                 );

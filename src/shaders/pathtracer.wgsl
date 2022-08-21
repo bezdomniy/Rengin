@@ -48,14 +48,17 @@ struct Material {
 
 
 struct UBO {
-    _pad1: vec3<u32>,
-    is_pathtracer: u32,
+    inverse_camera_transform: mat4x4<f32>,
+    half_width_height: vec2<f32>,
+    pixel_size: f32,
+    sqrt_rays_per_pixel: u32,
     resolution: vec2<u32>,
-    _pad2: vec2<u32>,
     n_objects: u32,
     lights_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
+    is_pathtracer: u32,
+    _pad1: u32,
 };
 
 struct InnerNodes {
@@ -93,6 +96,7 @@ struct Ray {
     refractive_index: f32,
     rayD: vec3<f32>,
     bounce_idx: i32,
+    throughput: vec4<f32>,
 };
 
 struct Intersection {
@@ -116,8 +120,6 @@ var<storage, read> normal_nodes: Normals;
 var<storage, read> object_params: ObjectParams;
 @group(0) @binding(6)
 var<storage, read_write> rays: array<Ray>;
-@group(0) @binding(7)
-var<storage, read_write> throughput: array<vec4<f32>>;
 
 fn float_to_linear_rgb(x: f32) -> f32 {
     if (x > 0.04045) {
@@ -258,7 +260,7 @@ fn hemisphericalRand(normal: vec3<f32>) -> vec3<f32>
     return -in_unit_sphere;
 }
 
-fn intersectAABB(ray: Ray, aabbIdx: u32) -> bool {
+fn intersectAABB(rayO: vec3<f32>, rayD: vec3<f32>, aabbIdx: u32) -> bool {
     // let INFINITY: f32 = 1.0 / 0.0;
 
     var t_min: f32 = NEG_INFINITY;
@@ -272,9 +274,9 @@ fn intersectAABB(ray: Ray, aabbIdx: u32) -> bool {
 
     for (var a: i32 = 0; a < 3; a = a+1)
     {
-        let invD = 1.0 / ray.rayD[a];
-        t0 = (inner_node.first[a] - ray.rayO[a]) * invD;
-        t1 = (inner_node.second[a] - ray.rayO[a]) * invD;
+        let invD = 1.0 / rayD[a];
+        t0 = (inner_node.first[a] - rayO[a]) * invD;
+        t1 = (inner_node.second[a] - rayO[a]) * invD;
         if (invD < 0.0) {
             let temp = t0;
             t0 = t1;
@@ -295,21 +297,21 @@ fn intersectAABB(ray: Ray, aabbIdx: u32) -> bool {
     return true;
 }
 
-fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, object_id: u32) -> Intersection {
+fn intersectTriangle(rayO: vec3<f32>, rayD: vec3<f32>, triangleIdx: u32, inIntersection: Intersection, object_id: u32) -> Intersection {
     let tri = leaf_nodes.LeafNodes[triangleIdx];
     var uv: vec2<f32> = vec2<f32>(0.0);
     let e1: vec3<f32> = tri.point2 - tri.point1;
     let e2: vec3<f32> = tri.point3 - tri.point1;
 
-    let dirCrossE2: vec3<f32> = cross(ray.rayD, e2);
+    let dirCrossE2: vec3<f32> = cross(rayD, e2);
     let det: f32 = dot(e1, dirCrossE2);
 
     let f: f32 = 1.0 / det;
-    let p1ToOrigin: vec3<f32> = (ray.rayO - tri.point1);
+    let p1ToOrigin: vec3<f32> = (rayO - tri.point1);
     uv.x = f * dot(p1ToOrigin, dirCrossE2);
 
     let originCrossE1: vec3<f32>  = cross(p1ToOrigin, e1);
-    uv.y = f * dot(ray.rayD, originCrossE1);
+    uv.y = f * dot(rayD, originCrossE1);
     
     let t = f * dot(e2, originCrossE1);
 
@@ -325,7 +327,7 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, o
     // return isHit ? Intersection(uv,inIntersection.id,t) : inIntersection;
 }
 
-fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_idx: u32, max_inner_node_idx: u32, leaf_offset: u32, object_id: u32) -> Intersection {
+fn intersectInnerNodes(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection, min_inner_node_idx: u32, max_inner_node_idx: u32, leaf_offset: u32, object_id: u32) -> Intersection {
     // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
     var ret: Intersection = inIntersection;
 
@@ -337,11 +339,11 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
         let current_node: NodeInner = inner_nodes.InnerNodes[idx];
         let leaf_node: bool = current_node.idx2 > 0u;
 
-        if (intersectAABB(ray, idx)) {
+        if (intersectAABB(rayO, rayD, idx)) {
             idx = idx + 1u;
             if (leaf_node) {
                 for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1 + leaf_offset; primIdx < current_node.idx2 + leaf_offset; primIdx = primIdx + 1u) {
-                    let next_intersection = intersectTriangle(ray, primIdx, ret,object_id);
+                    let next_intersection = intersectTriangle(rayO, rayD, primIdx, ret,object_id);
 
                     if ((next_intersection.closestT < inIntersection.closestT)  && (next_intersection.closestT > EPSILON)) {
                         ret = next_intersection;
@@ -360,14 +362,13 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
     return ret;
 }
 
-fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
+fn intersectSphere(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection, object_id: u32) -> Intersection {
     // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
     var ret: Intersection = inIntersection;
 
-    let sphereToRay = ray.rayO;
-    let a = dot(ray.rayD, ray.rayD);
-    let b = 2.0 * dot(ray.rayD, sphereToRay);
-    let c = dot(sphereToRay, sphereToRay) - 1.0;
+    let a = dot(rayD, rayD);
+    let b = 2.0 * dot(rayD, rayO);
+    let c = dot(rayO, rayO) - 1.0;
     let discriminant = b * b - 4.0 * a * c;
 
     if (discriminant < 0.0) {
@@ -389,14 +390,14 @@ fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: u32) -> In
     return ret;
 }
 
-fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
+fn intersectPlane(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection, object_id: u32) -> Intersection {
     var ret: Intersection = inIntersection;
 
-    if (abs(ray.rayD.y) < EPSILON) {
+    if (abs(rayD.y) < EPSILON) {
         return ret;
     }
 
-    let t: f32 = -ray.rayO.y / ray.rayD.y;
+    let t: f32 = -rayO.y / rayD.y;
 
     if (t < ret.closestT && t > EPSILON) {
         return Intersection(vec2<f32>(0.0),0,t,object_id);
@@ -404,7 +405,7 @@ fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: u32) -> Int
     return ret;
 }
 
-fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
+fn intersectCube(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection, object_id: u32) -> Intersection {
     var ret: Intersection = inIntersection;
 
     var t_min: f32 = NEG_INFINITY;
@@ -414,9 +415,9 @@ fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: u32) -> Inte
 
     for (var a: i32 = 0; a < 3; a = a+1)
     {
-        let invD = 1.0 / ray.rayD[a];
-        t0 = (-1.0 - ray.rayO[a]) * invD;
-        t1 = (1.0 - ray.rayO[a]) * invD;
+        let invD = 1.0 / rayD[a];
+        t0 = (-1.0 - rayO[a]) * invD;
+        t1 = (1.0 - rayO[a]) * invD;
         if (invD < 0.0) {
             let temp = t0;
             t0 = t1;
@@ -442,7 +443,7 @@ fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: u32) -> Inte
     return ret;
 }
 
-fn intersect(ray: Ray,start:u32, immediate_ret: bool) -> Intersection {
+fn intersect(rayO: vec3<f32>, rayD: vec3<f32>,start:u32, immediate_ret: bool) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
@@ -455,21 +456,22 @@ fn intersect(ray: Ray,start:u32, immediate_ret: bool) -> Intersection {
         if (ob_params.model_type == 9u) {
             continue;
         }
-            
-        let nRay: Ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO,1.0)).xyz, ray.refractive_index, (ob_params.inverse_transform * vec4<f32>(ray.rayD,0.0)).xyz, ray.bounce_idx);
+        
+        let t_rayO = (ob_params.inverse_transform * vec4<f32>(rayO,1.0)).xyz;
+        let t_rayD = (ob_params.inverse_transform * vec4<f32>(rayD,0.0)).xyz;
 
         if (ob_params.model_type == 0u) { //Sphere
-            ret = intersectSphere(nRay,ret, i);
+            ret = intersectSphere(t_rayO, t_rayD,ret, i);
         }
         else if (ob_params.model_type == 1u) { //Plane
-            ret = intersectPlane(nRay,ret, i);
+            ret = intersectPlane(t_rayO, t_rayD,ret, i);
         }
         else if (ob_params.model_type == 2u) { //Cube
-            ret = intersectCube(nRay,ret, i);
+            ret = intersectCube(t_rayO, t_rayD,ret, i);
         }
         else {
             // Triangle mesh
-            ret = intersectInnerNodes(nRay,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes,i);
+            ret = intersectInnerNodes(t_rayO, t_rayD,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes,i);
         }
 
         if (immediate_ret) {
@@ -703,7 +705,7 @@ fn surface_area(object: ObjectParam) -> f32 {
     return 1.0;
 }
 
-fn light_pdf(ray: Ray, intersection: Intersection, cosine: f32) -> f32 {
+fn light_pdf(intersection: Intersection, cosine: f32) -> f32 {
     let light = object_params.ObjectParams[intersection.model_id];
     if (light.model_type == 0u) {
         // let scale = vec3<f32>(length(light.transform[0].xyz),length(light.transform[1].xyz),length(light.transform[2].xyz));
@@ -762,20 +764,20 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
     
 
     // Get intersected object ID
-    let intersection = intersect(ray,0u,false);
+    let intersection = intersect(ray.rayO, ray.rayD,0u,false);
     
     if (intersection.id == -1 || intersection.closestT >= MAXLEN)
     {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1);
-        return throughput[offset] * ray_miss_colour;
+        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1, vec4<f32>(-1f));
+        return ray.throughput * ray_miss_colour;
     }
 
     // TODO: just hard code object type in the intersection rather than looking it up
     let ob_params = object_params.ObjectParams[intersection.model_id];
 
     if (ob_params.material.emissiveness.x > 0.0) {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1);
-        return throughput[offset] * ob_params.material.emissiveness;
+        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1, vec4<f32>(-1f));
+        return ray.throughput * ob_params.material.emissiveness;
     }
 
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
@@ -827,7 +829,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
                 p = hitParams.underPoint;
             }
         }
-        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(scattering_target), ray.bounce_idx + 1);
+        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(scattering_target), ray.bounce_idx + 1, ray.throughput * albedo * pdf_adj);
     }
     else {
         let onb = onb(hitParams.normalv);
@@ -842,22 +844,18 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         }
 
         let direction = normalize(scattering_target);
-
-
-        let next_ray = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1);
-        rays[offset] = next_ray;
         
         let scattering_cosine = dot(direction, onb[2]);
         let scattering_pdf = scattering_cosine / PI;
 
         var v_light_pdf = 0.0;
         for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
-            let l_intersection = intersect(next_ray,i_light,true);
+            let l_intersection = intersect(p, direction,i_light,true);
             if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
                 continue;
             }
             
-            v_light_pdf = v_light_pdf + light_pdf(next_ray, l_intersection, scattering_cosine);
+            v_light_pdf = v_light_pdf + light_pdf(l_intersection, scattering_cosine);
         }
         
         let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
@@ -868,11 +866,13 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         else {
             pdf_adj = scattering_pdf;
         }
+
+        rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1, ray.throughput * albedo * pdf_adj);
     }
 
     // throughput = throughput * albedo * pdf_adj;
     
-    throughput[offset] = throughput[offset] * albedo * pdf_adj;
+    // throughput[offset] = ray.throughput * albedo * pdf_adj;
     // return albedo * pdf_adj;
     return vec4<f32>(-1f);
 }
