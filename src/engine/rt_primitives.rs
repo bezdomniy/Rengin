@@ -11,6 +11,16 @@ use winit::dpi::PhysicalSize;
 const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 
 #[repr(C)]
+#[derive(Debug)]
+pub struct Ray {
+    origin: Vec3,
+    refractive_index: f32,
+    direction: Vec3,
+    bounce_idx: i32,
+    throughput: Vec4,
+}
+
+#[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Material {
     pub colour: Vec4,
@@ -243,7 +253,6 @@ pub struct ScreenData {
     sqrt_rays_per_pixel: u32,
     pub ray_bounces: u32,
     is_pathtracer: u32,
-    pub rays: Rays,
 }
 
 impl ScreenData {
@@ -284,7 +293,6 @@ impl ScreenData {
             sqrt_rays_per_pixel,
             ray_bounces,
             is_pathtracer,
-            rays: Rays::new(&resolution),
         }
     }
 
@@ -319,43 +327,6 @@ impl ScreenData {
             ray_bounces: self.ray_bounces,
             lights_offset: self.lights_offset,
             _pad1: 0u32,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Ray {
-    origin: Vec3,
-    refractive_index: f32,
-    direction: Vec3,
-    bounce_idx: i32,
-    throughput: Vec4,
-}
-
-impl Default for Ray {
-    fn default() -> Self {
-        Ray {
-            origin: Vec3::default(),
-            refractive_index: -1f32,
-            direction: Vec3::default(),
-            bounce_idx: -1,
-            throughput: Vec4::new(1f32, 1f32, 1f32, 1f32),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Default)]
-pub struct Rays {
-    pub data: Vec<Ray>,
-}
-
-// TODO: implement sorting before output to gpu buffer
-impl Rays {
-    pub fn new(resolution: &PhysicalSize<u32>) -> Self {
-        Rays {
-            data: vec![Ray::default(); (resolution.width * resolution.height) as usize],
         }
     }
 }

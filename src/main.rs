@@ -229,7 +229,7 @@ impl RenderApp {
             .queue
             .submit(std::iter::once(command_encoder.finish()));
 
-        self.renderer.device.poll(wgpu::Maintain::Wait);
+        // self.renderer.device.poll(wgpu::Maintain::Wait);
     }
 
     pub async fn render(mut self, event_loop: EventLoop<()>) {

@@ -312,8 +312,13 @@ impl RenginRenderer for RenginWgpu {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Ray Buffer"),
-                contents: bytemuck::cast_slice(&screen_data.rays.data),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                contents: &vec![
+                    0xff;
+                    (screen_data.resolution.width * screen_data.resolution.height)
+                        as usize
+                        * mem::size_of::<Ray>()
+                ],
+                usage: wgpu::BufferUsages::STORAGE,
             });
 
         log::info!(
@@ -359,7 +364,9 @@ impl RenginRenderer for RenginWgpu {
                             ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(
-                                (screen_data.rays.data.len() * mem::size_of::<Ray>()) as _,
+                                ((screen_data.resolution.width * screen_data.resolution.height)
+                                    as usize
+                                    * mem::size_of::<Ray>()) as _,
                             ),
                         },
                         count: None,
@@ -460,25 +467,14 @@ impl RenginRenderer for RenginWgpu {
                             ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(
-                                (screen_data.rays.data.len() * mem::size_of::<Ray>()) as _,
+                                ((screen_data.resolution.width * screen_data.resolution.height)
+                                    as usize
+                                    * mem::size_of::<Ray>()) as _,
                             ),
                             // min_binding_size: None,
                         },
                         count: None,
                     },
-                    // wgpu::BindGroupLayoutEntry {
-                    //     binding: 7,
-                    //     visibility: wgpu::ShaderStages::COMPUTE,
-                    //     ty: wgpu::BindingType::Buffer {
-                    //         ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    //         has_dynamic_offset: false,
-                    //         min_binding_size: wgpu::BufferSize::new(
-                    //             (screen_data.size.width * screen_data.size.height * 4 * 4) as _,
-                    //         ),
-                    //         // min_binding_size: None,
-                    //     },
-                    //     count: None,
-                    // },
                 ],
                 label: None,
             },
