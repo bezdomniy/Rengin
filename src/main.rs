@@ -101,8 +101,6 @@ impl RenderApp {
             is_pathtracer,
         );
 
-        let rays = Rays::empty(resolution);
-
         log::debug!("screen_data: {:?}", screen_data);
 
         let now = Instant::now();
@@ -116,12 +114,10 @@ impl RenderApp {
         renderer.create_buffers(
             scene.bvh.as_ref().unwrap(),
             &screen_data,
-            &rays,
             scene.object_params.as_ref().unwrap(),
         );
         renderer.create_pipelines(
             scene.bvh.as_ref().unwrap(),
-            &rays,
             &screen_data,
             scene.object_params.as_ref().unwrap(),
         );
@@ -196,12 +192,12 @@ impl RenderApp {
     }
 
     pub fn update(&mut self) {
-        let rays = Rays::new(&self.screen_data);
+        self.screen_data.update_rays();
 
         self.renderer.queue.write_buffer(
             self.renderer.buffers.as_ref().unwrap().get("rays").unwrap(),
             0,
-            bytemuck::cast_slice(&rays.data),
+            bytemuck::cast_slice(&self.screen_data.rays.data),
         );
         self.renderer.queue.write_buffer(
             self.renderer
@@ -291,10 +287,10 @@ impl RenderApp {
 
                             for _ in 0..self.renderer.ray_bounces {
                                 cpass.dispatch_workgroups(
-                                    (self.screen_data.size.width / WORKGROUP_SIZE[0])
-                                        + WORKGROUP_SIZE[0],
-                                    (self.screen_data.size.height / WORKGROUP_SIZE[1])
-                                        + WORKGROUP_SIZE[1],
+                                    (self.screen_data.size.width / WORKGROUP_SIZE[0]),
+                                    // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
+                                    (self.screen_data.size.height / WORKGROUP_SIZE[1]),
+                                    // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
                                     WORKGROUP_SIZE[2],
                                 );
                             }

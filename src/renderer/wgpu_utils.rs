@@ -247,7 +247,6 @@ impl RenginRenderer for RenginWgpu {
         &mut self,
         bvh: &Bvh,
         screen_data: &ScreenData,
-        rays: &Rays,
         object_params: &[ObjectParam],
     ) {
         let now = Instant::now();
@@ -309,7 +308,7 @@ impl RenginRenderer for RenginWgpu {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Ray Buffer"),
-                contents: bytemuck::cast_slice(&rays.data),
+                contents: bytemuck::cast_slice(&screen_data.rays.data),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
 
@@ -333,7 +332,6 @@ impl RenginRenderer for RenginWgpu {
         &mut self,
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
         bvh: &Bvh,
-        rays: &Rays,
         screen_data: &ScreenData,
         object_params: &[ObjectParam],
     ) {
@@ -420,7 +418,7 @@ impl RenginRenderer for RenginWgpu {
                             ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(
-                                (rays.data.len() * mem::size_of::<Ray>()) as _,
+                                (screen_data.rays.data.len() * mem::size_of::<Ray>()) as _,
                             ),
                             // min_binding_size: None,
                         },

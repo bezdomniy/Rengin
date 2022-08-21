@@ -24,14 +24,12 @@ pub trait RenginRenderer {
         &mut self,
         bvh: &Bvh,
         screen_data: &ScreenData,
-        rays: &Rays,
         object_params: &[ObjectParam],
     );
     fn create_pipelines(
         &mut self,
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
         bvh: &Bvh,
-        rays: &Rays,
         screen_data: &ScreenData,
         object_params: &[ObjectParam],
     );
