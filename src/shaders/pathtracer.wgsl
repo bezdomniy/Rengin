@@ -747,8 +747,8 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         p_scatter = 1.0;
     }
     
-    var uv: vec2<f32>;
-    var t: f32 = MAXLEN;
+    // var uv: vec2<f32>;
+    // var t: f32 = MAXLEN;
 
     // var new_ray = RenderRay(init_ray,1.0);
 
@@ -757,7 +757,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
     // var ob_params = object_params.ObjectParams[0];
     // let ray_miss_colour = vec4<f32>(1.0);
     // let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
-    let ray_miss_colour = vec4<f32>(0.0);
+    let ray_miss_colour = vec4<f32>(0.0,0.0,0.0,1.0);
     
     
 
@@ -842,19 +842,22 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         }
 
         let direction = normalize(scattering_target);
-        rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1);
+
+
+        let next_ray = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1);
+        rays[offset] = next_ray;
         
         let scattering_cosine = dot(direction, onb[2]);
         let scattering_pdf = scattering_cosine / PI;
 
         var v_light_pdf = 0.0;
         for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
-            let l_intersection = intersect(ray,i_light,true);
+            let l_intersection = intersect(next_ray,i_light,true);
             if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
                 continue;
             }
             
-            v_light_pdf = v_light_pdf + light_pdf(ray, l_intersection, scattering_cosine);
+            v_light_pdf = v_light_pdf + light_pdf(next_ray, l_intersection, scattering_cosine);
         }
         
         let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
@@ -898,7 +901,7 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
     let ray_color = renderScene(ray,offset,light_sample);
 
 // TODO return color instead of bool to avoid array lookup
-    if (ray_color.w > 0f) { // || ubo.ray_bounces == u32(ray.bounce_idx + 1)) {
+    if (ray_color.w > -EPSILON) {
         var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
         if (ubo.subpixel_idx > 0u) {
             color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
@@ -909,8 +912,13 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
         textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
     }
     else if (ubo.ray_bounces == u32(ray.bounce_idx + 1)) {
+        var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
+        if (ubo.subpixel_idx > 0u) {
+            color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
+        }
+
         let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
-        let color = mix(textureLoad(imageData,vec2<i32>(global_invocation_id.xy)),vec4<f32>(0.0),scale);
+        color = mix(color,vec4<f32>(0.0,0.0,0.0,1.0),scale);
         textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
     }
 }
