@@ -880,10 +880,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
 
 
 @compute @workgroup_size(16, 16)
-fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
-        @builtin(global_invocation_id) global_invocation_id: vec3<u32>,
-        @builtin(workgroup_id) workgroup_id: vec3<u32>
-        ) 
+fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) 
 {
     let offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
     let ray = rays[offset];
@@ -900,7 +897,6 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
     init_pcg4d(vec4<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx, u32(ray.bounce_idx)));
     let ray_color = renderScene(ray,offset,light_sample);
 
-// TODO return color instead of bool to avoid array lookup
     if (ray_color.w > -EPSILON) {
         var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
         if (ubo.subpixel_idx > 0u) {
