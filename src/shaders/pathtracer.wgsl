@@ -838,7 +838,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         }
 
         var v_light_pdf = 0.0;
-        for (var i_light: u32 = ubo.specular_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
+        for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
             let l_intersection = intersect(p, direction,i_light,true);
             if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
                 continue;
@@ -852,7 +852,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
             
             v_light_pdf = v_light_pdf + light_pdf(p, l_intersection, light_cosine);
         }
-        v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.specular_offset);
+        v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
         
         let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
 
