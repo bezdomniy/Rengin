@@ -6,10 +6,10 @@ struct UBO {
     resolution: vec2<u32>,
     n_objects: u32,
     lights_offset: u32,
+    specular_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
     is_pathtracer: u32,
-    _pad1: u32,
 };
 
 

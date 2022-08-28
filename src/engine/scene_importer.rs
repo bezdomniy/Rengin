@@ -24,6 +24,7 @@ pub struct Scene {
     pub bvh: Option<Bvh>,
     pub camera: Option<CameraValue>,
     pub object_params: Option<Vec<ObjectParam>>,
+    pub specular_offset: usize,
     pub lights_offset: usize,
     _textures: Option<Vec<Texture>>,
 }
@@ -327,7 +328,7 @@ impl Scene {
 
         let commands: Vec<Command> =
             serde_yaml::from_reader(f).expect("Failed to load scene description.");
-        let (camera, object_params, bvh, lights_offset) =
+        let (camera, object_params, bvh, specular_offset, lights_offset) =
             Scene::load_assets(&commands, renderer_type);
 
         // for item in object_params.as_ref().unwrap() {
@@ -346,6 +347,7 @@ impl Scene {
         Scene {
             bvh,
             object_params,
+            specular_offset,
             lights_offset,
             camera,
             _textures: None,
@@ -370,8 +372,12 @@ impl Scene {
         Option<Vec<ObjectParam>>,
         Option<Bvh>,
         usize,
+        usize,
     ) {
-        let mut object_params: LinkedHashMap<(String, String), ObjectParam> = LinkedHashMap::new();
+        let mut lambertian_params: LinkedHashMap<(String, String), ObjectParam> =
+            LinkedHashMap::new();
+        let mut specular_params: LinkedHashMap<(String, String), ObjectParam> =
+            LinkedHashMap::new();
         let mut light_params: LinkedHashMap<(String, String), ObjectParam> = LinkedHashMap::new();
         let mut model_paths: Vec<String> = vec![];
         let mut camera: Option<CameraValue> = None;
@@ -390,7 +396,8 @@ impl Scene {
 
                         Scene::_get_object_params(
                             add_shape,
-                            &mut object_params,
+                            &mut lambertian_params,
+                            &mut specular_params,
                             &mut light_params,
                             &mut model_paths,
                             commands,
@@ -403,7 +410,8 @@ impl Scene {
 
                             Scene::_get_object_params(
                                 &light_shape,
-                                &mut object_params,
+                                &mut lambertian_params,
+                                &mut specular_params,
                                 &mut light_params,
                                 &mut model_paths,
                                 commands,
@@ -417,15 +425,10 @@ impl Scene {
             };
         }
 
-        let lights_offset = object_params.len();
-        // light_params.iter_mut().for_each(|(_, v)| {
-        //     if v.model_type == 9 {
-        //         v.inverse_transform = v.inverse_transform.inverse()
-        //     }
-        // });
-
-        // println!("@@ {:?}", light_params.clone());
-        object_params.extend(light_params);
+        let specular_offset = lambertian_params.len();
+        lambertian_params.extend(specular_params);
+        let lights_offset = lambertian_params.len();
+        lambertian_params.extend(light_params);
 
         // for item in &object_params {
         //     println!("{:?}", item.1.model_type);
@@ -436,7 +439,7 @@ impl Scene {
 
         let bvh = Some(Bvh::new(&model_paths));
 
-        for (i, (obparam_key, obparam_value)) in object_params
+        for (i, (obparam_key, obparam_value)) in lambertian_params
             .iter_mut()
             .filter(|(_, v)| v.model_type >= 10)
             .enumerate()
@@ -452,8 +455,9 @@ impl Scene {
         // TODO: change so n_objects is calculated here
         (
             camera,
-            Some(object_params.into_iter().map(|(_, v)| v).collect()),
+            Some(lambertian_params.into_iter().map(|(_, v)| v).collect()),
             bvh,
+            specular_offset,
             lights_offset,
         )
     }
@@ -481,7 +485,8 @@ impl Scene {
 
     fn _get_object_params(
         curr_shape: &ShapeValue,
-        accum_object_params: &mut LinkedHashMap<(String, String), ObjectParam>,
+        accum_lambertian_params: &mut LinkedHashMap<(String, String), ObjectParam>,
+        accum_specular_params: &mut LinkedHashMap<(String, String), ObjectParam>,
         accum_light_params: &mut LinkedHashMap<(String, String), ObjectParam>,
         accum_model_paths: &mut Vec<String>,
         commands: &Vec<Command>,
@@ -581,7 +586,12 @@ impl Scene {
         }
 
         if object_param.material.emissiveness == const_vec4!([0.0; 4]) {
-            accum_object_params.insert((object_map_key, hash), object_param);
+            if object_param.material.reflective > 0f32 || object_param.material.transparency > 0f32
+            {
+                accum_specular_params.insert((object_map_key, hash), object_param);
+            } else {
+                accum_lambertian_params.insert((object_map_key, hash), object_param);
+            }
         } else if !no_emissive_shapes || object_param.model_type == 9 {
             accum_light_params.insert((object_map_key, hash), object_param);
         }
@@ -595,7 +605,8 @@ impl Scene {
             for child in curr_shape.children.as_ref().unwrap() {
                 Scene::_get_object_params(
                     child,
-                    accum_object_params,
+                    accum_lambertian_params,
+                    accum_specular_params,
                     accum_light_params,
                     accum_model_paths,
                     commands,

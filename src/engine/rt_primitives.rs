@@ -232,10 +232,10 @@ pub struct Ubo {
     height: u32,
     n_objects: u32,
     lights_offset: u32,
+    specular_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
     is_pathtracer: u32,
-    _pad1: u32,
 }
 
 #[derive(Debug)]
@@ -247,6 +247,7 @@ pub struct ScreenData {
     pixel_size: f32,
     half_width_height: Vec2,
     fov: f32,
+    specular_offset: u32,
     lights_offset: u32,
     n_objects: u32,
     pub subpixel_idx: u32,
@@ -259,6 +260,7 @@ impl ScreenData {
     pub fn new(
         inverse_camera_transform: Mat4,
         n_objects: u32,
+        specular_offset: u32,
         lights_offset: u32,
         ray_bounces: u32,
         size: PhysicalSize<u32>,
@@ -289,6 +291,7 @@ impl ScreenData {
             fov,
             n_objects,
             lights_offset,
+            specular_offset,
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
             ray_bounces,
@@ -326,7 +329,7 @@ impl ScreenData {
             subpixel_idx: self.subpixel_idx,
             ray_bounces: self.ray_bounces,
             lights_offset: self.lights_offset,
-            _pad1: 0u32,
+            specular_offset: self.specular_offset,
         }
     }
 }

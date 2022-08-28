@@ -90,6 +90,7 @@ impl RenderApp {
         let screen_data = ScreenData::new(
             game_state.camera.get_inverse_transform(),
             scene.object_params.as_ref().unwrap().len() as u32,
+            scene.specular_offset as u32,
             scene.lights_offset as u32,
             ray_bounces,
             physical_size,

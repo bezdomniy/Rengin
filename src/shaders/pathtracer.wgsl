@@ -55,10 +55,10 @@ struct UBO {
     resolution: vec2<u32>,
     n_objects: u32,
     lights_offset: u32,
+    specular_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
     is_pathtracer: u32,
-    _pad1: u32,
 };
 
 struct InnerNodes {
@@ -159,13 +159,12 @@ fn init_pcg4d(v: vec4<u32>)
     rand_pcg4d.w = rand_pcg4d.w + (rand_pcg4d.y * rand_pcg4d.z);
 }
 
-fn u32_to_f32(x: u32) -> f32 {
-    return bitcast<f32>(0x3f800000u | (x >> 9u)) - 1.0;
+fn f32_zero_to_one(seed: u32) -> f32 {
+    return bitcast<f32>(0x3f800000u | (seed & 0x007fffffu)) - 1.0;
 }
 
-// alternative
-fn _u32_to_f32(x: u32) -> f32 {
-    return f32(x) * (1.0/f32(0xffffffffu));
+fn f32_negone_to_one(seed: u32) -> f32 {
+    return bitcast<f32>(0x40000000u | (seed & 0x007fffffu)) - 3.0;
 }
 
 fn rescale(value: f32, min: f32, max: f32) -> f32 {
@@ -173,9 +172,9 @@ fn rescale(value: f32, min: f32, max: f32) -> f32 {
 }
 
 fn random_in_unit_sphere() -> vec3<f32> {
-    let phi = 2.0 * PI * u32_to_f32(rand_pcg4d.x);
-    let cos_theta = 2.0 * u32_to_f32(rand_pcg4d.y) - 1.0;
-    let u = u32_to_f32(rand_pcg4d.z);
+    let phi = 2.0 * PI * f32_zero_to_one(rand_pcg4d.x);
+    let cos_theta = 2.0 * f32_zero_to_one(rand_pcg4d.y) - 1.0;
+    let u = f32_zero_to_one(rand_pcg4d.z);
 
     let theta = acos(cos_theta);
     let r = pow(u, 1.0 / 3.0);
@@ -187,15 +186,15 @@ fn random_in_unit_sphere() -> vec3<f32> {
 }
 
 fn random_in_cube() -> vec3<f32> {
-    let x = rescale(u32_to_f32(rand_pcg4d.x), -1.0, 1.0);
-    let y = rescale(u32_to_f32(rand_pcg4d.y), -1.0, 1.0);
-    let z = rescale(u32_to_f32(rand_pcg4d.z), -1.0, 1.0);
+    let x = f32_negone_to_one(rand_pcg4d.x);
+    let y = f32_negone_to_one(rand_pcg4d.y);
+    let z = f32_negone_to_one(rand_pcg4d.z);
     return vec3<f32>(x,y,z);
 }
 
 fn random_cosine_direction() -> vec3<f32> {
-    let r1 = u32_to_f32(rand_pcg4d.x);
-    let r2 = u32_to_f32(rand_pcg4d.y);
+    let r1 = f32_zero_to_one(rand_pcg4d.x);
+    let r2 = f32_zero_to_one(rand_pcg4d.y);
     let z = sqrt(1.0-r2);
 
     let phi = 2.0*PI*r1;
@@ -206,8 +205,8 @@ fn random_cosine_direction() -> vec3<f32> {
 }
 
 fn random_to_sphere(radius: f32, distance_squared: f32) -> vec3<f32> {
-    let r1 = u32_to_f32(rand_pcg4d.x);
-    let r2 = u32_to_f32(rand_pcg4d.y);
+    let r1 = f32_zero_to_one(rand_pcg4d.x);
+    let r2 = f32_zero_to_one(rand_pcg4d.y);
     let z = 1.0 + r2*(sqrt(1.0-radius*radius/distance_squared) - 1.0);
 
     let phi = 2.0*PI*r1;
@@ -218,8 +217,8 @@ fn random_to_sphere(radius: f32, distance_squared: f32) -> vec3<f32> {
 }
 
 fn random_uniform_direction() -> vec3<f32> {
-    let r1 = u32_to_f32(rand_pcg4d.x);
-    let r2 = u32_to_f32(rand_pcg4d.y);
+    let r1 = f32_zero_to_one(rand_pcg4d.x);
+    let r2 = f32_zero_to_one(rand_pcg4d.y);
     let x = cos(2.0*PI*r1)*2.0*sqrt(r2*(1.0-r2));
     let y = sin(2.0*PI*r1)*2.0*sqrt(r2*(1.0-r2));
     let z = 1.0 - 2.0*r2;
@@ -228,8 +227,8 @@ fn random_uniform_direction() -> vec3<f32> {
 }
 
 fn random_uniform_on_hemisphere() -> vec3<f32> {
-    let azimuthal = 2.0*PI*u32_to_f32(rand_pcg4d.x);
-    let z = u32_to_f32(rand_pcg4d.y);
+    let azimuthal = 2.0*PI*f32_zero_to_one(rand_pcg4d.x);
+    let z = f32_zero_to_one(rand_pcg4d.y);
 
     let xyproj = sqrt(1.0-(z*z));
 
@@ -241,8 +240,8 @@ fn random_uniform_on_hemisphere() -> vec3<f32> {
 
 // fn random_uniform_direction(radius: f32) -> vec3<f32>
 // {
-//     let theta: f32 = rescale(u32_to_f32(rand_pcg4d.x), 0.0, PI * 2.0);
-//     let phi: f32 = acos(rescale(u32_to_f32(rand_pcg4d.y), -1.0, 1.0));
+//     let theta: f32 = rescale(f32_zero_to_one(rand_pcg4d.x), 0.0, PI * 2.0);
+//     let phi: f32 = acos(rescale(f32_zero_to_one(rand_pcg4d.y), -1.0, 1.0));
 
 //     let x: f32 = sin(phi) * cos(theta);
 //     let y: f32 = sin(phi) * sin(theta);
@@ -635,7 +634,7 @@ fn onb_local(v: vec3<f32>, onb: array<vec3<f32>,3>) -> vec3<f32> {
 }
 
 fn random_light() -> ObjectParam {
-    let i = u32(rescale(u32_to_f32(rand_pcg4d.x), f32(ubo.lights_offset), f32(ubo.n_objects)));
+    let i = u32(rescale(f32_zero_to_one(rand_pcg4d.x), f32(ubo.lights_offset), f32(ubo.n_objects)));
     return object_params.ObjectParams[i];
 }
 
@@ -673,8 +672,8 @@ fn random_point_on_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
 
         // var r = vec3<f32>(0.0);
         // r[axis] = c;
-        // r[(axis + 1u) % 3u] = (u32_to_f32(rand_pcg4d.x) * 2.0) - 1.0;
-        // r[(axis + 2u) % 3u] = (u32_to_f32(rand_pcg4d.y) * 2.0) - 1.0;
+        // r[(axis + 1u) % 3u] = (f32_zero_to_one(rand_pcg4d.x) * 2.0) - 1.0;
+        // r[(axis + 2u) % 3u] = (f32_zero_to_one(rand_pcg4d.y) * 2.0) - 1.0;
 
         // return (light.transform * vec4<f32>(r,1.0)).xyz;
     }
@@ -728,7 +727,7 @@ fn light_pdf(p: vec3<f32>, intersection: Intersection, cosine: f32) -> f32 {
     }
     else if (light.model_type == 1u) {
         // TODO
-        return 0.0;
+        return 1.0;
     }
     else if (light.model_type == 2u) {
         // Still not quite right
@@ -736,11 +735,11 @@ fn light_pdf(p: vec3<f32>, intersection: Intersection, cosine: f32) -> f32 {
         return pow(intersection.closestT,2.0) / (cosine * light_area);
     }
     else if (light.model_type == 9u) {
-        return 0.0;
+        return 1.0;
     }
 
     // TODO
-    return 0.0;
+    return 1.0;
 }
 
 fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
@@ -778,13 +777,11 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
     let albedo = ob_params.material.colour;
 
     if (is_specular) {
+        let _onb = onb(hitParams.reflectv);
+
         if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
             // scattering_target = hitParams.reflectv;
-
-            // let onb_reflect = onb(hitParams.reflectv);
-            // let noise_direction = onb_local(random_cosine_direction(), onb_reflect);
-            // scattering_target = ((1.0 - ob_params.material.reflective) * noise_direction);
-            scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
+            scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb_local(random_cosine_direction(), _onb));
         }
 
         else if (ob_params.material.transparency > 0.0) {
@@ -802,11 +799,10 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
             let n_ratio = ray.refractive_index / eta_t;
             let sin_2t = pow(n_ratio, 2.0) * (1.0 - pow(cos_i, 2.0));
 
-            if (sin_2t > 1.0 || reflectance >= u32_to_f32(rand_pcg4d.w))
+            if (sin_2t > 1.0 || reflectance >= f32_zero_to_one(rand_pcg4d.w))
             {
                 // scattering_target = hitParams.reflectv;
-                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
-                // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
+                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb_local(random_cosine_direction(), _onb));
             }
             else {
                 let cos_t = sqrt(1.0 - sin_2t);
@@ -820,20 +816,20 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(scattering_target), ray.bounce_idx + 1, ray.throughput * albedo);
     }
     else {
-        let onb = onb(hitParams.normalv);
+        let _onb = onb(hitParams.normalv);
 
-        if (light_sample && u32_to_f32(rand_pcg4d.w) < p_scatter) {
+        if (light_sample && f32_zero_to_one(rand_pcg4d.w) < p_scatter) {
             let light = random_light();
             let on_light = random_point_on_light(light, p);
             scattering_target = on_light - p;
         }
         else {
-            scattering_target = onb_local(random_cosine_direction(), onb);
+            scattering_target = onb_local(random_cosine_direction(), _onb);
         }
 
         let direction = normalize(scattering_target);
         
-        let scattering_cosine = dot(direction, onb[2]);
+        let scattering_cosine = dot(direction, _onb[2]);
 
         var scattering_pdf = 0f;
 
@@ -842,7 +838,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         }
 
         var v_light_pdf = 0.0;
-        for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
+        for (var i_light: u32 = ubo.specular_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
             let l_intersection = intersect(p, direction,i_light,true);
             if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
                 continue;
@@ -856,7 +852,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
             
             v_light_pdf = v_light_pdf + light_pdf(p, l_intersection, light_cosine);
         }
-        v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
+        v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.specular_offset);
         
         let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
 
