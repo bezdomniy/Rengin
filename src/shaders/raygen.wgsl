@@ -19,6 +19,7 @@ struct Ray {
     rayD: vec3<f32>,
     bounce_idx: i32,
     throughput: vec4<f32>,
+    radiance: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -44,5 +45,5 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
     let direction = normalize((pixel - origin)).xyz;
 
     let rays_offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
-    rays[rays_offset] = Ray(origin.xyz, 1f, direction, 0, vec4<f32>(1f));
+    rays[rays_offset] = Ray(origin.xyz, 1f, direction, 0, vec4<f32>(1f), vec4<f32>(0f));
 }

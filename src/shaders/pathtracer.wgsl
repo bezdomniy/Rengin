@@ -97,6 +97,7 @@ struct Ray {
     rayD: vec3<f32>,
     bounce_idx: i32,
     throughput: vec4<f32>,
+    radiance: vec4<f32>,
 };
 
 struct Intersection {
@@ -442,13 +443,13 @@ fn intersectCube(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection,
     return ret;
 }
 
-fn intersect(rayO: vec3<f32>, rayD: vec3<f32>,start:u32, immediate_ret: bool) -> Intersection {
+fn intersect(rayO: vec3<f32>, rayD: vec3<f32>,start:u32, end:u32) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
 
     // TODO: fix loop range - get number of objects
-    for (var i: u32 = start; i < ubo.n_objects; i = i+1u) {
+    for (var i: u32 = start; i < end; i = i+1u) {
         let ob_params = object_params.ObjectParams[i];
 
         // TODO: clean this up
@@ -472,66 +473,52 @@ fn intersect(rayO: vec3<f32>, rayD: vec3<f32>,start:u32, immediate_ret: bool) ->
             // Triangle mesh
             ret = intersectInnerNodes(t_rayO, t_rayD,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes,i);
         }
-
-        if (immediate_ret) {
-            return ret;
-        }
     }
 
     return ret;
 }
 
-fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
-{
-    let ret: vec3<f32> = normalize((transpose(object_params.ObjectParams[object_id].inverse_transform) * vec4<f32>(normal,0.0)).xyz);
-    // ret.w = 0.0;
-    // ret = normalize(ret);
-
-
-    return ret;
-}
-
-fn normalAt(p: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32> {
-    if (typeEnum == 0u) { //Sphere
-        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(p,1.0)).xyz;
-        return normalToWorld(objectPoint,intersection.model_id);
+fn normalAt(p: vec3<f32>, intersection: Intersection) -> vec3<f32> {
+    let object = object_params.ObjectParams[intersection.model_id];
+    var object_normal = vec3<f32>(0f);
+    if (object.model_type == 0u) { //Sphere
+        object_normal = (object.inverse_transform * vec4<f32>(p,1.0)).xyz;
     }
-    else if (typeEnum == 1u) { //Plane
-        return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),intersection.model_id);
+    else if (object.model_type == 1u) { //Plane
+        object_normal = vec3<f32>(0.0, 1.0, 0.0);
     }
-    else if (typeEnum == 2u) { //Cube
-        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(p,1.0)).xyz;
-        let p1 = abs(objectPoint.x);
-        let p2 = abs(objectPoint.y);
-        let p3 = abs(objectPoint.z);
-        var objectNormal = normalize(vec3<f32>(objectPoint.x, 0.0, 0.0));
-
+    else if (object.model_type == 2u) { //Cube
+        let object_point = (object.inverse_transform * vec4<f32>(p,1.0)).xyz;
+        let p1 = abs(object_point.x);
+        let p2 = abs(object_point.y);
+        let p3 = abs(object_point.z);
+        
         if (p2 > p1 && p2 > p3) {
-            objectNormal = normalize(vec3<f32>(0.0, objectPoint.y, 0.0));
+            object_normal = normalize(vec3<f32>(0.0, object_point.y, 0.0));
         }
         else if (p3 > p1 && p3 > p2) {
-            objectNormal = normalize(vec3<f32>(0.0, 0.0,objectPoint.z));
+            object_normal = normalize(vec3<f32>(0.0, 0.0,object_point.z));
         }
-
-        return normalToWorld(objectNormal,intersection.model_id);
+        else {
+            object_normal = normalize(vec3<f32>(object_point.x, 0.0, 0.0));
+        }
     }
     else { //Model
         let normal: Normal = normal_nodes.Normals[intersection.id];
-        return normalToWorld((normal.normal2.xyz * intersection.uv.x + normal.normal3.xyz * intersection.uv.y + normal.normal1.xyz * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
-        // n.w = 0.0;
+        object_normal = normal.normal2.xyz * intersection.uv.x + normal.normal3.xyz * intersection.uv.y + normal.normal1.xyz * (1.0 - intersection.uv.x - intersection.uv.y);
     }
-    return vec3<f32>(0.0);
+    return normalize((transpose(object.inverse_transform) * vec4<f32>(object_normal,0.0)).xyz);
 }
 
 
-fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParams
+fn getHitParams(ray: Ray, intersection: Intersection) -> HitParams
 {
     var hitParams: HitParams;    
     hitParams.p =
         ray.rayO + normalize(ray.rayD) * intersection.closestT;
     // TODO check that uv only null have using none-uv normalAt version
     hitParams.normalv = 
-        normalAt(hitParams.p, intersection, typeEnum);
+        normalAt(hitParams.p, intersection);
     // hitParams.eyev = -ray.rayD;
     hitParams.eyev = -normalize(ray.rayD);
 
@@ -633,12 +620,12 @@ fn onb_local(v: vec3<f32>, onb: array<vec3<f32>,3>) -> vec3<f32> {
     return v.x*onb[0] + v.y*onb[1] + v.z*onb[2];
 }
 
-fn random_light() -> ObjectParam {
-    let i = u32(rescale(f32_zero_to_one(rand_pcg4d.x), f32(ubo.lights_offset), f32(ubo.n_objects)));
-    return object_params.ObjectParams[i];
+fn random_light_idx() -> u32 {
+    return u32(rescale(f32_zero_to_one(rand_pcg4d.x), f32(ubo.lights_offset), f32(ubo.n_objects)));
 }
 
-fn random_point_on_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
+fn random_point_on_light(light_idx: u32) -> vec3<f32> {
+    let light = object_params.ObjectParams[light_idx];
     if (light.model_type == 0u) {
         // let r = random_cosine_direction();
         // let r = random_uniform_on_hemisphere();
@@ -721,7 +708,7 @@ fn light_pdf(p: vec3<f32>, intersection: Intersection, cosine: f32) -> f32 {
 
         // let light_area = surface_area(light);
         // let point = ray.rayO + normalize(ray.rayD) * intersection.closestT;
-        // let n_light = normalAt(point, intersection,0u);
+        // let n_light = normalAt(point, intersection);
         // let solid_angle = (light_area * dot(n_light, ray.rayD)) / pow(intersection.closestT,2.0);
         // return 1.0 / solid_angle;
     }
@@ -753,28 +740,71 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
     let ray_miss_colour = vec4<f32>(0.0,0.0,0.0,1.0);
     
     // Get intersected object ID
-    let intersection = intersect(ray.rayO, ray.rayD,0u,false);
+    let intersection = intersect(ray.rayO, ray.rayD,0u,ubo.n_objects);
     
     if (intersection.id == -1 || intersection.closestT >= MAXLEN)
     {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1, vec4<f32>(-1f));
-        return ray.throughput * ray_miss_colour;
+        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1, vec4<f32>(-1f), vec4<f32>(-1f));
+        // return ray.throughput * ray_miss_colour;
+        return ray.radiance;
     }
 
     // TODO: just hard code object type in the intersection rather than looking it up
     let ob_params = object_params.ObjectParams[intersection.model_id];
 
     if (ob_params.material.emissiveness.x > 0.0) {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1, vec4<f32>(-1f));
-        return ray.throughput * ob_params.material.emissiveness;
+        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1, vec4<f32>(-1f), vec4<f32>(-1f));
+        // return ray.throughput * ob_params.material.emissiveness;
+
+        if (ray.bounce_idx == 0) {
+            return ob_params.material.emissiveness;
+        }
+        return ray.radiance;
     }
 
-    let hitParams = getHitParams(ray, intersection, ob_params.model_type);
-
     var is_specular = ob_params.material.reflective > 0.0 || ob_params.material.transparency > 0.0;
-    var scattering_target =  vec3<f32>(0.0);
-    var p = hitParams.overPoint;
+
     let albedo = ob_params.material.colour;
+    let lambertian_brdf = albedo / PI;
+    
+    let hitParams = getHitParams(ray, intersection);
+    var p = hitParams.overPoint;
+
+    let light_idx = random_light_idx();
+    let on_light = random_point_on_light(light_idx);
+    let to_light = normalize(on_light - p);
+    let light_dist = length(on_light - p);
+    let l_intersection = Intersection(vec2<f32>(-1f),-1,light_dist,light_idx);
+
+    var radiance = ray.radiance;
+
+           
+    let light_normalv = normalAt(on_light, l_intersection);
+
+    // TODO: add condition to check if it hits another object on the way
+    if (!is_specular && dot(hitParams.normalv, to_light) > 0f && dot(light_normalv, -to_light) > 0f ) {
+        let l_intersection = intersect(p, to_light,0u,ubo.n_objects); 
+        if (l_intersection.model_id >= ubo.lights_offset) {
+            let light = object_params.ObjectParams[light_idx];
+            // let solid_angle = (dot(light_normalv, -to_light) * surface_area(light)) / pow(light_dist,2f);
+            // let light_pdf = 1f / solid_angle;
+
+
+            let light_cosine = abs(dot(light_normalv, to_light));
+            
+            let light_pdf = light_pdf(p, l_intersection, light_cosine);
+            let brdf_pdf = light_cosine / PI;
+            // let brdf_pdf = 1f / (2f * PI);
+            let mis_pdf = light_pdf + brdf_pdf;
+
+            radiance = radiance + (ray.throughput * (dot(hitParams.normalv, to_light) / mis_pdf) * lambertian_brdf * light.material.emissiveness);
+        
+        }
+
+    }
+
+
+    var scattering_target =  vec3<f32>(0.0);
 
     if (is_specular) {
         let _onb = onb(hitParams.reflectv);
@@ -813,53 +843,64 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
                 p = hitParams.underPoint;
             }
         }
-        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(scattering_target), ray.bounce_idx + 1, ray.throughput * albedo);
+        let direction = normalize(scattering_target);
+        rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1, ray.throughput * albedo,radiance);
     }
     else {
         let _onb = onb(hitParams.normalv);
 
-        if (light_sample && f32_zero_to_one(rand_pcg4d.w) < p_scatter) {
-            let light = random_light();
-            let on_light = random_point_on_light(light, p);
-            scattering_target = on_light - p;
-        }
-        else {
-            scattering_target = onb_local(random_cosine_direction(), _onb);
-        }
+        // if (light_sample && f32_zero_to_one(rand_pcg4d.w) < p_scatter) {
+        //     let light_idx = random_light_idx();
+        //     let on_light = random_point_on_light(light_idx, p);
+        //     scattering_target = on_light - p;
+        // }
+        // else {
+        //     scattering_target = onb_local(random_cosine_direction(), _onb);
+        // }
 
-        let direction = normalize(scattering_target);
+        let direction = normalize(onb_local(random_cosine_direction(), _onb));
         
+
         let scattering_cosine = dot(direction, _onb[2]);
+        let scattering_pdf = scattering_cosine / PI;
+        // let scattering_pdf = 1f / (PI * 2f);
 
-        var scattering_pdf = 0f;
 
-        if scattering_cosine > 0f {
-            scattering_pdf = scattering_cosine / PI;
-        }
+        // var scattering_pdf = 0f;
 
-        var v_light_pdf = 0.0;
-        for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
-            let l_intersection = intersect(p, direction,i_light,true);
-            if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
-                continue;
-            }
+        // if scattering_cosine > 0f {
+        //     scattering_pdf = scattering_cosine / PI;
+        // }
 
-            let light_ob_params = object_params.ObjectParams[intersection.model_id];
-            let light_hit_point = p + direction * l_intersection.closestT;
-            let light_normalv = normalAt(light_hit_point, l_intersection, light_ob_params.model_type);
+        // var v_light_pdf = 0.0;
+        // for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
+        //     let l_intersection = intersect(p, direction,i_light,i_light+1u);
+        //     if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
+        //         continue;
+        //     }
 
-            let light_cosine = abs(dot(-direction, light_normalv));
+
+        //     let light_ob_params = object_params.ObjectParams[intersection.model_id];
+        //     let light_hit_point = p + direction * l_intersection.closestT;
+        //     let light_normalv = normalAt(light_hit_point, l_intersection);
+
+        //     // let to_light = light_hit_point - p;
+        //     // let light_dist = length(to_light);
+
+        //     // let solid_angle = (dot(light_normalv, -to_light) * surface_area(light_ob_params)) / pow(light_dist,2f);
+        //     // let light_pdf = 1f / solid_angle;
+
+        //     let light_cosine = abs(dot(-direction, light_normalv));
             
-            v_light_pdf = v_light_pdf + light_pdf(p, l_intersection, light_cosine);
-        }
-        v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
-        
-        let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
+        //     v_light_pdf = v_light_pdf + light_pdf(p, l_intersection, light_cosine);;
+        // }
+        // v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
+        // let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
 
-        rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1, ray.throughput * albedo * scattering_pdf / pdf);
+        rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1, ray.throughput * lambertian_brdf * (scattering_cosine / scattering_pdf),radiance);
     }
 
-    return vec4<f32>(-1f);
+    return radiance;
 }
 
 

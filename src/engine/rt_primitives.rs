@@ -18,6 +18,7 @@ pub struct Ray {
     direction: Vec3,
     bounce_idx: i32,
     throughput: Vec4,
+    radiance: Vec4,
 }
 
 #[repr(C)]
