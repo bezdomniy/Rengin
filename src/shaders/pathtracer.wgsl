@@ -193,6 +193,62 @@ fn random_in_cube() -> vec3<f32> {
     return vec3<f32>(x,y,z);
 }
 
+
+
+// Probably not need this, just point in cube is fine
+// from this: https://stackoverflow.com/questions/18182376/figuring-out-how-much-of-the-side-of-a-cube-is-visible
+// TODO: check if the dot products of 3 negative face indeed add to -1
+
+// var<private> FACE_NORMALS: array<vec3<f32>,6> = 
+//     array<vec3<f32>,6>(  
+//         vec3<f32>(-1f,0f,0f),vec3<f32>(0f,-1f,0f),vec3<f32>(0f,0f,-1f),
+//         vec3<f32>(1f,0f,0f), vec3<f32>(0f,1f,0f), vec3<f32>(0f,0f,1f)
+//                                     );
+
+// fn random_to_cube_face(view_vector: vec3<f32>) -> vec3<f32> {
+//     let a1 = rescale(u32_to_f32(rand_pcg4d.x), -1f, 1f);
+//     let a2 = rescale(u32_to_f32(rand_pcg4d.y), -1f, 1f);
+
+//     let choice_idx = u32_to_f32(rand_pcg4d.z);
+
+//     var faces = array<vec3<f32>,3>(vec3<f32>(0.0),vec3<f32>(0.0),vec3<f32>(0.0));
+//     var thres = array<f32,3>(0f,0f,0f);
+
+//     let start = rand_pcg4d.z % 6u;
+//     var j = 0u;
+//     for (var i = start; i < start + 6u; i = i+1u) {
+//         let idx = i % 6u;
+//         var r = FACE_NORMALS[idx];
+//         let d = dot(r,normalize(view_vector));
+//         if (d < 0f) {
+//             // r[idx % 3u] = -r[idx % 3u];
+//             r[(idx + 1u) % 3u] = a1;
+//             r[(idx + 2u) % 3u] = a2;
+
+//             faces[j] = r;
+//             thres[j] = -d;
+
+//             if (j == 2u) {
+//                 break;
+//             }
+
+//             j = j + 1u;
+
+//             // return r;
+//         }
+//     }
+
+//     var tot = 0f;
+//     for (var i = 0u; i < j; i = i+1u) {
+//         tot = tot + thres[i];
+//         if (choice_idx < tot) {
+//             return faces[i];
+//         }
+//     }
+
+//     return faces[j];
+// }
+
 fn random_cosine_direction() -> vec3<f32> {
     let r1 = u32_to_f32(rand_pcg4d.x);
     let r2 = u32_to_f32(rand_pcg4d.y);
@@ -205,14 +261,16 @@ fn random_cosine_direction() -> vec3<f32> {
     return vec3<f32>(x, y, z);
 }
 
+// TODO: update so it can handle non-spherical shapes
 fn random_to_sphere(radius: f32, distance_squared: f32) -> vec3<f32> {
     let r1 = u32_to_f32(rand_pcg4d.x);
     let r2 = u32_to_f32(rand_pcg4d.y);
     let z = 1.0 + r2*(sqrt(1.0-radius*radius/distance_squared) - 1.0);
 
     let phi = 2.0*PI*r1;
-    let x = cos(phi)*sqrt(1.0-(z*z));
-    let y = sin(phi)*sqrt(1.0-(z*z));
+    let scale = sqrt(1.0-(z*z));
+    let x = cos(phi)*scale;
+    let y = sin(phi)*scale;
 
     return vec3<f32>(x, y, z);
 }
@@ -454,7 +512,8 @@ fn intersect(ray: Ray,start:u32, immediate_ret: bool) -> Intersection {
         let ob_params = object_params.ObjectParams[i];
 
         // TODO: clean this up
-        if (ob_params.model_type == 9u) {
+        if (ob_params.model_type == 9u) //point light from whitted rt 
+        {
             continue;
         }
             
@@ -644,55 +703,41 @@ fn random_light() -> ObjectParam {
     return object_params.ObjectParams[i];
 }
 
-fn random_point_on_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
-    if (light.model_type == 0u) {
-        // let r = random_cosine_direction();
-        // let r = random_uniform_on_hemisphere();
-        let r = random_in_unit_sphere();
-        
-        // let center = (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
-        // let to_light = -normalize(center - origin);
-        // let onb = onb(to_light);
-        // let r = onb_local(random_uniform_on_hemisphere(),onb);
+fn random_to_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
+    let center = (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
+    let direction = center - origin;
+    let distance_squared = pow(length(direction),2.0);
 
-        return (light.transform * vec4<f32>(r,1.0)).xyz;
+    let onb = onb(normalize(direction));
+
+    let scale = vec3<f32>(length(light.transform[0].xyz),length(light.transform[1].xyz),length(light.transform[2].xyz));
+
+    // TODO: fix the negative offset - lots of hot pixels without it, something wrong
+    let radius = max(max(scale.x,scale.y),scale.z) - 0.05f;
+    
+    if (light.model_type == 0u) {
+        let r = onb_local(random_to_sphere(radius,distance_squared),onb);
+        return r;
     }
     else if (light.model_type == 1u) {
         return vec3<f32>(0.0);
     }
     else if (light.model_type == 2u) {
-        
-        let r = random_in_cube();
-        return (light.transform * vec4<f32>(r,1.0)).xyz; 
-
-        // // this is random on cube surface
-        // let random_side = rand_pcg4d.z % 6u;
-        // let axis = random_side % 3u;
-
-        // if (random_side > 2u) {
-        //     let c = 1.0;
-        // }
-        // else {
-        //     let c = -1.0;
-        // }
-
-        // var r = vec3<f32>(0.0);
-        // r[axis] = c;
-        // r[(axis + 1u) % 3u] = (u32_to_f32(rand_pcg4d.x) * 2.0) - 1.0;
-        // r[(axis + 2u) % 3u] = (u32_to_f32(rand_pcg4d.y) * 2.0) - 1.0;
-
-        // return (light.transform * vec4<f32>(r,1.0)).xyz;
+        let p = random_in_cube();
+        // let p = random_to_cube_face((light.inverse_transform * vec4<f32>(direction,0f)).xyz);
+        let r = (light.transform * vec4<f32>(p,1f)).xyz;
+        return normalize(r - origin);
     }
 
     // TODO: for model mesh, choose random triangle, then random point on it
-    return vec3<f32>(0.0);
+    return vec3<f32>(1.0);
 }
 
 // TODO: check the initial size cube and sphere and centroid coordinates and adjust accordingly
 fn surface_area(object: ObjectParam) -> f32 {
     let scale = vec3<f32>(length(object.transform[0].xyz),length(object.transform[1].xyz),length(object.transform[2].xyz));
     if (object.model_type == 0u) {
-        return 4.0 * PI * pow((pow(scale.x * scale.z,1.6075) + pow(scale.x * scale.z,1.6075)  + pow(scale.x * scale.z,1.6075))/3.0,1.0/1.6075);
+        return 4.0 * PI * pow((pow(scale.x * scale.z,1.6075) + pow(scale.z * scale.y,1.6075)  + pow(scale.x * scale.y,1.6075))/3.0,1.0/1.6075);
     }
     else if (object.model_type == 1u) {
         // TODO
@@ -710,21 +755,36 @@ fn surface_area(object: ObjectParam) -> f32 {
     return 1.0;
 }
 
-fn light_pdf(ray: Ray, intersection: Intersection, cosine: f32) -> f32 {
+fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
+    if (intersection.id == -1 || intersection.closestT >= MAXLEN) {
+        return 0f;
+    }
+
     let light = object_params.ObjectParams[intersection.model_id];
+    let p = ray.rayO + normalize(ray.rayD) * intersection.closestT;
+    let normal = normalAt(p, intersection, light.model_type);
+
     if (light.model_type == 0u) {
-        // let scale = vec3<f32>(length(light.transform[0].xyz),length(light.transform[1].xyz),length(light.transform[2].xyz));
-        // let radius = max(max(scale.x,scale.y),scale.z);
-        // let center = (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
-        // let o = ray.rayO;
+        let scale = vec3<f32>(length(light.transform[0].xyz),length(light.transform[1].xyz),length(light.transform[2].xyz));
+        let radius = max(max(scale.x,scale.y),scale.z);
 
-        // let cos_theta_max = sqrt(1.0 - (radius*radius/pow(length(center-o),2.0)));
-        // let solid_angle = 2.0*PI*(1.0-cos_theta_max);
-        // return 1.0 / solid_angle;
+        // let hit_point = ray.rayO + intersection.closestT * normalize(ray.rayD);
+        // let normal = normalAt(hit_point, intersection, 0u);
+        // let center = hit_point - (normal * radius );
+        let center = (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
+
+        let cos_theta_max = sqrt(1.0 - (radius*radius/pow(length(center-ray.rayO),2.0)));
+        let solid_angle = 2.0*PI*(1.0-cos_theta_max);
+        return 1.0 / solid_angle;
 
 
-        let light_area = surface_area(light);
-        return pow(intersection.closestT,2.0) / (cosine * light_area);
+        // let cos_theta = dot(-ray.rayD, normalize(hit_point - center));
+        // let light_area = surface_area(light);
+        // return pow(intersection.closestT,2.0) / (light_area * cos_theta * 0.5);
+
+
+        // let light_area = surface_area(light);
+        // return pow(intersection.closestT,2.0) / (cosine * light_area);
 
         // let light_area = surface_area(light);
         // let point = ray.rayO + normalize(ray.rayD) * intersection.closestT;
@@ -738,7 +798,11 @@ fn light_pdf(ray: Ray, intersection: Intersection, cosine: f32) -> f32 {
     }
     else if (light.model_type == 2u) {
         let light_area = surface_area(light);
-        return pow(intersection.closestT,2.0) / (cosine * light_area);
+        // return 1f - light_area;
+        let distance_squared = pow(intersection.closestT,2f);
+        let cosine = abs(dot(ray.rayD, normal));
+
+        return distance_squared / (cosine * light_area);
     }
     else if (light.model_type == 9u) {
         return 0.0;
@@ -847,8 +911,8 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
 
             if (light_sample && u32_to_f32(rand_pcg4d.w) < p_scatter) {
                 let light = random_light();
-                let on_light = random_point_on_light(light, p);
-                scattering_target = on_light - p;
+                scattering_target = random_to_light(light, p);
+                // scattering_target = on_light - p;
             }
             else {
                 scattering_target = onb_local(random_cosine_direction(), onb);
@@ -860,17 +924,27 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
 
             
             let scattering_cosine = dot(direction, onb[2]);
-            let scattering_pdf = scattering_cosine / PI;
+            var scattering_pdf = 0f;
+            if (scattering_cosine > 0f) {
+                scattering_pdf = scattering_cosine / PI;
+            }
 
-            var v_light_pdf = 0.0;
+            // let l_intersection = intersect(ray,ubo.lights_offset,false);
+            // let v_light_pdf = light_pdf(ray, l_intersection);
+
+            var v_light_pdf = 0f;
+            
             for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
                 let l_intersection = intersect(ray,i_light,true);
                 if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
                     continue;
                 }
                 
-                v_light_pdf = v_light_pdf + light_pdf(ray, l_intersection, scattering_cosine);
+                v_light_pdf = v_light_pdf + light_pdf(ray, l_intersection);
+                // break;
             }
+
+            v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
             
             let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
 
