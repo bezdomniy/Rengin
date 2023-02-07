@@ -132,6 +132,7 @@ impl RenginWgpu {
             width: window.inner_size().width,
             height: window.inner_size().height,
             present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: window_surface.get_supported_alpha_modes(&adapter)[0],
         };
         // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
