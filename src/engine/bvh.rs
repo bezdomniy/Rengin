@@ -3,7 +3,7 @@ use std::any::Any;
 use tobj;
 static MAX_SHAPES_IN_NODE: usize = 4;
 
-use glam::{const_mat3, const_vec3, const_vec4, Mat3, Vec3, Vec4};
+use glam::{Mat3, Mat4, Vec3, Vec4};
 
 use super::rt_primitives::ObjectParam;
 
@@ -91,7 +91,7 @@ impl Primitives {
                         .map(|triangle_indices| {
                             // println!("{:?}", triangle_indices);
                             Box::new(TrianglePrimitive {
-                                points: const_mat3!(
+                                points: Mat3::from_cols_array_2d(&[
                                     [
                                         part.mesh.positions[3 * triangle_indices[0] as usize],
                                         part.mesh.positions[(3 * triangle_indices[0] + 1) as usize],
@@ -106,9 +106,9 @@ impl Primitives {
                                         part.mesh.positions[3 * triangle_indices[2] as usize],
                                         part.mesh.positions[(3 * triangle_indices[2] + 1) as usize],
                                         part.mesh.positions[(3 * triangle_indices[2] + 2) as usize],
-                                    ]
-                                ),
-                                normals: const_mat3!(
+                                    ],
+                                ]),
+                                normals: Mat3::from_cols_array_2d(&[
                                     [
                                         part.mesh.normals[3 * triangle_indices[0] as usize],
                                         part.mesh.normals[(3 * triangle_indices[0] + 1) as usize],
@@ -123,8 +123,8 @@ impl Primitives {
                                         part.mesh.normals[3 * triangle_indices[2] as usize],
                                         part.mesh.normals[(3 * triangle_indices[2] + 1) as usize],
                                         part.mesh.normals[(3 * triangle_indices[2] + 2) as usize],
-                                    ]
-                                ),
+                                    ],
+                                ]),
                             }) as Box<dyn Bounded>
                         });
                 self.0.last_mut().unwrap().extend(primitives_iter);
@@ -283,9 +283,9 @@ impl Bvh {
         // println!("start end: {:?} {:?}", start, end);
         let centroid_bounds = triangle_params_unsorted[start..end].iter().fold(
             NodeInner {
-                first: const_vec3!([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
+                first: Vec3::from_array([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
                 skip_ptr_or_prim_idx1: 0,
-                second: const_vec3!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
+                second: Vec3::from_array([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
                 prim_idx2: 0,
             },
             |acc, new| acc.add_point(&new.bounds_centroid()),
@@ -293,9 +293,9 @@ impl Bvh {
 
         let mut bounds = triangle_params_unsorted[start..end].iter().fold(
             NodeInner {
-                first: const_vec3!([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
+                first: Vec3::from_array([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
                 skip_ptr_or_prim_idx1: 0,
-                second: const_vec3!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
+                second: Vec3::from_array([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
                 prim_idx2: 0,
             },
             |acc, new| acc.merge(&new.bounds()),
@@ -487,9 +487,9 @@ impl Bvh {
 impl NodeLeaf {
     pub fn new(v: [f32; 9]) -> Self {
         NodeLeaf {
-            point1: const_vec3!([v[0], v[1], v[2]]),
-            point2: const_vec3!([v[3], v[4], v[5]]),
-            point3: const_vec3!([v[6], v[7], v[8]]),
+            point1: Vec3::from_array([v[0], v[1], v[2]]),
+            point2: Vec3::from_array([v[3], v[4], v[5]]),
+            point3: Vec3::from_array([v[6], v[7], v[8]]),
             pad1: 0,
             pad2: 0,
             pad3: 0,
@@ -501,9 +501,9 @@ impl NodeNormal {
     pub fn new(v: [f32; 9]) -> Self {
         NodeNormal {
             normals: [
-                const_vec4!([v[0], v[1], v[2], 0f32]),
-                const_vec4!([v[3], v[4], v[5], 0f32]),
-                const_vec4!([v[6], v[7], v[8], 0f32]),
+                Vec4::from_array([v[0], v[1], v[2], 0f32]),
+                Vec4::from_array([v[3], v[4], v[5], 0f32]),
+                Vec4::from_array([v[6], v[7], v[8], 0f32]),
             ],
         }
     }
@@ -524,7 +524,7 @@ impl Bounded for TrianglePrimitive {
             .to_cols_array_2d()
             .iter()
             .fold(NodeInner::empty(), |aabb, p| {
-                aabb.add_point(&const_vec3!(*p))
+                aabb.add_point(&Vec3::from_array(*p))
             })
     }
 
@@ -564,21 +564,21 @@ impl Bounded for PlanePrimitive {
 impl NodeInner {
     pub fn empty() -> Self {
         NodeInner {
-            first: const_vec3!([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
+            first: Vec3::from_array([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
             skip_ptr_or_prim_idx1: 0,
-            second: const_vec3!([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
+            second: Vec3::from_array([f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY]),
             prim_idx2: 0,
         }
     }
 
     pub fn merge(&self, other: &NodeInner) -> Self {
-        let min: Vec3 = const_vec3!([
+        let min: Vec3 = Vec3::from_array([
             f32::min(self.first.x, other.first.x),
             f32::min(self.first.y, other.first.y),
             f32::min(self.first.z, other.first.z),
         ]);
 
-        let max: Vec3 = const_vec3!([
+        let max: Vec3 = Vec3::from_array([
             f32::max(self.second.x, other.second.x),
             f32::max(self.second.y, other.second.y),
             f32::max(self.second.z, other.second.z),
