@@ -2,8 +2,7 @@
 name = "rengin"
 version = "0.1.0"
 authors = ["Ilia <ilia.shibaev@gmail.com>"]
-edition = "2018"
-resolver = "2"
+edition = "2021"
 
 [workspace]
 members = [
