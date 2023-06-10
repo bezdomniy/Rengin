@@ -132,11 +132,11 @@ fn to_linear_rgb(c: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(float_to_linear_rgb(c.x),float_to_linear_rgb(c.y),float_to_linear_rgb(c.z),1.0);
 }
 
-let EPSILON:f32 = 0.001;
-let MAXLEN: f32 = 10000.0;
-let INFINITY: f32 = 340282346638528859811704183484516925440.0;
-let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
-let PI: f32 = 3.1415926535897932384626433832795;
+const EPSILON:f32 = 0.001;
+const MAXLEN: f32 = 10000.0;
+const INFINITY: f32 = 340282346638528859811704183484516925440.0;
+const NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
+const PI: f32 = 3.1415926535897932384626433832795;
 
 var<private> rand_pcg4d: vec4<u32>;
 
@@ -392,7 +392,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
     var idx = min_inner_node_idx;
     loop  
     {
-        if (idx >= max_inner_node_idx ) {break};
+        if (idx >= max_inner_node_idx ) {break;};
 
         let current_node: NodeInner = inner_nodes.InnerNodes[idx];
         let leaf_node: bool = current_node.idx2 > 0u;

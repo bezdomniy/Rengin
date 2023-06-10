@@ -128,14 +128,14 @@ fn to_linear_rgb(c: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(float_to_linear_rgb(c.x),float_to_linear_rgb(c.y),float_to_linear_rgb(c.z),1.0);
 }
 
-let EPSILON:f32 = 0.0001;
-let MAXLEN: f32 = 10000.0;
-let INFINITY: f32 = 340282346638528859811704183484516925440.0;
-let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
+const EPSILON:f32 = 0.0001;
+const MAXLEN: f32 = 10000.0;
+const INFINITY: f32 = 340282346638528859811704183484516925440.0;
+const NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
-let PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio 
-// let RAYS_PER_PIXEL: u32 = 4u;  
-let MAX_RAY_BOUNCES: i32 = 16;
+const PHI: f32 = 1.61803398874989484820459;  // Φ = Golden Ratio 
+// const RAYS_PER_PIXEL: u32 = 4u;  
+const MAX_RAY_BOUNCES: i32 = 16;
 
 // fn jenkinsHash(x: u32) -> u32 {
 //     x += x << 10u;
@@ -277,7 +277,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
     var idx: i32 = min_inner_node_idx;
     loop  
     {
-        if (idx >= max_inner_node_idx ) {break};
+        if (idx >= max_inner_node_idx ) {break;};
 
         let current_node: NodeInner = inner_nodes.InnerNodes[idx];
         let leaf_node: bool = current_node.idx2 > 0u;

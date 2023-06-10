@@ -58,10 +58,13 @@ impl RenginWgpu {
 
         log::info!("backend: {:?}", backend);
         // let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
-        let instance = wgpu::Instance::new(backend);
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: backend,
+            dx12_shader_compiler: Default::default(),
+        });
         log::info!("instance: {:?}", instance);
 
-        let window_surface = unsafe { instance.create_surface(&window) };
+        let window_surface = unsafe { instance.create_surface(&window).unwrap() };
         log::info!("window_surface: {:?}", window_surface);
 
         let adapter = instance
@@ -126,13 +129,16 @@ impl RenginWgpu {
             .await
             .unwrap();
 
+        let surface_caps = window_surface.get_capabilities(&adapter);
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: window_surface.get_supported_formats(&adapter)[0],
+            format: surface_caps.formats[0],
+            alpha_mode: surface_caps.alpha_modes[0],
+            present_mode: wgpu::PresentMode::Fifo,
             width: window.inner_size().width,
             height: window.inner_size().height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: window_surface.get_supported_alpha_modes(&adapter)[0],
+            view_formats: vec![],
         };
         // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
@@ -191,6 +197,7 @@ impl RenginRenderer for RenginWgpu {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
             label: None,
         }));
