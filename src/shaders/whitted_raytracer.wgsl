@@ -533,7 +533,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     let light_emissiveness = light.material.emissiveness;
 
     loop  {
-        if (top_stack < 0) { break }
+        if (top_stack < 0) { break; }
 
         let new_ray = stack[top_stack];
         top_stack = top_stack - 1;
