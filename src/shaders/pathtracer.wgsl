@@ -761,8 +761,6 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
     }
 
     let light = object_params.ObjectParams[intersection.model_id];
-    let p = ray.rayO + normalize(ray.rayD) * intersection.closestT;
-    let normal = normalAt(p, intersection, light.model_type);
 
     if (light.model_type == 0u) {
         let scale = vec3<f32>(length(light.transform[0].xyz),length(light.transform[1].xyz),length(light.transform[2].xyz));
@@ -797,10 +795,12 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
         return 0.0;
     }
     else if (light.model_type == 2u) {
+        let p = ray.rayO + normalize(ray.rayD) * intersection.closestT;
+        let normal = normalAt(p, intersection, light.model_type);
         let light_area = surface_area(light);
         // return 1f - light_area;
         let distance_squared = pow(intersection.closestT,2f);
-        let cosine = abs(dot(ray.rayD, normal));
+        let cosine = abs(dot(normal,-ray.rayD));
 
         return distance_squared / (cosine * light_area);
     }
@@ -813,6 +813,7 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
 }
 
 fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
+    init_pcg4d(vec4<u32>(xy.x, xy.y, ubo.subpixel_idx, ubo.n_objects));
     var p_scatter = 0.5;
     if (ubo.lights_offset == ubo.n_objects) {
         p_scatter = 1.0;
@@ -832,6 +833,8 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
     // let ray_miss_colour = vec4<f32>(1.0);
     // let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
     let ray_miss_colour = vec4<f32>(0.0);
+
+    var sample_light = false;
     
     for (var bounce_idx: u32 = 0u; bounce_idx < ubo.ray_bounces; bounce_idx =  bounce_idx + 1u) {
 
@@ -859,9 +862,11 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
         var scattering_target =  vec3<f32>(0.0);
         var p = hitParams.overPoint;
         let albedo = ob_params.material.colour;
-        init_pcg4d(vec4<u32>(xy.x, xy.y, ubo.subpixel_idx, bounce_idx));
+        
 
         var pdf_adj = 1.0;
+
+        let onb = onb(hitParams.normalv);
 
         if (is_specular) {
             if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
@@ -870,7 +875,8 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
                 // let onb_reflect = onb(hitParams.reflectv);
                 // let noise_direction = onb_local(random_cosine_direction(), onb_reflect);
                 // scattering_target = ((1.0 - ob_params.material.reflective) * noise_direction);
-                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
+                // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
+                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb_local(random_cosine_direction(), onb));
             }
 
             else if (ob_params.material.transparency > 0.0) {
@@ -891,15 +897,17 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
                 if (sin_2t > 1.0 || reflectance >= u32_to_f32(rand_pcg4d.w))
                 {
                     // scattering_target = hitParams.reflectv;
-                    scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
+                    // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
+                    scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb_local(random_cosine_direction(), onb));
                     // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
                 }
                 else {
                     let cos_t = sqrt(1.0 - sin_2t);
 
+                    // scattering_target = (hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
+                    //                 (hitParams.eyev * n_ratio)) + ((1.0 - ob_params.material.transparency) * onb_local(-random_cosine_direction(), onb));
                     scattering_target = hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
                                     (hitParams.eyev * n_ratio);
-
                     p = hitParams.underPoint;
                 }
             }
@@ -907,9 +915,9 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
             new_ray = RenderRay(ray, ob_params.material.refractive_index);
         }
         else {
-            let onb = onb(hitParams.normalv);
 
-            if (light_sample && u32_to_f32(rand_pcg4d.w) < p_scatter) {
+            sample_light = light_sample && u32_to_f32(rand_pcg4d.w) < p_scatter;
+            if (sample_light) {
                 let light = random_light();
                 scattering_target = random_to_light(light, p);
                 // scattering_target = on_light - p;
@@ -924,10 +932,10 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
 
             
             let scattering_cosine = dot(direction, onb[2]);
-            var scattering_pdf = 0f;
-            if (scattering_cosine > 0f) {
-                scattering_pdf = scattering_cosine / PI;
-            }
+            // var scattering_pdf = 0f;
+            // if (scattering_cosine > 0f) {
+                let scattering_pdf = scattering_cosine / PI;
+            // }
 
             // let l_intersection = intersect(ray,ubo.lights_offset,false);
             // let v_light_pdf = light_pdf(ray, l_intersection);
@@ -945,6 +953,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
             }
 
             v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
+            // v_light_pdf = v_light_pdf / f32(ubo.n_objects);
             
             let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
 
@@ -957,6 +966,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
         }
 
         throughput = throughput * albedo * pdf_adj;
+        init_pcg4d(rand_pcg4d);
     }
  
     return radiance;
@@ -990,7 +1000,11 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
     var ray_color = renderScene(ray,global_invocation_id.xy,light_sample);
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
-    color = mix(color,ray_color,scale);
+    if (ray_color.x != ray_color.x) { ray_color.x = 0.0; }
+    if (ray_color.y != ray_color.y) { ray_color.y = 0.0; }
+    if (ray_color.z != ray_color.z) { ray_color.z = 0.0; }
+    // if (ray_color.w != ray_color.w) { ray_color.w = 1.0; }
 
+    color = mix(color,ray_color,scale);
     textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }
