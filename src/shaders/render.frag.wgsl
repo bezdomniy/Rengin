@@ -4,8 +4,8 @@ struct UBO {
     resolution: vec2<u32>,
     _pad2: vec2<u32>,
     n_objects: i32,
+    lights_offset: u32,
     subpixel_idx: u32,
-    ray_bounces: u32,
     _pad3: u32,
 };
 
@@ -34,7 +34,7 @@ fn main(@location(0) inUV: vec2<f32>) -> @location(0) vec4<f32> {
     if (ubo.is_pathtracer == 1u) {
         color = sqrt(color);
     }
-    
+
     color = clamp(color,vec4<f32>(0.0),vec4<f32>(0.999));
     return to_linear_rgb(color);
 }
