@@ -54,15 +54,19 @@ impl RenginWgpu {
         rays_per_pixel: u32,
         ray_bounces: u32,
     ) -> Self {
-        let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
+        let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
 
-        log::info!("backend: {:?}", backend);
-        // let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
+        log::info!("backend: {:?}", backends);
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: backend,
+            backends,
             dx12_shader_compiler: Default::default(),
+            ..Default::default()
         });
         log::info!("instance: {:?}", instance);
+
+        for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
+            log::debug!("Found adapter {:?}", adapter)
+        }
 
         let window_surface = unsafe { instance.create_surface(&window).unwrap() };
         log::info!("window_surface: {:?}", window_surface);
@@ -411,7 +415,7 @@ impl RenginRenderer for RenginWgpu {
                         binding: 6,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(
                                 (rays.data.len() * mem::size_of::<Ray>()) as _,

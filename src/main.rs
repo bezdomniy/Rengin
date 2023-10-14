@@ -67,6 +67,7 @@ impl RenderApp {
         renderer_type: RendererType,
     ) -> Self {
         let physical_size = window.inner_size();
+        println!("@@@@@1 {:?}", physical_size);
 
         let mut renderer = executor::block_on(RenginWgpu::new(
             window,
@@ -125,6 +126,7 @@ impl RenderApp {
             scene.object_params.as_ref().unwrap(),
         );
 
+        println!("@@@@@2 {:?}", physical_size);
         // TODO: remove buffers as arg and move into RenginWgpu state
         renderer.create_bind_groups(&physical_size);
 
@@ -251,13 +253,15 @@ impl RenderApp {
                             ops: wgpu::Operations {
                                 // load: wgpu::LoadOp::Load,
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                store: true,
+                                store: wgpu::StoreOp::Store,
                             },
                         })];
                         let render_pass_descriptor = wgpu::RenderPassDescriptor {
                             label: None,
                             color_attachments: &color_attachments,
                             depth_stencil_attachment: None,
+                            occlusion_query_set: Default::default(),
+                            timestamp_writes: Default::default(),
                         };
 
                         let mut command_encoder = self.renderer.device.create_command_encoder(
@@ -267,8 +271,11 @@ impl RenderApp {
                         command_encoder.push_debug_group("compute ray trace");
                         {
                             // compute pass
-                            let mut cpass = command_encoder
-                                .begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+                            let mut cpass =
+                                command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                    label: None,
+                                    timestamp_writes: Default::default(),
+                                });
                             cpass.set_pipeline(self.renderer.compute_pipeline.as_ref().unwrap());
                             cpass.set_bind_group(
                                 0,
@@ -345,6 +352,7 @@ impl RenderApp {
                         },
                     ..
                 } => {
+                    println!("@@@@@-resize {:?}", size);
                     self.screen_data.update_dims(&size);
                     self.screen_data.subpixel_idx = 0;
                     self.renderer.update_window_size(&size);
