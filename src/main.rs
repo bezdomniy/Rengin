@@ -67,7 +67,6 @@ impl RenderApp {
         renderer_type: RendererType,
     ) -> Self {
         let physical_size = window.inner_size();
-        println!("@@@@@1 {:?}", physical_size);
 
         let mut renderer = executor::block_on(RenginWgpu::new(
             window,
@@ -126,7 +125,6 @@ impl RenderApp {
             scene.object_params.as_ref().unwrap(),
         );
 
-        println!("@@@@@2 {:?}", physical_size);
         // TODO: remove buffers as arg and move into RenginWgpu state
         renderer.create_bind_groups(&physical_size);
 
@@ -352,7 +350,6 @@ impl RenderApp {
                         },
                     ..
                 } => {
-                    println!("@@@@@-resize {:?}", size);
                     self.screen_data.update_dims(&size);
                     self.screen_data.subpixel_idx = 0;
                     self.renderer.update_window_size(&size);
