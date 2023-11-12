@@ -329,7 +329,7 @@ pub struct Ray {
     origin: Vec3,
     x: i32,
     direction: Vec3,
-    y: i32,
+    refractive_index: f32,
 }
 
 impl Ray {
@@ -355,7 +355,7 @@ impl Ray {
             origin: ray_o.xyz(),
             x,
             direction: (pixel - ray_o).normalize().xyz(),
-            y,
+            refractive_index: 1f32,
         }
     }
 }
@@ -364,7 +364,7 @@ impl Default for Ray {
     fn default() -> Self {
         Ray {
             x: -1,
-            y: -1,
+            refractive_index: -1f32,
             direction: Vec3::default(),
             origin: Vec3::default(),
         }

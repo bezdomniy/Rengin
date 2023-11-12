@@ -1,3 +1,4 @@
+use glam::Vec4;
 #[cfg(target_arch = "wasm32")]
 use wgpu_gecko as wgpu;
 
@@ -313,6 +314,14 @@ impl RenginRenderer for RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
 
+        let buf_rad = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Radiance Buffer"),
+            size: (rays.data.len() * mem::size_of::<Vec4>()) as u64,
+            mapped_at_creation: false,
+            // contents: &[0u8; screen_data.resolution.height * screen_data.resolution.width],
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
         log::info!(
             "Finshed loading buffers in {} millis",
             now.elapsed().as_millis()
@@ -325,6 +334,7 @@ impl RenginRenderer for RenginWgpu {
             ("normals", buf_normals),
             ("object_params", buf_op),
             ("rays", buf_rays),
+            ("radiance", buf_rad),
         ]));
     }
 
@@ -415,7 +425,7 @@ impl RenginRenderer for RenginWgpu {
                         binding: 6,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(
                                 (rays.data.len() * mem::size_of::<Ray>()) as _,
@@ -459,6 +469,32 @@ impl RenginRenderer for RenginWgpu {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (rays.data.len() * mem::size_of::<Ray>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (rays.data.len() * mem::size_of::<Vec4>()) as _,
+                            ),
+                            // min_binding_size: None,
                         },
                         count: None,
                     },
@@ -544,6 +580,26 @@ impl RenginRenderer for RenginWgpu {
                             .as_ref()
                             .unwrap()
                             .get("ubo")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("rays")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("radiance")
                             .unwrap()
                             .as_entire_binding(),
                     },

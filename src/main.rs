@@ -249,8 +249,8 @@ impl RenderApp {
                             view: &view,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                // load: wgpu::LoadOp::Load,
-                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                load: wgpu::LoadOp::Load,
+                                // load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                 store: wgpu::StoreOp::Store,
                             },
                         })];
@@ -268,28 +268,30 @@ impl RenderApp {
 
                         command_encoder.push_debug_group("compute ray trace");
                         {
-                            // compute pass
-                            let mut cpass =
-                                command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                    label: None,
-                                    timestamp_writes: Default::default(),
-                                });
-                            cpass.set_pipeline(self.renderer.compute_pipeline.as_ref().unwrap());
-                            cpass.set_bind_group(
-                                0,
-                                self.renderer.compute_bind_group.as_ref().unwrap(),
-                                &[],
-                            );
+                            for _ in 0..self.screen_data.ray_bounces {
+                                // compute pass
+                                let mut cpass = command_encoder.begin_compute_pass(
+                                    &wgpu::ComputePassDescriptor {
+                                        label: None,
+                                        timestamp_writes: Default::default(),
+                                    },
+                                );
+                                cpass
+                                    .set_pipeline(self.renderer.compute_pipeline.as_ref().unwrap());
+                                cpass.set_bind_group(
+                                    0,
+                                    self.renderer.compute_bind_group.as_ref().unwrap(),
+                                    &[],
+                                );
 
-                            // TODO: move ray bounce loop out of shader, and do it here
-
-                            cpass.dispatch_workgroups(
-                                (self.screen_data.size.width / WORKGROUP_SIZE[0])
-                                    + WORKGROUP_SIZE[0],
-                                (self.screen_data.size.height / WORKGROUP_SIZE[1])
-                                    + WORKGROUP_SIZE[1],
-                                WORKGROUP_SIZE[2],
-                            );
+                                cpass.dispatch_workgroups(
+                                    (self.screen_data.size.width / WORKGROUP_SIZE[0])
+                                        + WORKGROUP_SIZE[0],
+                                    (self.screen_data.size.height / WORKGROUP_SIZE[1])
+                                        + WORKGROUP_SIZE[1],
+                                    WORKGROUP_SIZE[2],
+                                );
+                            }
                         }
                         command_encoder.pop_debug_group();
 
