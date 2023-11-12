@@ -119,7 +119,7 @@ var<storage, read> normal_nodes: Normals;
 @group(0) @binding(5)
 var<storage, read> object_params: ObjectParams;
 @group(0) @binding(6)
-var<storage, read_write> rays: Rays;
+var<storage, read> rays: Rays;
 
 fn float_to_linear_rgb(x: f32) -> f32 {
     if (x > 0.04045) {
@@ -318,7 +318,7 @@ fn hemisphericalRand(normal: vec3<f32>) -> vec3<f32>
     return -in_unit_sphere;
 }
 
-fn intersectAABB(ray: Ray, aabbIdx: u32) -> bool {
+fn intersectAABB(ray: Ray, inner_node: NodeInner) -> bool {
     // let INFINITY: f32 = 1.0 / 0.0;
 
     var t_min: f32 = NEG_INFINITY;
@@ -328,7 +328,7 @@ fn intersectAABB(ray: Ray, aabbIdx: u32) -> bool {
     var t0: f32;
     var t1: f32;
 
-    let inner_node = inner_nodes.InnerNodes[aabbIdx];
+    // let inner_node = inner_nodes.InnerNodes[aabbIdx];
 
     for (var a: i32 = 0; a < 3; a = a+1)
     {
@@ -395,10 +395,10 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
         if (idx >= max_inner_node_idx ) {break;};
 
         let current_node: NodeInner = inner_nodes.InnerNodes[idx];
+
         let leaf_node: bool = current_node.idx2 > 0u;
 
-        if (intersectAABB(ray, idx)) {
-            idx = idx + 1u;
+        if (intersectAABB(ray, current_node)) {
             if (leaf_node) {
                 for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1 + leaf_offset; primIdx < current_node.idx2 + leaf_offset; primIdx = primIdx + 1u) {
                     let next_intersection = intersectTriangle(ray, primIdx, ret,object_id);
@@ -408,7 +408,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
                     }
                 }
             }
-            
+            idx = idx + 1u;
         }
         else if (leaf_node) {
             idx = idx + 1u;
@@ -541,9 +541,9 @@ fn intersect(ray: Ray,start:u32, immediate_ret: bool) -> Intersection {
     return ret;
 }
 
-fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
+fn normalToWorld(normal: vec3<f32>, ob_param: ObjectParam) -> vec3<f32>
 {
-    let ret: vec3<f32> = normalize((transpose(object_params.ObjectParams[object_id].inverse_transform) * vec4<f32>(normal,0.0)).xyz);
+    let ret: vec3<f32> = normalize((transpose(ob_param.inverse_transform) * vec4<f32>(normal,0.0)).xyz);
     // ret.w = 0.0;
     // ret = normalize(ret);
 
@@ -552,15 +552,16 @@ fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
 }
 
 fn normalAt(p: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32> {
+    let ob_param = object_params.ObjectParams[intersection.model_id];
     if (typeEnum == 0u) { //Sphere
-        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(p,1.0)).xyz;
-        return normalToWorld(objectPoint,intersection.model_id);
+        let objectPoint = (ob_param.inverse_transform * vec4<f32>(p,1.0)).xyz;
+        return normalToWorld(objectPoint,ob_param);
     }
     else if (typeEnum == 1u) { //Plane
-        return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),intersection.model_id);
+        return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),ob_param);
     }
     else if (typeEnum == 2u) { //Cube
-        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(p,1.0)).xyz;
+        let objectPoint = (ob_param.inverse_transform * vec4<f32>(p,1.0)).xyz;
         let p1 = abs(objectPoint.x);
         let p2 = abs(objectPoint.y);
         let p3 = abs(objectPoint.z);
@@ -573,11 +574,11 @@ fn normalAt(p: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32
             objectNormal = normalize(vec3<f32>(0.0, 0.0,objectPoint.z));
         }
 
-        return normalToWorld(objectNormal,intersection.model_id);
+        return normalToWorld(objectNormal,ob_param);
     }
     else { //Model
         let normal: Normal = normal_nodes.Normals[intersection.id];
-        return normalToWorld((normal.normal2.xyz * intersection.uv.x + normal.normal3.xyz * intersection.uv.y + normal.normal1.xyz * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
+        return normalToWorld((normal.normal2.xyz * intersection.uv.x + normal.normal3.xyz * intersection.uv.y + normal.normal1.xyz * (1.0 - intersection.uv.x - intersection.uv.y)),ob_param);
         // n.w = 0.0;
     }
     return vec3<f32>(0.0);
@@ -587,13 +588,14 @@ fn normalAt(p: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32
 fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParams
 {
     var hitParams: HitParams;    
+    let normal_ray_d = normalize(ray.rayD);
     hitParams.p =
-        ray.rayO + normalize(ray.rayD) * intersection.closestT;
+        ray.rayO + normal_ray_d * intersection.closestT;
     // TODO check that uv only null have using none-uv normalAt version
     hitParams.normalv = 
         normalAt(hitParams.p, intersection, typeEnum);
     // hitParams.eyev = -ray.rayD;
-    hitParams.eyev = -normalize(ray.rayD);
+    hitParams.eyev = -normal_ray_d;
 
     // hitParams.front_face = dot(hitParams.normalv, hitParams.eyev) < 0.0;
     hitParams.front_face = dot(ray.rayD, hitParams.normalv) < 0.0;
@@ -603,7 +605,7 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
     }
 
     hitParams.reflectv =
-        reflect(normalize(ray.rayD), hitParams.normalv);
+        reflect(normal_ray_d, hitParams.normalv);
     hitParams.overPoint =
         hitParams.p + hitParams.normalv * EPSILON;
     hitParams.underPoint =
@@ -657,8 +659,29 @@ struct RenderRay {
 //     return out;
 // }
 
-fn onb(n: vec3<f32>) -> array<vec3<f32>,3> {
-    var out: array<vec3<f32>,3>;
+
+	// float sign = n.z >= 0.f ? 1.0f : -1.f;
+	// float a = -1.0/(sign + n.z);
+	// float b = n.x * n.y * a; 
+	// b1 = vec3(1.0f + sign * n.x * n.x * a, sign * b, -sign * n.x);
+	// b2 = vec3(b, sign + n.y * n.y * a, -n.y);	
+
+
+fn onb(n: vec3<f32>) -> mat3x3<f32> {
+    var out: mat3x3<f32>;
+    out[2] = n; 
+
+    let sign = select(-1.0,1.0, n.z >= 0.0);
+    let a = -1.0 / (sign / n.z);
+    let b = n.x * n.y * a;
+    out[0] = vec3<f32>(1.0 + sign * n.x * n.x * a, sign * b, -sign * n.x);
+    out[1] = vec3<f32>(b, sign + n.y * n.y * a, -n.y);
+
+    return out;
+}
+
+fn _onb(n: vec3<f32>) -> mat3x3<f32> {
+    var out: mat3x3<f32>;
 
     out[2] = n; 
     if(n.z < -0.99995)
@@ -694,8 +717,9 @@ fn onb(n: vec3<f32>) -> array<vec3<f32>,3> {
 //     return out;
 // }
 
-fn onb_local(v: vec3<f32>, onb: array<vec3<f32>,3>) -> vec3<f32> {
-    return v.x*onb[0] + v.y*onb[1] + v.z*onb[2];
+fn onb_local(v: vec3<f32>, onb: mat3x3<f32>) -> vec3<f32> {
+    // return v.x*onb[0] + v.y*onb[1] + v.z*onb[2];
+    return onb * v;
 }
 
 fn random_light() -> ObjectParam {
@@ -716,7 +740,7 @@ fn random_to_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
     let radius = max(max(scale.x,scale.y),scale.z) - 0.05f;
     
     if (light.model_type == 0u) {
-        let r = onb_local(random_to_sphere(radius,distance_squared),onb);
+        let r = onb * random_to_sphere(radius,distance_squared);
         return r;
     }
     else if (light.model_type == 1u) {
@@ -876,7 +900,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
                 // let noise_direction = onb_local(random_cosine_direction(), onb_reflect);
                 // scattering_target = ((1.0 - ob_params.material.reflective) * noise_direction);
                 // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
-                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb_local(random_cosine_direction(), onb));
+                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
             }
 
             else if (ob_params.material.transparency > 0.0) {
@@ -898,7 +922,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
                 {
                     // scattering_target = hitParams.reflectv;
                     // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
-                    scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb_local(random_cosine_direction(), onb));
+                    scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
                     // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
                 }
                 else {
@@ -923,7 +947,8 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
                 // scattering_target = on_light - p;
             }
             else {
-                scattering_target = onb_local(random_cosine_direction(), onb);
+                // scattering_target = random_cosine_direction();
+                scattering_target = onb * random_cosine_direction();
             }
 
             let direction = normalize(scattering_target);
