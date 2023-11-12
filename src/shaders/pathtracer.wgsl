@@ -739,7 +739,7 @@ struct RenderReturn {
 
 fn renderScene(ray: Ray, light_sample: bool) -> RenderReturn {
     var p_scatter = 0.5;
-    if (ubo.lights_offset == ubo.n_objects) {
+    if (!light_sample || ubo.lights_offset == ubo.n_objects) {
         p_scatter = 1.0;
     }
 
@@ -882,7 +882,7 @@ fn renderScene(ray: Ray, light_sample: bool) -> RenderReturn {
     }
 
     return RenderReturn(albedo * pdf_adj, new_ray);
-    
+
 }
 
 
