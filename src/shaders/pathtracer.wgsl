@@ -107,7 +107,7 @@ struct Intersection {
 };
 
 @group(0) @binding(0)
-var<storage, read_write> radiances: array<vec4<f32>>;
+var<storage, read_write> throughputs: array<vec4<f32>>;
 @group(0) @binding(1)
 var<uniform> ubo: UBO;
 @group(0) @binding(2)
@@ -743,15 +743,11 @@ fn renderScene(ray: Ray, light_sample: bool) -> RenderReturn {
         p_scatter = 1.0;
     }
 
-    var t: f32 = MAXLEN;
 
     // var ob_params = object_params.ObjectParams[0];
     // let ray_miss_colour = vec4<f32>(1.0);
     // let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
-    let ray_miss_colour = vec4<f32>(0.0);
-
-    var sample_light = false;
-    
+    let ray_miss_colour = vec4<f32>(0.0);    
 
     // Get intersected object ID
     let intersection = intersect(ray,0u,false);
@@ -767,7 +763,7 @@ fn renderScene(ray: Ray, light_sample: bool) -> RenderReturn {
     
     if (ob_params.material.emissiveness.x > 0.0) {
         return RenderReturn(ob_params.material.emissiveness, Ray(vec3<f32>(0.0),-1,vec3<f32>(0.0),-1.0));
-        // return RenderReturn(vec4<f32>(0.0), Ray(vec3<f32>(0.0),-1,vec3<f32>(0.0),-1.0));
+        // return RenderReturn(ray_miss_colour, Ray(vec3<f32>(0.0),-1,vec3<f32>(0.0),-1.0));
     }
 
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
@@ -827,11 +823,11 @@ fn renderScene(ray: Ray, light_sample: bool) -> RenderReturn {
                 p = hitParams.underPoint;
             }
         }
-        new_ray = Ray(p, ray.x, normalize(scattering_target), ob_params.material.refractive_index);
+        new_ray = Ray(p, 999999, normalize(scattering_target), ob_params.material.refractive_index);
     }
     else {
 
-        sample_light = light_sample && u32_to_f32(rand_pcg4d.w) < p_scatter;
+        let sample_light = light_sample && u32_to_f32(rand_pcg4d.w) < p_scatter;
         if (sample_light) {
             let light = random_light();
             scattering_target = random_to_light(light, p);
@@ -844,7 +840,7 @@ fn renderScene(ray: Ray, light_sample: bool) -> RenderReturn {
 
         let direction = normalize(scattering_target);
 
-        new_ray = Ray(p, ray.x, direction, ob_params.material.refractive_index); 
+        new_ray = Ray(p, 999999, direction, ob_params.material.refractive_index); 
 
         
         let scattering_cosine = dot(direction, onb[2]);
@@ -882,6 +878,7 @@ fn renderScene(ray: Ray, light_sample: bool) -> RenderReturn {
     }
 
     return RenderReturn(albedo * pdf_adj, new_ray);
+    // return RenderReturn(ray_miss_colour, new_ray);
 
 }
 
@@ -893,19 +890,21 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
         @builtin(workgroup_id) workgroup_id: vec3<u32>
         ) 
 {
-    let ray = rays.Rays[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x];
+    let idx = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
+    let ray = rays.Rays[idx];
 
     if (ray.x < 0) {
         return;
     }
 
     var throughput: vec4<f32> = vec4<f32>(1.0);
-    if (ubo.subpixel_idx > 0u) {
-        throughput = radiances[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x];
+    // if (ubo.subpixel_idx > 0u) { //TODO: this should be 2nd bounce, not subpixel
+    if (ray.x == 999999) {
+        throughput = throughputs[idx];
     }
 
     
-    var light_sample = true;
+    var light_sample = false;
     if (ubo.lights_offset == ubo.n_objects) {
         light_sample = false;
     }
@@ -921,6 +920,12 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
 
     // color = mix(color,ray_color,scale);
 
-    radiances[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x] = throughput * render_result.throughput;
-    rays.Rays[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x] = render_result.new_ray;
+    // if (render_result.new_ray.x > -1) {
+        throughputs[idx] = throughput * render_result.throughput;
+    // }
+    // else if (render_result.new_ray.x == -1) {
+    //     throughputs[idx] = render_result.throughput;
+    // }
+
+    rays.Rays[idx] = render_result.new_ray;
 }

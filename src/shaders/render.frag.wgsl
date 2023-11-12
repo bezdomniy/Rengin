@@ -27,7 +27,7 @@ var<uniform> ubo: UBO;
 @group(0) @binding(2)
 var<storage, read_write> rays: Rays;
 @group(0) @binding(3)
-var<storage, read_write> radiances: array<vec4<f32>>;
+var<storage, read_write> throughputs: array<vec4<f32>>;
 
 fn float_to_linear_rgb(x: f32) -> f32 {
     if (x > 0.04045) {
@@ -55,9 +55,10 @@ fn main(@location(0) inUV: vec2<f32>) -> @location(0) vec4<f32> {
 
     var ray_color = vec4<f32>(0.0);
     if (ray.x == -1) {
-        ray_color = radiances[(xy.y * ubo.resolution.x) + xy.x];
+        ray_color = throughputs[(xy.y * ubo.resolution.x) + xy.x];
     }
-    // var ray_color = radiances[(xy.y * ubo.resolution.x) + xy.x];
+
+    // var ray_color = throughputs[(xy.y * ubo.resolution.x) + xy.x];
 
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
