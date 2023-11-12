@@ -855,12 +855,12 @@ fn renderScene(ray: Ray, light_sample: bool) -> RenderReturn {
         var v_light_pdf = 0f;
         
         for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
-            let l_intersection = intersect(ray,i_light,true);
+            let l_intersection = intersect(new_ray,i_light,true);
             if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
                 continue;
             }
             
-            v_light_pdf = v_light_pdf + light_pdf(ray, l_intersection);
+            v_light_pdf = v_light_pdf + light_pdf(new_ray, l_intersection);
             // break;
         }
 
@@ -904,7 +904,7 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
     }
 
     
-    var light_sample = false;
+    var light_sample = true;
     if (ubo.lights_offset == ubo.n_objects) {
         light_sample = false;
     }
