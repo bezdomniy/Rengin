@@ -843,15 +843,12 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
         p_scatter = 1.0;
     }
     
-    var radiance: vec4<f32> = vec4<f32>(0.0);
     var throughput: vec4<f32> = vec4<f32>(1.0);
 
     var uv: vec2<f32>;
     var t: f32 = MAXLEN;
 
     var new_ray = RenderRay(init_ray,1.0);
-
-    var albedo = vec4<f32>(0.0);
 
     // var ob_params = object_params.ObjectParams[0];
     // let ray_miss_colour = vec4<f32>(1.0);
@@ -867,8 +864,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
         
         if (intersection.id == -1 || intersection.closestT >= MAXLEN)
         {
-            radiance = radiance + (ray_miss_colour * throughput);
-            break;
+            return ray_miss_colour * throughput;
         }
 
         // TODO: just hard code object type in the intersection rather than looking it up
@@ -876,8 +872,7 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
 
         
         if (ob_params.material.emissiveness.x > 0.0) {
-            radiance = radiance + (ob_params.material.emissiveness * throughput);
-            break;
+            return ob_params.material.emissiveness * throughput;
         }
 
         let hitParams = getHitParams(new_ray.ray, intersection, ob_params.model_type);
@@ -993,8 +988,8 @@ fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
         throughput = throughput * albedo * pdf_adj;
         init_pcg4d(rand_pcg4d);
     }
- 
-    return radiance;
+
+    return ray_miss_colour * throughput;
 }
 
 
