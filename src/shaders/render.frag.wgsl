@@ -45,36 +45,37 @@ fn main(@location(0) inUV: vec2<f32>) -> @location(0) vec4<f32> {
     // // TODO: fix a way to take the scaling into the fragment shader too.
     let xy = vec2<u32>(inUV*vec2<f32>(ubo.resolution));
 
-    var throughput: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
+    var accum: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
     var radiance: vec4<f32> = vec4<f32>(1.0);
 
     let ray = rays.Rays[(xy.y * ubo.resolution.x) + xy.x];
 
     if (ubo.subpixel_idx > 0u) {
-        throughput = textureLoad(imageData, xy);
-        radiance = radiances[(xy.y * ubo.resolution.x) + xy.x];
+        accum = textureLoad(imageData, xy);
     }
 
-    var color = radiance + throughput;
-    radiances[(xy.y * ubo.resolution.x) + xy.x] = color;
+    var ray_color = vec4<f32>(0.0);
+    if (ray.x == -1) {
+        ray_color = radiances[(xy.y * ubo.resolution.x) + xy.x];
+    }
+    // var ray_color = radiances[(xy.y * ubo.resolution.x) + xy.x];
 
+    let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
-    // let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
+    if (ray_color.x != ray_color.x) { ray_color.x = 0.0; }
+    if (ray_color.y != ray_color.y) { ray_color.y = 0.0; }
+    if (ray_color.z != ray_color.z) { ray_color.z = 0.0; }
+    // if (ray_color.w != ray_color.w) { ray_color.w = 1.0; }
 
-    if (color.x != color.x) { color.x = 0.0; }
-    if (color.y != color.y) { color.y = 0.0; }
-    if (color.z != color.z) { color.z = 0.0; }
-    // if (color.w != color.w) { color.w = 1.0; }
-
-    // color = mix(color,ray_color,scale);
-
-    color = color / f32(ubo.subpixel_idx + 1u);
-
+    accum = mix(accum,ray_color,scale);
+    // accum = ray_color;
+    
+    textureStore(imageData, xy, accum);
 
     if (ubo.is_pathtracer == 1u) {
-        color = sqrt(color);
+        accum = sqrt(accum);
     }
 
-    color = clamp(color,vec4<f32>(0.0),vec4<f32>(0.999));
-    return to_linear_rgb(color);
+    accum = clamp(accum,vec4<f32>(0.0),vec4<f32>(0.999));
+    return to_linear_rgb(accum);
 }

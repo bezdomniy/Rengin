@@ -107,7 +107,7 @@ struct Intersection {
 };
 
 @group(0) @binding(0)
-var imageData: texture_storage_2d<rgba8unorm,read_write>;
+var<storage, read_write> radiances: array<vec4<f32>>;
 @group(0) @binding(1)
 var<uniform> ubo: UBO;
 @group(0) @binding(2)
@@ -758,7 +758,7 @@ fn renderScene(ray: Ray, light_sample: bool) -> RenderReturn {
     
     if (intersection.id == -1 || intersection.closestT >= MAXLEN)
     {
-        return RenderReturn(ray_miss_colour,Ray(vec3<f32>(0.0),-1,vec3<f32>(0.0),-1.0));
+        return RenderReturn(ray_miss_colour, Ray(vec3<f32>(0.0),-1,vec3<f32>(0.0),-1.0));
     }
 
     // TODO: just hard code object type in the intersection rather than looking it up
@@ -766,7 +766,8 @@ fn renderScene(ray: Ray, light_sample: bool) -> RenderReturn {
 
     
     if (ob_params.material.emissiveness.x > 0.0) {
-        return RenderReturn(ob_params.material.emissiveness,Ray(vec3<f32>(0.0),-1,vec3<f32>(0.0),-1.0));
+        return RenderReturn(ob_params.material.emissiveness, Ray(vec3<f32>(0.0),-1,vec3<f32>(0.0),-1.0));
+        // return RenderReturn(vec4<f32>(0.0), Ray(vec3<f32>(0.0),-1,vec3<f32>(0.0),-1.0));
     }
 
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
@@ -900,7 +901,7 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
 
     var throughput: vec4<f32> = vec4<f32>(1.0);
     if (ubo.subpixel_idx > 0u) {
-        throughput = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
+        throughput = radiances[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x];
     }
 
     
@@ -920,8 +921,6 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
 
     // color = mix(color,ray_color,scale);
 
-    textureStore(imageData, vec2<i32>(global_invocation_id.xy), throughput * render_result.throughput);
-
-
+    radiances[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x] = throughput * render_result.throughput;
     rays.Rays[(global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x] = render_result.new_ray;
 }

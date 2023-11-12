@@ -352,10 +352,12 @@ impl RenginRenderer for RenginWgpu {
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::ReadWrite,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            view_dimension: wgpu::TextureViewDimension::D2,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (rays.data.len() * mem::size_of::<Vec4>()) as _,
+                            ),
                         },
                         count: None,
                     },
@@ -616,7 +618,13 @@ impl RenginRenderer for RenginWgpu {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&compute_target_texture_view),
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("radiance")
+                            .unwrap()
+                            .as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
