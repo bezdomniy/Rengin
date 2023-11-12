@@ -46,7 +46,6 @@ fn main(@location(0) inUV: vec2<f32>) -> @location(0) vec4<f32> {
     let xy = vec2<u32>(inUV*vec2<f32>(ubo.resolution));
 
     var accum: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
-    var radiance: vec4<f32> = vec4<f32>(1.0);
 
     let ray = rays.Rays[(xy.y * ubo.resolution.x) + xy.x];
 
