@@ -839,7 +839,7 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
 fn renderScene(init_ray: Ray, xy: vec2<u32>,light_sample: bool) -> vec4<f32> {
     init_pcg4d(vec4<u32>(xy.x, xy.y, ubo.subpixel_idx, ubo.n_objects));
     var p_scatter = 0.5;
-    if (ubo.lights_offset == ubo.n_objects) {
+    if (!light_sample || ubo.lights_offset == ubo.n_objects) {
         p_scatter = 1.0;
     }
     
