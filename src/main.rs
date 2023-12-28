@@ -285,10 +285,8 @@ impl RenderApp {
                                 );
 
                                 cpass.dispatch_workgroups(
-                                    (self.screen_data.size.width / WORKGROUP_SIZE[0])
-                                        + WORKGROUP_SIZE[0],
-                                    (self.screen_data.size.height / WORKGROUP_SIZE[1])
-                                        + WORKGROUP_SIZE[1],
+                                    self.screen_data.size.width / WORKGROUP_SIZE[0],
+                                    self.screen_data.size.height / WORKGROUP_SIZE[1],
                                     WORKGROUP_SIZE[2],
                                 );
                             }
