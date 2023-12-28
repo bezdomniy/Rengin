@@ -12,7 +12,7 @@
 - define: white-light
   value:
     color: [1, 1, 1]
-    emissiveness: [6, 6, 6]
+    emissiveness: [2, 2, 2]
 
 - define: base-material
   value:

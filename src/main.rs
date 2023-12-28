@@ -312,9 +312,7 @@ impl RenderApp {
                         }
                         command_encoder.pop_debug_group();
 
-                        self.renderer
-                            .queue
-                            .submit(std::iter::once(command_encoder.finish()));
+                        self.renderer.queue.submit(Some(command_encoder.finish()));
 
                         self.renderer.device.poll(wgpu::Maintain::Wait);
                         frame.present();

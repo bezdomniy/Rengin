@@ -909,7 +909,8 @@ fn main(@builtin(local_invocation_id) local_invocation_id: vec3<u32>,
         light_sample = false;
     }
     
-    init_pcg4d(vec4<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx, ubo.n_objects));
+    // init_pcg4d(vec4<u32>(u32(ray.rayD.z*1000.0),u32(ray.rayD.y*1000.0), ubo.subpixel_idx, ubo.n_objects));
+    init_pcg4d(vec4<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx, u32(ray.rayD.y*1000.0)));
     let render_result = renderScene(ray,light_sample);
     // let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
