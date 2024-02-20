@@ -216,6 +216,7 @@ impl<'a> RenderApp<'a> {
     }
 
     pub async fn render(mut self, event_loop: EventLoop<()>) {
+        let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
         let mut last_update_inst = Instant::now();
         let mut left_mouse_down = false;
 
@@ -258,106 +259,8 @@ impl<'a> RenderApp<'a> {
                     },
                     Event::DeviceEvent { event, .. } => {
                         self.update_device_event(event, &mut left_mouse_down);
-                    },
+                    }
                     Event::AboutToWait => {
-                        if self.screen_data.subpixel_idx < self.renderer.rays_per_pixel {
-                            self.update();
-
-                            let frame = match self.renderer.surface.get_current_texture() {
-                                Ok(frame) => frame,
-                                Err(_) => {
-                                    self.renderer
-                                        .surface
-                                        .configure(&self.renderer.device, &self.renderer.config);
-                                    self.renderer
-                                        .surface
-                                        .get_current_texture()
-                                        .expect("Failed to acquire next surface texture!")
-                                }
-                            };
-                            let view = frame
-                                .texture
-                                .create_view(&wgpu::TextureViewDescriptor::default());
-
-                            // TODO: create send texture to use to keep track of previous frame
-
-                            // create render pass descriptor and its color attachments
-                            let color_attachments = [Some(wgpu::RenderPassColorAttachment {
-                                view: &view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    // load: wgpu::LoadOp::Load,
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })];
-                            let render_pass_descriptor = wgpu::RenderPassDescriptor {
-                                label: None,
-                                color_attachments: &color_attachments,
-                                depth_stencil_attachment: None,
-                                occlusion_query_set: Default::default(),
-                                timestamp_writes: Default::default(),
-                            };
-
-                            let mut command_encoder = self.renderer.device.create_command_encoder(
-                                &wgpu::CommandEncoderDescriptor { label: None },
-                            );
-
-                            command_encoder.push_debug_group("compute ray trace");
-                            {
-                                // compute pass
-                                let mut cpass = command_encoder.begin_compute_pass(
-                                    &wgpu::ComputePassDescriptor {
-                                        label: None,
-                                        timestamp_writes: Default::default(),
-                                    },
-                                );
-                                cpass
-                                    .set_pipeline(self.renderer.compute_pipeline.as_ref().unwrap());
-                                cpass.set_bind_group(
-                                    0,
-                                    self.renderer.compute_bind_group.as_ref().unwrap(),
-                                    &[],
-                                );
-
-                                // TODO: move ray bounce loop out of shader, and do it here
-
-                                cpass.dispatch_workgroups(
-                                    (self.screen_data.size.width / WORKGROUP_SIZE[0])
-                                        + WORKGROUP_SIZE[0],
-                                    (self.screen_data.size.height / WORKGROUP_SIZE[1])
-                                        + WORKGROUP_SIZE[1],
-                                    WORKGROUP_SIZE[2],
-                                );
-                            }
-                            command_encoder.pop_debug_group();
-
-                            command_encoder.push_debug_group("render texture");
-                            {
-                                // render pass
-                                let mut rpass =
-                                    command_encoder.begin_render_pass(&render_pass_descriptor);
-                                rpass.set_pipeline(self.renderer.render_pipeline.as_ref().unwrap());
-                                rpass.set_bind_group(
-                                    0,
-                                    self.renderer.render_bind_group.as_ref().unwrap(),
-                                    &[],
-                                );
-                                // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
-                                // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
-                                rpass.draw(0..3, 0..1);
-                            }
-                            command_encoder.pop_debug_group();
-
-                            self.renderer
-                                .queue
-                                .submit(std::iter::once(command_encoder.finish()));
-
-                            self.renderer.device.poll(wgpu::Maintain::Wait);
-                            frame.present();
-                        }
-                        
-                        let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
                         let time_since_last_frame = last_update_inst.elapsed();
 
                         if (!left_mouse_down || self.renderer.continous_motion)
@@ -372,11 +275,109 @@ impl<'a> RenderApp<'a> {
                             );
 
                             last_update_inst = Instant::now();
+                            if self.screen_data.subpixel_idx < self.renderer.rays_per_pixel {
+                                self.update();
+
+                                let frame = match self.renderer.surface.get_current_texture() {
+                                    Ok(frame) => frame,
+                                    Err(_) => {
+                                        self.renderer.surface.configure(
+                                            &self.renderer.device,
+                                            &self.renderer.config,
+                                        );
+                                        self.renderer
+                                            .surface
+                                            .get_current_texture()
+                                            .expect("Failed to acquire next surface texture!")
+                                    }
+                                };
+                                let view = frame
+                                    .texture
+                                    .create_view(&wgpu::TextureViewDescriptor::default());
+
+                                // TODO: create send texture to use to keep track of previous frame
+
+                                // create render pass descriptor and its color attachments
+                                let color_attachments = [Some(wgpu::RenderPassColorAttachment {
+                                    view: &view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        // load: wgpu::LoadOp::Load,
+                                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                })];
+                                let render_pass_descriptor = wgpu::RenderPassDescriptor {
+                                    label: None,
+                                    color_attachments: &color_attachments,
+                                    depth_stencil_attachment: None,
+                                    occlusion_query_set: Default::default(),
+                                    timestamp_writes: Default::default(),
+                                };
+
+                                let mut command_encoder =
+                                    self.renderer.device.create_command_encoder(
+                                        &wgpu::CommandEncoderDescriptor { label: None },
+                                    );
+
+                                command_encoder.push_debug_group("compute ray trace");
+                                {
+                                    // compute pass
+                                    let mut cpass = command_encoder.begin_compute_pass(
+                                        &wgpu::ComputePassDescriptor {
+                                            label: None,
+                                            timestamp_writes: Default::default(),
+                                        },
+                                    );
+                                    cpass.set_pipeline(
+                                        self.renderer.compute_pipeline.as_ref().unwrap(),
+                                    );
+                                    cpass.set_bind_group(
+                                        0,
+                                        self.renderer.compute_bind_group.as_ref().unwrap(),
+                                        &[],
+                                    );
+
+                                    // TODO: move ray bounce loop out of shader, and do it here
+
+                                    cpass.dispatch_workgroups(
+                                        (self.screen_data.size.width / WORKGROUP_SIZE[0])
+                                            + WORKGROUP_SIZE[0],
+                                        (self.screen_data.size.height / WORKGROUP_SIZE[1])
+                                            + WORKGROUP_SIZE[1],
+                                        WORKGROUP_SIZE[2],
+                                    );
+                                }
+                                command_encoder.pop_debug_group();
+
+                                command_encoder.push_debug_group("render texture");
+                                {
+                                    // render pass
+                                    let mut rpass =
+                                        command_encoder.begin_render_pass(&render_pass_descriptor);
+                                    rpass.set_pipeline(
+                                        self.renderer.render_pipeline.as_ref().unwrap(),
+                                    );
+                                    rpass.set_bind_group(
+                                        0,
+                                        self.renderer.render_bind_group.as_ref().unwrap(),
+                                        &[],
+                                    );
+                                    // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
+                                    // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
+                                    rpass.draw(0..3, 0..1);
+                                }
+                                command_encoder.pop_debug_group();
+
+                                self.renderer
+                                    .queue
+                                    .submit(std::iter::once(command_encoder.finish()));
+
+                                self.renderer.device.poll(wgpu::Maintain::Wait);
+                                frame.present();
+                            }
                         } else {
                             // exit(0);
-                            // *control_flow = ControlFlow::WaitUntil(
-                            //     Instant::now() + target_frametime - time_since_last_frame,
-                            // );
                             target.set_control_flow(ControlFlow::WaitUntil(
                                 Instant::now() + target_frametime - time_since_last_frame,
                             ))
