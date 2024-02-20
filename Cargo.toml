@@ -14,24 +14,24 @@ webgl = ["glam/libm"]
 
 [dependencies]
 glam = { version = "0.25", default-features = false, features = ["bytemuck"] }
-winit = "0.28.7"
-tobj = "3.2.2"
+winit = "0.29"
+tobj = "4.0"
 bincode = "1.3.3"
-env_logger = "0.8"
+env_logger = "0.11"
 log = "0.4"
 bytemuck = { version = "1.14", features = ["derive"] }
 rand = "0.8.4"
 yaml-rust = "0.4"
 linked-hash-map = "0.5.4"
 serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.8"
-image = "0.23"
-itertools = "0.10.3"
-clap = { version = "3.0.5", features = ["derive"] }
+serde_yaml = "0.9"
+image = "0.24"
+itertools = "0.12"
+clap = { version = "4.5", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures = { version = "0.3" }
-wgpu = { version = "0.18", features = ["vulkan-portability"] }
+wgpu = { version = "0.19", features = ["vulkan-portability"] }
 # wgpu = { git = "https://github.com/gfx-rs/wgpu.git", branch = "trunk", package = "wgpu", features= ["vulkan-portability"] }
 # ash =  { version="0.37", default-features = false, features = ["linked", "debug"] }
 # ash-window = "0.10"
