@@ -356,31 +356,32 @@ impl<'a> RenderApp<'a> {
                             self.renderer.device.poll(wgpu::Maintain::Wait);
                             frame.present();
                         }
+                        
+                        let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
+                        let time_since_last_frame = last_update_inst.elapsed();
+
+                        if (!left_mouse_down || self.renderer.continous_motion)
+                            && ((self.screen_data.subpixel_idx < self.renderer.rays_per_pixel)
+                                || (self.screen_data.subpixel_idx == 0
+                                    && time_since_last_frame >= target_frametime))
+                        {
+                            log::info!(
+                                "Drawing ray index: {}, framerate: {}",
+                                self.screen_data.subpixel_idx,
+                                1000u128 / time_since_last_frame.as_millis()
+                            );
+
+                            last_update_inst = Instant::now();
+                        } else {
+                            // exit(0);
+                            // *control_flow = ControlFlow::WaitUntil(
+                            //     Instant::now() + target_frametime - time_since_last_frame,
+                            // );
+                            target.set_control_flow(ControlFlow::WaitUntil(
+                                Instant::now() + target_frametime - time_since_last_frame,
+                            ))
+                        }
                     }
-                    //TODO: fix this
-                    // Event::RedrawEventsCleared => {
-                    //     let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
-                    //     let time_since_last_frame = last_update_inst.elapsed();
-
-                    //     if (!left_mouse_down || self.renderer.continous_motion)
-                    //         && ((self.screen_data.subpixel_idx < self.renderer.rays_per_pixel)
-                    //             || (self.screen_data.subpixel_idx == 0
-                    //                 && time_since_last_frame >= target_frametime))
-                    //     {
-                    //         log::info!(
-                    //             "Drawing ray index: {}, framerate: {}",
-                    //             self.screen_data.subpixel_idx,
-                    //             1000u128 / time_since_last_frame.as_millis()
-                    //         );
-
-                    //         last_update_inst = Instant::now();
-                    //     } else {
-                    //         // exit(0);
-                    //         *control_flow = ControlFlow::WaitUntil(
-                    //             Instant::now() + target_frametime - time_since_last_frame,
-                    //         );
-                    //     }
-                    // }
                     _ => {}
                 }
             },
