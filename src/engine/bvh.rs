@@ -258,7 +258,7 @@ impl Bvh {
         let mut bounding_boxes: Vec<NodeInner> =
             Vec::with_capacity(triangles.len().next_power_of_two());
 
-        let split_method = SplitMethod::EqualCounts;
+        let split_method = SplitMethod::Sah;
 
         Bvh::recursive_build(
             &mut bounding_boxes,
@@ -331,7 +331,7 @@ impl Bvh {
             let mut fallthrough = false;
             let mut mid = (start + end) / 2;
 
-            if matches!(split_method, SplitMethod::EqualCounts) {
+            if matches!(split_method, SplitMethod::Middle) {
                 let pmid = (centroid_bounds.first[split_dimension]
                     + centroid_bounds.second[split_dimension])
                     / 2f32;
@@ -345,7 +345,7 @@ impl Bvh {
                 }
             }
 
-            if fallthrough || matches!(split_method, SplitMethod::Middle) {
+            if fallthrough || matches!(split_method, SplitMethod::EqualCounts) {
                 mid = (start + end) / 2;
                 triangle_params_unsorted[start..end].select_nth_unstable_by(mid - start, |a, b| {
                     a.bounds_centroid()[split_dimension]
@@ -416,7 +416,7 @@ impl Bvh {
                     let mut min_cost_split_bucket: usize = 0;
 
                     for (i, c) in cost.iter().enumerate().take(n_buckets - 1).skip(1) {
-                        if cost[i] < min_cost {
+                        if *c < min_cost {
                             min_cost = *c;
                             min_cost_split_bucket = i;
                         }
@@ -438,7 +438,7 @@ impl Bvh {
                         bounds.skip_ptr_or_prim_idx1 = start as u32;
                         bounds.prim_idx2 = end as u32;
                         bounding_boxes.push(bounds);
-                        return bounding_boxes.len() as u32;
+                        return bounding_boxes.len() as u32 - 1;
                     }
                 }
             }
@@ -468,7 +468,7 @@ impl Bvh {
             // bounds.skip_ptr_or_prim_idx1 = 2u32.pow((bvh_height - level) as u32) - 1;
             // bounds.skip_ptr_or_prim_idx1 = 1;
         }
-        bounding_boxes.len() as u32
+        bounding_boxes.len() as u32 - 1
     }
 
     pub fn find_model_locations(&self, tag: &String) -> (u32, u32, u32) {
