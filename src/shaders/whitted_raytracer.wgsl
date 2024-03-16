@@ -118,7 +118,7 @@ var<storage, read> normal_nodes: Normals;
 @group(0) @binding(5)
 var<storage, read> object_params: ObjectParams;
 @group(0) @binding(6)
-var<storage, read_write> rays: Rays;
+var<storage, read> rays: Rays;
 
 const EPSILON:f32 = 0.001;
 const MAXLEN: f32 = 10000.0;
