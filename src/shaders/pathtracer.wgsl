@@ -431,22 +431,19 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
 }
 
 fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
-    // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
-    var ret: Intersection = inIntersection;
-
     let a = dot(ray.rayD, ray.rayD);
     let b = 2.0 * dot(ray.rayD, ray.rayO);
     let c = dot(ray.rayO, ray.rayO) - 1.0;
     let discriminant = b * b - 4.0 * a * c;
 
     if (discriminant < 0.0) {
-        return ret;
+        return inIntersection;
     }
 
     let t1 = (-b - sqrt(discriminant)) / (2.0 * a);
     let t2 = (-b + sqrt(discriminant)) / (2.0 * a);
 
-    if (t1 < ret.closestT || t2 < ret.closestT) {
+    if (t1 < inIntersection.closestT || t2 < inIntersection.closestT) {
         if (t1 < t2 && t1 > EPSILON) {
             return Intersection(vec2<f32>(0.0),0,t1,object_id);
         }
@@ -455,27 +452,23 @@ fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: u32) -> In
             return Intersection(vec2<f32>(0.0),0,t2,object_id);
         }
     }
-    return ret;
+    return inIntersection;
 }
 
 fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
-    var ret: Intersection = inIntersection;
-
     if (abs(ray.rayD.y) < EPSILON) {
-        return ret;
+        return inIntersection;
     }
 
     let t: f32 = -ray.rayO.y / ray.rayD.y;
 
-    if (t < ret.closestT && t > EPSILON) {
+    if (t < inIntersection.closestT && t > EPSILON) {
         return Intersection(vec2<f32>(0.0),0,t,object_id);
     }
-    return ret;
+    return inIntersection;
 }
 
 fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
-    var ret: Intersection = inIntersection;
-
     var t_min: f32 = NEG_INFINITY;
     var t_max: f32 = INFINITY;
     var t0: f32;
@@ -498,17 +491,17 @@ fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: u32) -> Inte
             t_max = t1;
         }
         if (t_max <= t_min) {
-            return ret;
+            return inIntersection;
         }
     }
 
-    if (t_min < ret.closestT && t_min > EPSILON) {
+    if (t_min < inIntersection.closestT && t_min > EPSILON) {
         return Intersection(vec2<f32>(0.0),0,t_min,object_id);
     }
-    else if (t_max < ret.closestT && t_max > EPSILON) {
+    else if (t_max < inIntersection.closestT && t_max > EPSILON) {
         return Intersection(vec2<f32>(0.0),0,t_max,object_id);
     }
-    return ret;
+    return inIntersection;
 }
 
 fn intersect(ray: Ray, start:u32, immediate_ret: bool) -> Intersection {
@@ -848,9 +841,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
     if (!light_sample || ubo.lights_offset == ubo.n_objects) {
         p_scatter = 1.0;
     }
-    
-    var sample_light = false;
-    
+        
     // Get intersected object ID
     let intersection = intersect(ray,0u,false);
     
@@ -869,7 +860,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
     }
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
 
-    var is_specular = ob_params.material.reflective > 0.0 || ob_params.material.transparency > 0.0;
+    let is_specular = ob_params.material.reflective > 0.0 || ob_params.material.transparency > 0.0;
     var scattering_target =  vec3<f32>(0.0);
     var p = hitParams.overPoint;
     
@@ -882,7 +873,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         else {
             var eta_t = ob_params.material.refractive_index;
 
-            var cos_i = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
+            let cos_i = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
 
             if (!hitParams.front_face) {
                 eta_t=eta_t/ray.refractive_index;
