@@ -959,9 +959,12 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         // let v_light_pdf = light_pdf(ray, l_intersection);
 
         var v_light_pdf = 0f;
+
+
+        let next_ray = Ray(p, -1, direction, -1, vec4<f32>(-1f));
         
         for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
-            let l_intersection = intersect(ray,i_light,true);
+            let l_intersection = intersect(next_ray,i_light,true);
             if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
                 continue;
             }
