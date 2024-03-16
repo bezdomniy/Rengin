@@ -91,6 +91,15 @@ struct ObjectParams {
     ObjectParams: array<ObjectParam>,
 };
 
+// struct Ray {
+//     rayO: vec3<f32>,
+//     refractive_index: f32,
+//     rayD: vec3<f32>,
+//     bounce_idx: i32,
+//     throughput: vec4<f32>,
+// };
+
+
 struct Ray {
     rayO: vec3<f32>,
     refractive_index: f32,
@@ -419,13 +428,13 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
     return ret;
 }
 
-fn intersectSphere(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection, object_id: u32) -> Intersection {
+fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
     // var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN);
     var ret: Intersection = inIntersection;
 
-    let a = dot(rayD, rayD);
-    let b = 2.0 * dot(rayD, rayO);
-    let c = dot(rayO, rayO) - 1.0;
+    let a = dot(ray.rayD, ray.rayD);
+    let b = 2.0 * dot(ray.rayD, ray.rayO);
+    let c = dot(ray.rayO, ray.rayO) - 1.0;
     let discriminant = b * b - 4.0 * a * c;
 
     if (discriminant < 0.0) {
@@ -447,14 +456,14 @@ fn intersectSphere(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersectio
     return ret;
 }
 
-fn intersectPlane(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection, object_id: u32) -> Intersection {
+fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
     var ret: Intersection = inIntersection;
 
-    if (abs(rayD.y) < EPSILON) {
+    if (abs(ray.rayD.y) < EPSILON) {
         return ret;
     }
 
-    let t: f32 = -rayO.y / rayD.y;
+    let t: f32 = -ray.rayO.y / ray.rayD.y;
 
     if (t < ret.closestT && t > EPSILON) {
         return Intersection(vec2<f32>(0.0),0,t,object_id);
@@ -462,7 +471,7 @@ fn intersectPlane(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection
     return ret;
 }
 
-fn intersectCube(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection, object_id: u32) -> Intersection {
+fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
     var ret: Intersection = inIntersection;
 
     var t_min: f32 = NEG_INFINITY;
@@ -472,9 +481,9 @@ fn intersectCube(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection,
 
     for (var a: i32 = 0; a < 3; a = a+1)
     {
-        let invD = 1.0 / rayD[a];
-        t0 = (-1.0 - rayO[a]) * invD;
-        t1 = (1.0 - rayO[a]) * invD;
+        let invD = 1.0 / ray.rayD[a];
+        t0 = (-1.0 - ray.rayO[a]) * invD;
+        t1 = (1.0 - ray.rayO[a]) * invD;
         if (invD < 0.0) {
             let temp = t0;
             t0 = t1;
@@ -500,7 +509,7 @@ fn intersectCube(rayO: vec3<f32>, rayD: vec3<f32>, inIntersection: Intersection,
     return ret;
 }
 
-fn intersect(rayO: vec3<f32>, rayD: vec3<f32>,start:u32, immediate_ret: bool) -> Intersection {
+fn intersect(ray: Ray, start:u32, immediate_ret: bool) -> Intersection {
     // TODO: this will need the id of the object as input in future when we are rendering more than one model
     var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
 
@@ -515,21 +524,23 @@ fn intersect(rayO: vec3<f32>, rayD: vec3<f32>,start:u32, immediate_ret: bool) ->
             continue;
         }
         
-        let t_rayO = (ob_params.inverse_transform * vec4<f32>(rayO,1.0)).xyz;
-        let t_rayD = (ob_params.inverse_transform * vec4<f32>(rayD,0.0)).xyz;
+        // let t_rayO = (ob_params.inverse_transform * vec4<f32>(rayO,1.0)).xyz;
+        // let t_rayD = (ob_params.inverse_transform * vec4<f32>(rayD,0.0)).xyz;
+        let nRay: Ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO,1.0)).xyz, ray.refractive_index, (ob_params.inverse_transform * vec4<f32>(ray.rayD,0.0)).xyz, ray.bounce_idx, vec4<f32>(-1f));
+
 
         if (ob_params.model_type == 0u) { //Sphere
-            ret = intersectSphere(t_rayO, t_rayD,ret, i);
+            ret = intersectSphere(nRay,ret, i);
         }
         else if (ob_params.model_type == 1u) { //Plane
-            ret = intersectPlane(t_rayO, t_rayD,ret, i);
+            ret = intersectPlane(nRay,ret, i);
         }
         else if (ob_params.model_type == 2u) { //Cube
-            ret = intersectCube(t_rayO, t_rayD,ret, i);
+            ret = intersectCube(nRay,ret, i);
         }
         else {
             // Triangle mesh
-            ret = intersectInnerNodes(t_rayO, t_rayD,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes,i);
+            ret = intersectInnerNodes(nRay,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes,i);
         }
 
         if (immediate_ret) {
@@ -830,18 +841,26 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
     return 1.0;
 }
 
-fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
+fn renderScene(ray: Ray, xy: vec2<u32>, offset: u32,light_sample: bool) -> vec4<f32> {
     var p_scatter = 0.5;
     if (!light_sample || ubo.lights_offset == ubo.n_objects) {
         p_scatter = 1.0;
     }
     
+    var throughput: vec4<f32> = vec4<f32>(1.0);
+
+    var uv: vec2<f32>;
+    var t: f32 = MAXLEN;
+
+    // var ob_params = object_params.ObjectParams[0];
     // let ray_miss_colour = vec4<f32>(1.0);
     // let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
-    let ray_miss_colour = vec4<f32>(0.0,0.0,0.0,1.0);
+    let ray_miss_colour = vec4<f32>(0.0);
+
+    var sample_light = false;
     
     // Get intersected object ID
-    let intersection = intersect(ray.rayO, ray.rayD,0u,false);
+    let intersection = intersect(ray,0u,false);
     
     if (intersection.id == -1 || intersection.closestT >= MAXLEN)
     {
@@ -856,23 +875,22 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1, vec4<f32>(-1f));
         return ray.throughput * ob_params.material.emissiveness;
     }
-
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
 
     var is_specular = ob_params.material.reflective > 0.0 || ob_params.material.transparency > 0.0;
     var scattering_target =  vec3<f32>(0.0);
     var p = hitParams.overPoint;
     let albedo = ob_params.material.colour;
+    
+    var pdf_adj = 1.0;
+
+    let onb = onb(hitParams.normalv);
 
     if (is_specular) {
-        let _onb = onb(hitParams.reflectv);
-
         if (ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0) {
-            // scattering_target = hitParams.reflectv;
-            scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb_local(random_cosine_direction(), _onb));
+            scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
         }
-
-        else if (ob_params.material.transparency > 0.0) {
+        else {
             var eta_t = ob_params.material.refractive_index;
 
             var cos_i = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
@@ -890,62 +908,86 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
             if (sin_2t > 1.0 || reflectance >= f32_zero_to_one(rand_pcg4d.w))
             {
                 // scattering_target = hitParams.reflectv;
-                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb_local(random_cosine_direction(), _onb));
+                // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
+                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
+                // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
             }
             else {
                 let cos_t = sqrt(1.0 - sin_2t);
 
+                // scattering_target = (hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
+                //                 (hitParams.eyev * n_ratio)) + ((1.0 - ob_params.material.transparency) * onb_local(-random_cosine_direction(), onb));
                 scattering_target = hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
                                 (hitParams.eyev * n_ratio);
-
                 p = hitParams.underPoint;
             }
         }
+        
         rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(scattering_target), ray.bounce_idx + 1, ray.throughput * albedo);
+
     }
     else {
-        let _onb = onb(hitParams.normalv);
-
         if (light_sample && f32_zero_to_one(rand_pcg4d.w) < p_scatter) {
             let light = random_light();
-            let on_light = random_point_on_light(light, p);
-            scattering_target = on_light - p;
+            scattering_target = random_to_light(light, p);
         }
         else {
-            scattering_target = onb_local(random_cosine_direction(), _onb);
-        }
 
+            sample_light = light_sample && f32_zero_to_one(rand_pcg4d.w) < p_scatter;
+            if (sample_light) {
+                let light = random_light();
+                scattering_target = random_to_light(light, p);
+                // scattering_target = on_light - p;
+            }
+            else {
+                // scattering_target = random_cosine_direction();
+                scattering_target = onb * random_cosine_direction();
+            }
+        }
         let direction = normalize(scattering_target);
+        // let ray = Ray(p, init_ray.x, direction, init_ray.y);
+        // new_ray = RenderRay(ray, ob_params.material.refractive_index);   
+
         
-        let scattering_cosine = dot(direction, _onb[2]);
+        let scattering_cosine = dot(direction, onb[2]);
+        // var scattering_pdf = 0f;
+        // if (scattering_cosine > 0f) {
+            let scattering_pdf = scattering_cosine / PI;
+        // }
 
-        var scattering_pdf = 0f;
+        // let l_intersection = intersect(ray,ubo.lights_offset,false);
+        // let v_light_pdf = light_pdf(ray, l_intersection);
 
-        if scattering_cosine > 0f {
-            scattering_pdf = scattering_cosine / PI;
-        }
-
-        var v_light_pdf = 0.0;
+        var v_light_pdf = 0f;
+        
         for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
-            let l_intersection = intersect(p, direction,i_light,true);
+            let l_intersection = intersect(ray,i_light,true);
             if (l_intersection.id == -1 || l_intersection.closestT >= MAXLEN) {
                 continue;
             }
-
-            let light_ob_params = object_params.ObjectParams[intersection.model_id];
-            let light_hit_point = p + direction * l_intersection.closestT;
-            let light_normalv = normalAt(light_hit_point, l_intersection, light_ob_params.model_type);
-
-            let light_cosine = abs(dot(-direction, light_normalv));
             
-            v_light_pdf = v_light_pdf + light_pdf(p, l_intersection, light_cosine);
+            v_light_pdf = v_light_pdf + light_pdf(ray, l_intersection);
+            // break;
         }
+
         v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
+        // v_light_pdf = v_light_pdf / f32(ubo.n_objects);
         
         let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
 
+        if (pdf > 0.0) {
+            pdf_adj = scattering_pdf / pdf;
+        }
+        else {
+            pdf_adj = scattering_pdf;
+        }
+        
+        // v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
+        
+        // let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
+
         rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1, ray.throughput * albedo * scattering_pdf / pdf);
-    }
+     }
 
     return vec4<f32>(-1f);
 }
@@ -968,7 +1010,7 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
     }
     
     init_pcg4d(vec4<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx, u32(ray.bounce_idx)));
-    let ray_color = renderScene(ray,offset,light_sample);
+    let ray_color = renderScene(ray,global_invocation_id.xy,offset,light_sample);
 
     if (ray_color.w > -EPSILON) {
         var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
