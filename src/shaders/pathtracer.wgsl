@@ -147,6 +147,8 @@ const INFINITY: f32 = 340282346638528859811704183484516925440.0;
 const NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 const PI: f32 = 3.1415926535897932384626433832795;
 
+const RAY_MISS_COLOUR = vec4<f32>(0.0,0.0,0.0,1.0);
+
 var<private> rand_pcg4d: vec4<u32>;
 
 fn init_pcg4d(v: vec4<u32>)
@@ -847,16 +849,6 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         p_scatter = 1.0;
     }
     
-    var throughput: vec4<f32> = vec4<f32>(1.0);
-
-    var uv: vec2<f32>;
-    var t: f32 = MAXLEN;
-
-    // var ob_params = object_params.ObjectParams[0];
-    // let ray_miss_colour = vec4<f32>(1.0);
-    // let ray_miss_colour = vec4<f32>(0.1,0.1,0.1,1.0);
-    let ray_miss_colour = vec4<f32>(0.0);
-
     var sample_light = false;
     
     // Get intersected object ID
@@ -865,7 +857,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
     if (intersection.id == -1 || intersection.closestT >= MAXLEN)
     {
         rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1, vec4<f32>(-1f));
-        return ray.throughput * ray_miss_colour;
+        return ray.throughput * RAY_MISS_COLOUR;
     }
 
     // TODO: just hard code object type in the intersection rather than looking it up
@@ -880,10 +872,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
     var is_specular = ob_params.material.reflective > 0.0 || ob_params.material.transparency > 0.0;
     var scattering_target =  vec3<f32>(0.0);
     var p = hitParams.overPoint;
-    let albedo = ob_params.material.colour;
     
-    var pdf_adj = 1.0;
-
     let onb = onb(hitParams.normalv);
 
     if (is_specular) {
@@ -899,8 +888,8 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
                 eta_t=eta_t/ray.refractive_index;
             }
 
-            let reflectance = schlick(cos_i, eta_t, ray.refractive_index);
-            // let reflectance = schlick_lazanyi(cos_i,eta_t,0.0);
+            // let reflectance = schlick(cos_i, eta_t, ray.refractive_index);
+            let reflectance = schlick_lazanyi(cos_i,eta_t,0.0);
 
             let n_ratio = ray.refractive_index / eta_t;
             let sin_2t = pow(n_ratio, 2.0) * (1.0 - pow(cos_i, 2.0));
@@ -923,7 +912,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
             }
         }
         
-        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(scattering_target), ray.bounce_idx + 1, ray.throughput * albedo);
+        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(scattering_target), ray.bounce_idx + 1, ray.throughput * ob_params.material.colour);
 
     }
     else {
@@ -952,7 +941,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         var v_light_pdf = 0f;
 
 
-        let next_ray = Ray(p, -1, direction, -1, vec4<f32>(-1f));
+        var next_ray = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1, vec4<f32>(-1f));
         
         for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light+1u) {
             let l_intersection = intersect(next_ray,i_light,true);
@@ -973,8 +962,9 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         // v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
         
         // let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
+        next_ray.throughput = ray.throughput * ob_params.material.colour * scattering_pdf / pdf;
 
-        rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1, ray.throughput * albedo * scattering_pdf / pdf);
+        rays[offset] = next_ray;
      }
 
     return vec4<f32>(-1f);
@@ -1000,24 +990,18 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
     init_pcg4d(vec4<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx, u32(ray.bounce_idx)));
     let ray_color = renderScene(ray,offset,light_sample);
 
+    var color: vec4<f32> = RAY_MISS_COLOUR;
+    if (ubo.subpixel_idx > 0u) {
+        color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
+    }
+    let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
+
     if (ray_color.w > -EPSILON) {
-        var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
-        if (ubo.subpixel_idx > 0u) {
-            color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
-        }
-
-        let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
         color = mix(color,ray_color,scale);
-        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
     }
+    //TODO: why this needed
     else if (ubo.ray_bounces == u32(ray.bounce_idx + 1)) {
-        var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
-        if (ubo.subpixel_idx > 0u) {
-            color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
-        }
-
-        let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
         color = mix(color,vec4<f32>(0.0,0.0,0.0,1.0),scale);
-        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
     }
+    textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }
