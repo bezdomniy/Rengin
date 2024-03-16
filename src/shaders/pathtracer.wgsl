@@ -932,17 +932,8 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
             scattering_target = random_to_light(light, p);
         }
         else {
-
-            sample_light = light_sample && f32_zero_to_one(rand_pcg4d.w) < p_scatter;
-            if (sample_light) {
-                let light = random_light();
-                scattering_target = random_to_light(light, p);
-                // scattering_target = on_light - p;
-            }
-            else {
-                // scattering_target = random_cosine_direction();
-                scattering_target = onb * random_cosine_direction();
-            }
+            // scattering_target = random_cosine_direction();
+            scattering_target = onb * random_cosine_direction();
         }
         let direction = normalize(scattering_target);
         // let ray = Ray(p, init_ray.x, direction, init_ray.y);
@@ -978,12 +969,6 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
         
         let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
 
-        if (pdf > 0.0) {
-            pdf_adj = scattering_pdf / pdf;
-        }
-        else {
-            pdf_adj = scattering_pdf;
-        }
         
         // v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
         
