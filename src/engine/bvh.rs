@@ -461,7 +461,7 @@ impl Bvh {
                 split_method,
             );
 
-            bounding_boxes[curr_idx].skip_ptr_or_prim_idx1 = skip_ptr + 1;
+            bounding_boxes[curr_idx].skip_ptr_or_prim_idx1 = skip_ptr;
 
             // println!("{:?}", bounds);
 
