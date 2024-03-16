@@ -360,9 +360,6 @@ impl<'a> RenderApp<'a> {
                                         &[],
                                     );
 
-                                    // TODO: move ray bounce loop out of shader, and do it here
-
-
                                     for _ in 0..self.renderer.ray_bounces {
                                         cpass.dispatch_workgroups(
                                             self.screen_data.size.width / WORKGROUP_SIZE[0],
