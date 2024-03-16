@@ -841,7 +841,7 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
     return 1.0;
 }
 
-fn renderScene(ray: Ray, xy: vec2<u32>, offset: u32,light_sample: bool) -> vec4<f32> {
+fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
     var p_scatter = 0.5;
     if (!light_sample || ubo.lights_offset == ubo.n_objects) {
         p_scatter = 1.0;
@@ -1010,7 +1010,7 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
     }
     
     init_pcg4d(vec4<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx, u32(ray.bounce_idx)));
-    let ray_color = renderScene(ray,global_invocation_id.xy,offset,light_sample);
+    let ray_color = renderScene(ray,offset,light_sample);
 
     if (ray_color.w > -EPSILON) {
         var color: vec4<f32> = vec4<f32>(0.0,0.0,0.0,1.0);
