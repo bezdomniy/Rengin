@@ -38,7 +38,7 @@ fn main(@location(0) inUV: vec2<f32>) -> @location(0) vec4<f32> {
     if (ubo.is_pathtracer == 1u) {
         color = sqrt(color);
     }
-    
+
     color = clamp(color,vec4<f32>(0.0),vec4<f32>(0.999));
     return to_linear_rgb(color);
 }

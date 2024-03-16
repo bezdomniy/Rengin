@@ -3,7 +3,7 @@ use wgpu_gecko as wgpu;
 
 use std::f32::consts::FRAC_PI_2;
 
-use glam::{const_vec3, Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
 // use rand::Rng;
 use wgpu::SurfaceConfiguration;
 use winit::dpi::PhysicalSize;
@@ -127,9 +127,9 @@ pub struct Camera {
 
 impl Camera {
     pub fn new(p: [f32; 3], c: [f32; 3], u: [f32; 3]) -> Self {
-        let position = const_vec3!(p);
-        let centre = const_vec3!(c);
-        let up = const_vec3!(u);
+        let position = Vec3::from_array(p);
+        let centre = Vec3::from_array(c);
+        let up = Vec3::from_array(u);
 
         let (yaw, pitch) = Camera::get_yaw_pitch(position, centre);
 
@@ -204,7 +204,7 @@ impl Camera {
             angle_xz.cos() * angle_y.cos() * camera_dist,
         ];
 
-        self.position = const_vec3!(new_position);
+        self.position = Vec3::from_array(new_position);
     }
 
     pub fn move_forward(&mut self, d: f32) {

@@ -6,10 +6,10 @@ mod renderer;
 
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{
-    DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode,
-    WindowEvent,
+    DeviceEvent, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget};
+use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowBuilder};
 
 // use std::process::exit;
@@ -48,15 +48,15 @@ struct GameState {
     pub camera: Camera,
 }
 
-struct RenderApp {
-    renderer: RenginWgpu,
+struct RenderApp<'a> {
+    renderer: RenginWgpu<'a>,
     screen_data: ScreenData,
     game_state: GameState,
 }
 
-impl RenderApp {
+impl<'a> RenderApp<'a> {
     pub fn new(
-        window: &Window,
+        window: &'a Window,
         resolution: &PhysicalSize<u32>,
         scene: &Scene,
         continous_motion: bool,
@@ -212,7 +212,11 @@ impl RenderApp {
         {
             // compute pass
             let mut cpass =
-                command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+                command_encoder.begin_compute_pass(
+                    &wgpu::ComputePassDescriptor {
+                        label: None,
+                        timestamp_writes: Default::default(),
+                    },);
             cpass.set_pipeline(self.renderer.raygen_pipeline.as_ref().unwrap());
             cpass.set_bind_group(0, self.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
 
@@ -234,175 +238,180 @@ impl RenderApp {
     }
 
     pub async fn render(mut self, event_loop: EventLoop<()>) {
+        let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
         let mut last_update_inst = Instant::now();
         let mut left_mouse_down = false;
 
-        event_loop.run(move |event, _, control_flow| {
-            // *control_flow = ControlFlow::Wait;
-            match event {
-                Event::MainEventsCleared => {
-                    if self.screen_data.subpixel_idx < self.renderer.rays_per_pixel {
-                        self.update();
-
-                        let frame = match self.renderer.surface.get_current_texture() {
-                            Ok(frame) => frame,
-                            Err(_) => {
-                                self.renderer
-                                    .surface
-                                    .configure(&self.renderer.device, &self.renderer.config);
-                                self.renderer
-                                    .surface
-                                    .get_current_texture()
-                                    .expect("Failed to acquire next surface texture!")
-                            }
-                        };
-                        let view = frame
-                            .texture
-                            .create_view(&wgpu::TextureViewDescriptor::default());
-
-                        // TODO: create send texture to use to keep track of previous frame
-
-                        // create render pass descriptor and its color attachments
-                        let color_attachments = [Some(wgpu::RenderPassColorAttachment {
-                            view: &view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                // load: wgpu::LoadOp::Load,
-                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                store: true,
-                            },
-                        })];
-                        let render_pass_descriptor = wgpu::RenderPassDescriptor {
-                            label: None,
-                            color_attachments: &color_attachments,
-                            depth_stencil_attachment: None,
-                        };
-
-                        let mut command_encoder = self.renderer.device.create_command_encoder(
-                            &wgpu::CommandEncoderDescriptor { label: None },
-                        );
-
-                        command_encoder.push_debug_group("compute ray trace");
-                        {
-                            // compute pass
-                            let mut cpass = command_encoder
-                                .begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
-                            cpass.set_pipeline(self.renderer.compute_pipeline.as_ref().unwrap());
-                            cpass.set_bind_group(
-                                0,
-                                self.renderer.compute_bind_group.as_ref().unwrap(),
-                                &[],
-                            );
-
-                            for _ in 0..self.renderer.ray_bounces {
-                                cpass.dispatch_workgroups(
-                                    self.screen_data.size.width / WORKGROUP_SIZE[0],
-                                    // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
-                                    self.screen_data.size.height / WORKGROUP_SIZE[1],
-                                    // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
-                                    WORKGROUP_SIZE[2],
-                                );
-                            }
+        let _ = event_loop.run(
+            move |event: Event<()>, target: &EventLoopWindowTarget<()>| {
+                match event {
+                    winit::event::Event::WindowEvent { event, .. } => match event {
+                        WindowEvent::Resized(size) => {
+                            self.screen_data.update_dims(&size);
+                            self.screen_data.subpixel_idx = 0;
+                            self.renderer.update_window_size(&size);
                         }
-                        command_encoder.pop_debug_group();
-
-                        command_encoder.push_debug_group("render texture");
-                        {
-                            // render pass
-                            let mut rpass =
-                                command_encoder.begin_render_pass(&render_pass_descriptor);
-                            rpass.set_pipeline(self.renderer.render_pipeline.as_ref().unwrap());
-                            rpass.set_bind_group(
-                                0,
-                                self.renderer.render_bind_group.as_ref().unwrap(),
-                                &[],
-                            );
-                            // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
-                            // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
-                            rpass.draw(0..3, 0..1);
-                        }
-                        command_encoder.pop_debug_group();
-
-                        self.renderer
-                            .queue
-                            .submit(std::iter::once(command_encoder.finish()));
-
-                        self.renderer.device.poll(wgpu::Maintain::Wait);
-                        frame.present();
-                    }
-                }
-                Event::RedrawEventsCleared => {
-                    let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
-                    let time_since_last_frame = last_update_inst.elapsed();
-
-                    if (!left_mouse_down || self.renderer.continous_motion)
-                        && ((self.screen_data.subpixel_idx < self.renderer.rays_per_pixel)
-                            || (self.screen_data.subpixel_idx == 0
-                                && time_since_last_frame >= target_frametime))
-                    {
-                        log::info!(
-                            "Drawing ray index: {}, framerate: {}",
-                            self.screen_data.subpixel_idx,
-                            1000u128 / time_since_last_frame.as_millis()
-                        );
-
-                        last_update_inst = Instant::now();
-                    } else {
-                        // exit(0);
-                        *control_flow = ControlFlow::WaitUntil(
-                            Instant::now() + target_frametime - time_since_last_frame,
-                        );
-                    }
-                }
-                Event::WindowEvent {
-                    event:
-                        WindowEvent::Resized(size)
-                        | WindowEvent::ScaleFactorChanged {
-                            new_inner_size: &mut size,
+                        WindowEvent::KeyboardInput {
+                            event:
+                                KeyEvent {
+                                    logical_key: Key::Named(NamedKey::Escape),
+                                    state: ElementState::Pressed,
+                                    ..
+                                },
                             ..
-                        },
-                    ..
-                } => {
-                    self.screen_data.update_dims(&size);
-                    self.screen_data.subpixel_idx = 0;
-                    self.renderer.update_window_size(&size);
+                        }
+                        | WindowEvent::CloseRequested => target.exit(),
+
+                        // #[cfg(not(target_arch = "wasm32"))]
+                        WindowEvent::KeyboardInput {
+                            event:
+                                KeyEvent {
+                                    logical_key: Key::Character(s),
+                                    state: ElementState::Pressed,
+                                    ..
+                                },
+                            ..
+                        } if s == "R" => {
+                            println!("{:#?}", self.renderer.instance.generate_report());
+                        }
+                        WindowEvent::RedrawRequested => {}
+                        _ => {
+                            self.update_window_event(event, &mut left_mouse_down);
+                        }
+                    },
+                    Event::DeviceEvent { event, .. } => {
+                        self.update_device_event(event, &mut left_mouse_down);
+                    }
+                    Event::AboutToWait => {
+                        let time_since_last_frame = last_update_inst.elapsed();
+
+                        if (!left_mouse_down || self.renderer.continous_motion)
+                            && ((self.screen_data.subpixel_idx < self.renderer.rays_per_pixel)
+                                || (self.screen_data.subpixel_idx == 0
+                                    && time_since_last_frame >= target_frametime))
+                        {
+                            log::info!(
+                                "Drawing ray index: {}, framerate: {}",
+                                self.screen_data.subpixel_idx,
+                                1000u128 / time_since_last_frame.as_millis()
+                            );
+
+                            last_update_inst = Instant::now();
+                            if self.screen_data.subpixel_idx < self.renderer.rays_per_pixel {
+                                self.update();
+
+                                let frame = match self.renderer.surface.get_current_texture() {
+                                    Ok(frame) => frame,
+                                    Err(_) => {
+                                        self.renderer.surface.configure(
+                                            &self.renderer.device,
+                                            &self.renderer.config,
+                                        );
+                                        self.renderer
+                                            .surface
+                                            .get_current_texture()
+                                            .expect("Failed to acquire next surface texture!")
+                                    }
+                                };
+                                let view = frame
+                                    .texture
+                                    .create_view(&wgpu::TextureViewDescriptor::default());
+
+                                // TODO: create send texture to use to keep track of previous frame
+
+                                // create render pass descriptor and its color attachments
+                                let color_attachments = [Some(wgpu::RenderPassColorAttachment {
+                                    view: &view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        // load: wgpu::LoadOp::Load,
+                                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                })];
+                                let render_pass_descriptor = wgpu::RenderPassDescriptor {
+                                    label: None,
+                                    color_attachments: &color_attachments,
+                                    depth_stencil_attachment: None,
+                                    occlusion_query_set: Default::default(),
+                                    timestamp_writes: Default::default(),
+                                };
+
+                                let mut command_encoder =
+                                    self.renderer.device.create_command_encoder(
+                                        &wgpu::CommandEncoderDescriptor { label: None },
+                                    );
+
+                                command_encoder.push_debug_group("compute ray trace");
+                                {
+                                    // compute pass
+                                    let mut cpass = command_encoder.begin_compute_pass(
+                                        &wgpu::ComputePassDescriptor {
+                                            label: None,
+                                            timestamp_writes: Default::default(),
+                                        },
+                                    );
+                                    cpass.set_pipeline(
+                                        self.renderer.compute_pipeline.as_ref().unwrap(),
+                                    );
+                                    cpass.set_bind_group(
+                                        0,
+                                        self.renderer.compute_bind_group.as_ref().unwrap(),
+                                        &[],
+                                    );
+
+                                    // TODO: move ray bounce loop out of shader, and do it here
+
+
+                                    for _ in 0..self.renderer.ray_bounces {
+                                        cpass.dispatch_workgroups(
+                                            self.screen_data.size.width / WORKGROUP_SIZE[0],
+                                            // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
+                                            self.screen_data.size.height / WORKGROUP_SIZE[1],
+                                            // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
+                                            WORKGROUP_SIZE[2],
+                                        );
+                                    }
+                                }
+                                command_encoder.pop_debug_group();
+
+                                command_encoder.push_debug_group("render texture");
+                                {
+                                    // render pass
+                                    let mut rpass =
+                                        command_encoder.begin_render_pass(&render_pass_descriptor);
+                                    rpass.set_pipeline(
+                                        self.renderer.render_pipeline.as_ref().unwrap(),
+                                    );
+                                    rpass.set_bind_group(
+                                        0,
+                                        self.renderer.render_bind_group.as_ref().unwrap(),
+                                        &[],
+                                    );
+                                    // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
+                                    // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
+                                    rpass.draw(0..3, 0..1);
+                                }
+                                command_encoder.pop_debug_group();
+
+                                self.renderer
+                                    .queue
+                                    .submit(std::iter::once(command_encoder.finish()));
+
+                                self.renderer.device.poll(wgpu::Maintain::Wait);
+                                frame.present();
+                            }
+                        } else {
+                            // exit(0);
+                            target.set_control_flow(ControlFlow::WaitUntil(
+                                Instant::now() + target_frametime - time_since_last_frame,
+                            ))
+                        }
+                    }
+                    _ => {}
                 }
-                Event::DeviceEvent { event, .. } => {
-                    self.update_device_event(event, &mut left_mouse_down);
-                }
-                Event::WindowEvent { event, .. } => match event {
-                    WindowEvent::KeyboardInput {
-                        input:
-                            KeyboardInput {
-                                virtual_keycode: Some(VirtualKeyCode::Escape),
-                                state: ElementState::Pressed,
-                                ..
-                            },
-                        ..
-                    }
-                    | WindowEvent::CloseRequested => {
-                        *control_flow = ControlFlow::Exit;
-                    }
-                    // #[cfg(not(target_arch = "wasm32"))]
-                    WindowEvent::KeyboardInput {
-                        input:
-                            KeyboardInput {
-                                virtual_keycode: Some(VirtualKeyCode::R),
-                                state: ElementState::Pressed,
-                                ..
-                            },
-                        ..
-                    } => {
-                        // println!("{:#?}", self.renderer.instance.generate_report());
-                    }
-                    _ => {
-                        self.update_window_event(event, &mut left_mouse_down);
-                    }
-                },
-                Event::RedrawRequested(_) => {}
-                _ => {}
-            }
-        });
+            },
+        );
     }
 }
 
@@ -453,7 +462,7 @@ fn main() {
         now.elapsed().as_millis()
     );
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
 
     let monitor_scale_factor = event_loop.primary_monitor().unwrap().scale_factor();
     let resolution = event_loop.primary_monitor().unwrap().size();

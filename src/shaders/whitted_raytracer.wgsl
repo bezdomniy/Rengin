@@ -118,17 +118,17 @@ var<storage, read> normal_nodes: Normals;
 @group(0) @binding(5)
 var<storage, read> object_params: ObjectParams;
 @group(0) @binding(6)
-var<storage, read_write> rays: Rays;
+var<storage, read> rays: Rays;
 
-let EPSILON:f32 = 0.001;
-let MAXLEN: f32 = 10000.0;
-let INFINITY: f32 = 340282346638528859811704183484516925440.0;
-let NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
+const EPSILON:f32 = 0.001;
+const MAXLEN: f32 = 10000.0;
+const INFINITY: f32 = 340282346638528859811704183484516925440.0;
+const NEG_INFINITY: f32 = -340282346638528859811704183484516925440.0;
 
-let MAX_RAY_BOUNCE_ARRAY_SIZE: i32 = 8;
+const MAX_RAY_BOUNCE_ARRAY_SIZE: i32 = 8;
 
 fn intersectAABB(ray: Ray, aabbIdx: i32) -> bool {
-    // let INFINITY: f32 = 1.0 / 0.0;
+    // const INFINITY: f32 = 1.0 / 0.0;
 
     var t_min: f32 = NEG_INFINITY;
     var t_max: f32 = INFINITY;
@@ -201,7 +201,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
     var idx: i32 = min_inner_node_idx;
     loop  
     {
-        if (idx >= max_inner_node_idx ) {break};
+        if (idx >= max_inner_node_idx ) {break;};
 
         let current_node: NodeInner = inner_nodes.InnerNodes[idx];
         let leaf_node: bool = current_node.idx2 > 0u;
@@ -533,7 +533,7 @@ fn renderScene(init_ray: Ray) -> vec4<f32> {
     let light_emissiveness = light.material.emissiveness;
 
     loop  {
-        if (top_stack < 0) { break }
+        if (top_stack < 0) { break; }
 
         let new_ray = stack[top_stack];
         top_stack = top_stack - 1;

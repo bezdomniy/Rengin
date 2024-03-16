@@ -2,13 +2,10 @@
 name = "rengin"
 version = "0.1.0"
 authors = ["Ilia <ilia.shibaev@gmail.com>"]
-edition = "2018"
-resolver = "2"
+edition = "2021"
 
 [workspace]
-members = [
-    "run-wasm",
-]
+members = ["run-wasm"]
 
 [features]
 default = ["native"]
@@ -16,25 +13,26 @@ native = ["glam/std"]
 webgl = ["glam/libm"]
 
 [dependencies]
-glam = { version = "0.20.5", default-features = false, features = ["bytemuck"] }
-winit = "0.26"
-tobj = "3.2.2"
+glam = { version = "0.25", default-features = false, features = ["bytemuck"] }
+winit = "0.29"
+tobj = "4.0"
 bincode = "1.3.3"
-env_logger = "0.8"
+env_logger = "0.11"
 log = "0.4"
-bytemuck = { version = "1.7.2", features = [ "derive" ] }
+bytemuck = { version = "1.14", features = ["derive"] }
 rand = "0.8.4"
 yaml-rust = "0.4"
 linked-hash-map = "0.5.4"
 serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.8"
-image = "0.23"
-itertools = "0.10.3"
-clap = { version = "3.0.5", features = ["derive"] }
+serde_yaml = "0.9"
+image = "0.25"
+itertools = "0.12"
+clap = { version = "4.5", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-futures = { version = "0.3"}
-wgpu = {version="0.13", features= ["vulkan-portability"]}
+futures = { version = "0.3" }
+wgpu = { version = "0.19", features = ["vulkan-portability"] }
+# wgpu = { git = "https://github.com/gfx-rs/wgpu.git", branch = "trunk", package = "wgpu", features= ["vulkan-portability"] }
 # ash =  { version="0.37", default-features = false, features = ["linked", "debug"] }
 # ash-window = "0.10"
 #renderdoc = "0.10.1"
@@ -48,153 +46,6 @@ wgpu = {version="0.13", features= ["vulkan-portability"]}
 # wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
 # instant = { version = "0.1", features = [ "stdweb" ] }
 # getrandom = { version = "0.2", features = ["js"] }
-# web-sys = { version = "0.3.53", features = [
-#     'console',
-#     "AddEventListenerOptions",
-#     'CssStyleDeclaration',
-#     'BeforeUnloadEvent',
-#     'Document',
-#     'DomRect',
-#     'Element',
-#     'Event',
-#     'EventTarget',
-#     'FocusEvent',
-#     'HtmlCanvasElement',
-#     'HtmlElement',
-#     'KeyboardEvent',
-#     'MediaQueryList',
-#     'MediaQueryListEvent',
-#     'MouseEvent',
-#     'PointerEvent',
-#     "Headers",
-#     "Request",
-#     "RequestInit",
-#     "RequestMode",
-#     "Response",
-#     "Document",
-#     "Navigator",
-#     "Node",
-#     "NodeList",
-#     "Gpu",
-#     "GpuAdapter",
-#     "GpuAddressMode",
-#     "GpuBindGroup",
-#     "GpuBindGroupDescriptor",
-#     "GpuBindGroupEntry",
-#     "GpuBindGroupLayout",
-#     "GpuBindGroupLayoutDescriptor",
-#     "GpuBindGroupLayoutEntry",
-#     "GpuBlendComponent",
-#     "GpuBlendFactor",
-#     "GpuBlendOperation",
-#     "GpuBlendState",
-#     "GpuBuffer",
-#     "GpuBufferBinding",
-#     "GpuBufferBindingLayout",
-#     "GpuBufferBindingType",
-#     "GpuBufferDescriptor",
-#     "GpuBufferUsage",
-#     "GpuCanvasContext",
-#     "GpuCanvasConfiguration",
-#     "GpuColorDict",
-#     "GpuColorTargetState",
-#     "GpuColorWrite",
-#     "GpuCommandBuffer",
-#     "GpuCommandBufferDescriptor",
-#     "GpuCommandEncoder",
-#     "GpuCommandEncoderDescriptor",
-#     "GpuCompareFunction",
-#     "GpuCompilationInfo",
-#     "GpuCompilationMessage",
-#     "GpuCompilationMessageType",
-#     "GpuComputePassDescriptor",
-#     "GpuComputePassEncoder",
-#     "GpuComputePipeline",
-#     "GpuComputePipelineDescriptor",
-#     "GpuCullMode",
-#     "GpuDepthStencilState",
-#     "GpuDevice",
-#     "GpuDeviceDescriptor",
-#     "GpuDeviceLostInfo",
-#     "GpuDeviceLostReason",
-#     "GpuErrorFilter",
-#     "GpuExtent3dDict",
-#     "GpuFeatureName",
-#     "GpuFilterMode",
-#     "GpuFragmentState",
-#     "GpuFrontFace",
-#     "GpuImageCopyBuffer",
-#     "GpuImageCopyTexture",
-#     "GpuImageDataLayout",
-#     "GpuIndexFormat",
-#     "GpuLoadOp",
-#     "GpuMapMode",
-#     "GpuMultisampleState",
-#     "GpuObjectDescriptorBase",
-#     "GpuOrigin2dDict",
-#     "GpuOrigin3dDict",
-#     "GpuOutOfMemoryError",
-#     "GpuPipelineDescriptorBase",
-#     "GpuPipelineLayout",
-#     "GpuPipelineLayoutDescriptor",
-#     "GpuPipelineStatisticName",
-#     "GpuPowerPreference",
-#     "GpuPrimitiveState",
-#     "GpuPrimitiveTopology",
-#     "GpuProgrammableStage",
-#     "GpuQuerySet",
-#     "GpuQuerySetDescriptor",
-#     "GpuQueryType",
-#     "GpuQueue",
-#     "GpuRenderBundle",
-#     "GpuRenderBundleDescriptor",
-#     "GpuRenderBundleEncoder",
-#     "GpuRenderBundleEncoderDescriptor",
-#     "GpuRenderPassColorAttachment",
-#     "GpuRenderPassDepthStencilAttachment",
-#     "GpuRenderPassDescriptor",
-#     "GpuRenderPassEncoder",
-#     "GpuRenderPipeline",
-#     "GpuRenderPipelineDescriptor",
-#     "GpuRequestAdapterOptions",
-#     "GpuSampler",
-#     "GpuSamplerBindingLayout",
-#     "GpuSamplerBindingType",
-#     "GpuSamplerDescriptor",
-#     "GpuShaderModule",
-#     "GpuShaderModuleDescriptor",
-#     "GpuShaderStage",
-#     "GpuStencilFaceState",
-#     "GpuStencilOperation",
-#     "GpuStorageTextureAccess",
-#     "GpuStorageTextureBindingLayout",
-#     "GpuStoreOp",
-#     "GpuSupportedFeatures",
-#     "GpuSupportedLimits",
-#     "GpuTexture",
-#     "GpuTextureAspect",
-#     "GpuTextureBindingLayout",
-#     "GpuTextureDescriptor",
-#     "GpuTextureDimension",
-#     "GpuTextureFormat",
-#     "GpuTextureSampleType",
-#     "GpuTextureUsage",
-#     "GpuTextureView",
-#     "GpuTextureViewDescriptor",
-#     "GpuTextureViewDimension",
-#     "GpuUncapturedErrorEvent",
-#     "GpuUncapturedErrorEventInit",
-#     "GpuValidationError",
-#     "GpuVertexAttribute",
-#     "GpuVertexBufferLayout",
-#     "GpuVertexFormat",
-#     "GpuVertexState",
-#     "GpuVertexStepMode",
-#     "HtmlCanvasElement",
-#     "OffscreenCanvas",
-#     "Window",
-#     'WheelEvent'
-# ]}
 
-[profile.release] 
+[profile.release]
 debug = true

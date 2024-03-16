@@ -1,6 +1,6 @@
 use super::{bvh::Bvh, rt_primitives::Material, rt_primitives::ObjectParam};
 use crate::RendererType;
-use glam::{const_vec4, Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3, Vec4};
 use image::{ImageBuffer, Rgba};
 use itertools::Itertools;
 use rand::{distributions::Alphanumeric, Rng};
@@ -585,7 +585,7 @@ impl Scene {
             // println!("{:#?}", object_param.material);
         }
 
-        if object_param.material.emissiveness == const_vec4!([0.0; 4]) {
+        if object_param.material.emissiveness == Vec4::from_array([0.0; 4]) {
             if object_param.material.reflective > 0f32 || object_param.material.transparency > 0f32
             {
                 accum_specular_params.insert((object_map_key, hash), object_param);

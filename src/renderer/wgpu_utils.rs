@@ -17,7 +17,7 @@ use winit::{dpi::PhysicalSize, window::Window};
 
 use super::{RenginRenderer, RenginShaderModule};
 
-pub struct RenginWgpu {
+pub struct RenginWgpu<'a> {
     pub instance: Instance,
     pub adapter: Adapter,
     pub device: Device,
@@ -33,7 +33,7 @@ pub struct RenginWgpu {
     pub render_bind_group: Option<BindGroup>,
     pub buffers: Option<HashMap<&'static str, Buffer>>,
     pub compute_target_texture: Option<Texture>,
-    pub surface: Surface,
+    pub surface: Surface<'a>,
     pub config: wgpu::SurfaceConfiguration,
     pub shaders: Option<HashMap<&'static str, RenginShaderModule>>,
     // pub physical_size: PhysicalSize<u32>,
@@ -46,22 +46,33 @@ pub struct RenginWgpu {
     // pub resolution: PhysicalSize<u32>,
 }
 
-impl RenginWgpu {
+impl<'a> RenginWgpu<'a> {
     pub async fn new(
-        window: &Window,
+        window: &'a Window,
         // workgroup_size: [u32; 3],
         continous_motion: bool,
         rays_per_pixel: u32,
         ray_bounces: u32,
     ) -> Self {
-        let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
 
-        log::info!("backend: {:?}", backend);
-        // let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
-        let instance = wgpu::Instance::new(backend);
+        let width = window.inner_size().width;
+        let height = window.inner_size().height;
+
+        let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
+
+        log::info!("backend: {:?}", backends);
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends,
+            dx12_shader_compiler: Default::default(),
+            ..Default::default()
+        });
         log::info!("instance: {:?}", instance);
 
-        let window_surface = unsafe { instance.create_surface(&window) };
+        for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
+            log::debug!("Found adapter {:?}", adapter)
+        }
+
+        let window_surface = instance.create_surface(window).unwrap() ;
         log::info!("window_surface: {:?}", window_surface);
 
         let adapter = instance
@@ -118,20 +129,25 @@ impl RenginWgpu {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    features: (optional_features & adapter_features) | required_features,
-                    limits: required_limits,
+                    required_features: (optional_features & adapter_features) | required_features,
+                    required_limits,
                 },
                 trace_dir.ok().as_ref().map(std::path::Path::new),
             )
             .await
             .unwrap();
 
+        let surface_caps = window_surface.get_capabilities(&adapter);
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: window_surface.get_supported_formats(&adapter)[0],
-            width: window.inner_size().width,
-            height: window.inner_size().height,
+            format: surface_caps.formats[0],
+            alpha_mode: surface_caps.alpha_modes[0],
             present_mode: wgpu::PresentMode::Fifo,
+            width,
+            height,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2
         };
         // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
@@ -167,7 +183,7 @@ impl RenginWgpu {
     }
 }
 
-impl RenginRenderer for RenginWgpu {
+impl<'a> RenginRenderer for RenginWgpu<'a> {
     fn update_window_size(&mut self, physical_size: &PhysicalSize<u32>) {
         // self.physical_size = winit::dpi::PhysicalSize::new(width, height);
         // self.logical_size = self.physical_size.to_logical(self.scale_factor);
@@ -193,6 +209,7 @@ impl RenginRenderer for RenginWgpu {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
             usage: wgpu::TextureUsages::STORAGE_BINDING,
             label: None,
         }));
@@ -464,7 +481,7 @@ impl RenginRenderer for RenginWgpu {
                         binding: 6,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(
                                 ((screen_data.resolution.width * screen_data.resolution.height)
