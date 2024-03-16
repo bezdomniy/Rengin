@@ -438,7 +438,7 @@ impl Bvh {
                         bounds.skip_ptr_or_prim_idx1 = start as u32;
                         bounds.prim_idx2 = end as u32;
                         bounding_boxes.push(bounds);
-                        return bounding_boxes.len() as u32 - 1;
+                        return bounding_boxes.len() as u32;
                     }
                 }
             }
@@ -461,14 +461,14 @@ impl Bvh {
                 split_method,
             );
 
-            bounding_boxes[curr_idx].skip_ptr_or_prim_idx1 = skip_ptr + 1;
+            bounding_boxes[curr_idx].skip_ptr_or_prim_idx1 = skip_ptr;
 
             // println!("{:?}", bounds);
 
             // bounds.skip_ptr_or_prim_idx1 = 2u32.pow((bvh_height - level) as u32) - 1;
             // bounds.skip_ptr_or_prim_idx1 = 1;
         }
-        bounding_boxes.len() as u32 - 1
+        bounding_boxes.len() as u32
     }
 
     pub fn find_model_locations(&self, tag: &String) -> (u32, u32, u32) {
