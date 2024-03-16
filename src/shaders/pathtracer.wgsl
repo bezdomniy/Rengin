@@ -981,6 +981,19 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
     if (ray.bounce_idx < 0) {
         return;
     }
+
+    //TODO: why this needed
+    if (ubo.ray_bounces == u32(ray.bounce_idx + 1)) {
+        var color: vec4<f32> = RAY_MISS_COLOUR;
+        if (ubo.subpixel_idx > 0u) {
+            color = textureLoad(imageData,vec2<i32>(global_invocation_id.xy));
+        }
+        let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
+
+        color = mix(color,vec4<f32>(0.0,0.0,0.0,1.0),scale);
+        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+        return;
+    }
     
     var light_sample = true;
     if (ubo.lights_offset == ubo.n_objects) {
@@ -998,10 +1011,6 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
 
     if (ray_color.w > -EPSILON) {
         color = mix(color,ray_color,scale);
+        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
     }
-    //TODO: why this needed
-    else if (ubo.ray_bounces == u32(ray.bounce_idx + 1)) {
-        color = mix(color,vec4<f32>(0.0,0.0,0.0,1.0),scale);
-    }
-    textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
 }
