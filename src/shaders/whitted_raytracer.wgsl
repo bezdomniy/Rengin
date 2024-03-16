@@ -1,5 +1,5 @@
 // TODO: !! fix so only lights get used as lights, not emissive shapes
-
+// NOT WORKING AFTER LOOP SHADER UPDATE
 struct NodeLeaf {
     point1: vec3<f32>,
     pad1: u32,
