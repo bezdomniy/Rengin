@@ -1,6 +1,5 @@
 use itertools::partition;
 use std::any::Any;
-use tobj;
 static MAX_SHAPES_IN_NODE: usize = 4;
 
 use glam::{Mat3, Vec3, Vec4};
