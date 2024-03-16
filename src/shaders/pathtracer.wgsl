@@ -960,7 +960,7 @@ fn renderScene(ray: Ray, offset: u32,light_sample: bool) -> vec4<f32> {
                 continue;
             }
             
-            v_light_pdf = v_light_pdf + light_pdf(ray, l_intersection);
+            v_light_pdf = v_light_pdf + light_pdf(next_ray, l_intersection);
             // break;
         }
 
