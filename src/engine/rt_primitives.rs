@@ -3,7 +3,7 @@ use wgpu_gecko as wgpu;
 
 use std::f32::consts::FRAC_PI_2;
 
-use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat4, Vec2,Vec3, Vec4};
 // use rand::Rng;
 use wgpu::SurfaceConfiguration;
 use winit::dpi::PhysicalSize;
