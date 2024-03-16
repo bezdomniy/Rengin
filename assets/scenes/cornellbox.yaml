@@ -5,9 +5,6 @@
   from: [278, 278, -760]
   to: [278, 278, 0]
   up: [0, 1, 0]
-- add: light
-  at: [278, 500, 278]
-  intensity: [1, 1, 1]
 - define: base-material
   value:
     color: [1, 0, 0]
@@ -42,18 +39,13 @@
 - define: white-light
   extend: white-material
   value:
-    emissiveness: [7, 7, 7]
+    emissiveness: [5,5,5]
 
 # - define: sun-light
 #   extend: base-material
 #   value:
 #     emissiveness: [1000,1000,1000]
 
-- add: cube
-  material: white-light
-  transform:
-    - [scale, 65, 1, 53]
-    - [translate, 278, 554, 278]
 
 # - add: sphere
 #   material: sun-light
@@ -85,7 +77,7 @@
   material: white-material
   # material:
   #   color: [1, 1, 1]
-  # #   reflective: 1
+  #   reflective: 1
   # #   transparency: 1
   # #   refractive-index: 1.5
   transform:
@@ -99,12 +91,35 @@
     color: [1, 1, 1]
     reflective: 1
     transparency: 1
-    refractive-index: 1.5
+    refractive-index: 1.52
   transform:
     - [scale, 82.5, 82.5, 82.5]
     - [rotate-y, -0.314159]
     - [translate, 212.5, 82.5, 147.5]
 
+- add: sphere
+  # material: white-material
+  material:
+    color: [1, 1, 1]
+    reflective: 1
+    transparency: 1
+    refractive-index: 1
+  transform:
+    - [scale, 80.5, 80.5, 80.5]
+    - [rotate-y, -0.314159]
+    - [translate, 212.5, 82.5, 147.5]
+- add: cube
+  # material: white-material
+  material:
+    emissiveness: [1000,1000,1000]
+    color: [1, 1, 1]
+    # reflective: 1
+    # transparency: 1
+    # refractive-index: 1
+  transform:
+    - [scale, 2.7321, 2.7321, 2.7321]
+    - [rotate-y, -0.314159]
+    - [translate, 212.5, 82.5, 147.5]
 - add: cube
   material: white-material
   transform:
@@ -135,3 +150,12 @@
     - [scale, 278, 1, 278]
     - [rotate-z, 1.5708]
     - [translate, 0, 278, 278]
+
+- add: light
+  at: [278, 500, 278]
+  intensity: [1, 1, 1]
+# - add: cube
+#   material: white-light
+#   transform:
+#     - [scale, 65, 1, 53]
+#     - [translate, 278, 554, 278]
