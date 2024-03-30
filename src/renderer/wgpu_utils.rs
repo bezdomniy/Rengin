@@ -19,7 +19,7 @@ use super::{RenginRenderer, RenginShaderModule};
 
 pub struct RenginWgpu<'a> {
     pub instance: Instance,
-    pub adapter: Adapter,
+    pub _adapter: Adapter,
     pub device: Device,
     pub queue: Queue,
     pub raygen_pipeline: Option<ComputePipeline>,
@@ -54,7 +54,6 @@ impl<'a> RenginWgpu<'a> {
         rays_per_pixel: u32,
         ray_bounces: u32,
     ) -> Self {
-
         let width = window.inner_size().width;
         let height = window.inner_size().height;
 
@@ -72,7 +71,7 @@ impl<'a> RenginWgpu<'a> {
             log::debug!("Found adapter {:?}", adapter)
         }
 
-        let window_surface = instance.create_surface(window).unwrap() ;
+        let window_surface = instance.create_surface(window).unwrap();
         log::info!("window_surface: {:?}", window_surface);
 
         let adapter = instance
@@ -147,14 +146,14 @@ impl<'a> RenginWgpu<'a> {
             width,
             height,
             view_formats: vec![],
-            desired_maximum_frame_latency: 2
+            desired_maximum_frame_latency: 2,
         };
         // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
 
         RenginWgpu {
             instance,
-            adapter,
+            _adapter: adapter,
             device,
             queue,
             raygen_bind_group: None,
