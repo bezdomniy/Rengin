@@ -174,3 +174,41 @@ fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: u32) -> Inte
     }
     return inIntersection;
 }
+
+
+fn intersect(ray: Ray, start:u32, immediate_ret: bool) -> Intersection {
+    // TODO: this will need the id of the object as input in future when we are rendering more than one model
+    var ret: Intersection = Intersection(vec2<f32>(0.0), -1, MAXLEN, u32(0));
+
+    // TODO: fix loop range - get number of objects
+    for (var i: u32 = start; i < ubo.n_objects; i = i+1u) {
+        let ob_params = object_params.ObjectParams[i];
+
+        // TODO: clean this up
+        if (ob_params.model_type == 9u) //point light from whitted rt 
+        {
+            continue;
+        }
+        let transformed_ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO,1.0)).xyz, ray.refractive_index, (ob_params.inverse_transform * vec4<f32>(ray.rayD,0.0)).xyz, ray.bounce_idx, vec4<f32>(-1f));
+
+        if (ob_params.model_type == 0u) { //Sphere
+            ret = intersectSphere(transformed_ray,ret, i);
+        }
+        else if (ob_params.model_type == 1u) { //Plane
+            ret = intersectPlane(transformed_ray,ret, i);
+        }
+        else if (ob_params.model_type == 2u) { //Cube
+            ret = intersectCube(transformed_ray,ret, i);
+        }
+        else {
+            // Triangle mesh
+            ret = intersectInnerNodes(transformed_ray,ret, ob_params.offset_inner_nodes, ob_params.offset_inner_nodes + ob_params.len_inner_nodes, ob_params.offset_leaf_nodes,i);
+        }
+
+        if (immediate_ret) {
+            return ret;
+        }
+    }
+
+    return ret;
+}
