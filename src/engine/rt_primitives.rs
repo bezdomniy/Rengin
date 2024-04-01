@@ -3,7 +3,7 @@ use wgpu_gecko as wgpu;
 
 use std::f32::consts::FRAC_PI_2;
 
-use glam::{Mat4, Vec2,Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 // use rand::Rng;
 use wgpu::SurfaceConfiguration;
 use winit::dpi::PhysicalSize;
@@ -32,13 +32,14 @@ pub struct Material {
     pub diffuse: f32,
     pub specular: f32,
     pub shininess: f32,
-    _padding: u32,
+    pub texture_index: u32,
 }
 
 impl Material {
     #![allow(dead_code)]
     pub fn new(
         colour: Vec4,
+        texture_index: Option<u32>,
         emissiveness: Vec4,
         ambient: f32,
         diffuse: f32,
@@ -48,6 +49,11 @@ impl Material {
         transparency: f32,
         refractive_index: f32,
     ) -> Self {
+        let texture_index = match texture_index {
+            Some(idx) => idx,
+            None => u32::MAX,
+        };
+
         Material {
             colour,
             emissiveness,
@@ -58,7 +64,7 @@ impl Material {
             reflective,
             transparency,
             refractive_index,
-            _padding: 0,
+            texture_index,
         }
     }
 }
@@ -75,7 +81,7 @@ impl Default for Material {
             diffuse: 0.9,
             specular: 0.9,
             shininess: 200.0,
-            _padding: 0,
+            texture_index: u32::MAX,
         }
     }
 }
