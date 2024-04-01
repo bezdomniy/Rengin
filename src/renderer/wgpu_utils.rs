@@ -215,14 +215,25 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
     }
 
     fn create_shaders(&mut self, renderer_type: RendererType) {
+        let pt_main_str = include_str!("../shaders/pathtracer.wgsl");
+        let rand_shader_str = include_str!("../shaders/random.wgsl");
+        let constants_shader_str = include_str!("../shaders/constants.wgsl");
+        let intersects_shader_str = include_str!("../shaders/intersects.wgsl");
+
+        let pt_shader_str = [
+            constants_shader_str,
+            rand_shader_str,
+            intersects_shader_str,
+            pt_main_str,
+        ]
+        .join("\n");
+
         let cs_module = match renderer_type {
             RendererType::PathTracer => {
                 self.device
                     .create_shader_module(wgpu::ShaderModuleDescriptor {
                         label: None,
-                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                            "../shaders/pathtracer.wgsl"
-                        ))),
+                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(pt_shader_str.as_str())),
                     })
             }
             RendererType::RayTracer => {
