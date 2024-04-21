@@ -17,96 +17,6 @@ var<storage, read> object_params: ObjectParams;
 @group(0) @binding(6)
 var<storage, read_write> rays: array<Ray>;
 
-
-fn normalToWorld(normal: vec3<f32>, object_id: u32) -> vec3<f32>
-{
-    let ret: vec3<f32> = normalize((transpose(object_params.ObjectParams[object_id].inverse_transform) * vec4<f32>(normal,0.0)).xyz);
-    // ret.w = 0.0;
-    // ret = normalize(ret);
-
-
-    return ret;
-}
-
-fn normalAt(p: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32> {
-    if (typeEnum == 0u) { //Sphere
-        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(p,1.0)).xyz;
-        return normalToWorld(objectPoint,intersection.model_id);
-    }
-    else if (typeEnum == 1u) { //Plane
-        return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),intersection.model_id);
-    }
-    else if (typeEnum == 2u) { //Cube
-        let objectPoint = (object_params.ObjectParams[intersection.model_id].inverse_transform * vec4<f32>(p,1.0)).xyz;
-        let p1 = abs(objectPoint.x);
-        let p2 = abs(objectPoint.y);
-        let p3 = abs(objectPoint.z);
-        var objectNormal = normalize(vec3<f32>(objectPoint.x, 0.0, 0.0));
-
-        if (p2 > p1 && p2 > p3) {
-            objectNormal = normalize(vec3<f32>(0.0, objectPoint.y, 0.0));
-        }
-        else if (p3 > p1 && p3 > p2) {
-            objectNormal = normalize(vec3<f32>(0.0, 0.0,objectPoint.z));
-        }
-
-        return normalToWorld(objectNormal,intersection.model_id);
-    }
-    else { //Model
-        let normal: Normal = normal_nodes.Normals[intersection.id];
-        return normalToWorld((normal.normal2.xyz * intersection.uv.x + normal.normal3.xyz * intersection.uv.y + normal.normal1.xyz * (1.0 - intersection.uv.x - intersection.uv.y)),intersection.model_id);
-        // n.w = 0.0;
-    }
-    return vec3<f32>(0.0);
-}
-
-
-fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParams
-{
-    var hitParams: HitParams;
-    hitParams.p =
-        ray.rayO + normalize(ray.rayD) * intersection.closestT;
-    // TODO check that uv only null have using none-uv normalAt version
-    hitParams.normalv = 
-        normalAt(hitParams.p, intersection, typeEnum);
-    // hitParams.eyev = -ray.rayD;
-    hitParams.eyev = -normalize(ray.rayD);
-
-    // hitParams.front_face = dot(hitParams.normalv, hitParams.eyev) < 0.0;
-    hitParams.front_face = dot(ray.rayD, hitParams.normalv) < 0.0;
-    if (!hitParams.front_face)
-    {
-        hitParams.normalv = -hitParams.normalv;
-    }
-
-    hitParams.reflectv =
-        reflect(normalize(ray.rayD), hitParams.normalv);
-    hitParams.overPoint =
-        hitParams.p + hitParams.normalv * EPSILON;
-    hitParams.underPoint =
-        hitParams.p - hitParams.normalv * EPSILON;
-
-    return hitParams;
-}
-
-fn _schlick(cos_i:f32, r0: f32) -> f32 {
-    return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
-}
-
-fn schlick(cos_i:f32, eta_t: f32, eta_i: f32) -> f32 {
-    let r0 = pow((eta_i-eta_t) / (eta_i+eta_t),2.0);
-    return r0 + (1.0-r0)*pow((1.0 - cos_i),5.0);
-}
-
-fn _schlick_lazanyi(cos_i:f32, eta_t: f32, eta_i: f32, a: f32, alpha:f32) -> f32 {
-    let r0 = pow((eta_i-eta_t) / (eta_i+eta_t),2.0);
-    return _schlick(cos_i, r0) - a * cos_i * pow(1.0 - cos_i , alpha);
-}
-
-fn schlick_lazanyi(cos_i:f32, eta_t: f32, k: f32) -> f32 {
-    return (pow(eta_t - 1.0, 2.0) + 4.0 * eta_t * pow(1.0 - cos_i,5.0) + pow(k,2.0)) / (pow(eta_t+1.0,2.0) + pow(k,2.0));
-}
-
 fn isShadowed(p: vec3<f32>, lightPos: vec3<f32>) -> bool
 {
   let v: vec3<f32> = lightPos - p;
@@ -297,13 +207,7 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
         textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
         return;
     }
-    
-    var light_sample = true;
-    if (ubo.lights_offset == ubo.n_objects) {
-        light_sample = false;
-    }
-    
-    init_pcg4d(vec4<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx, u32(ray.bounce_idx)));
+
     let ray_color = renderScene(ray,offset,light_sample);
 
     var color: vec4<f32> = RAY_MISS_COLOUR;

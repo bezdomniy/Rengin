@@ -222,6 +222,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         let types_str = include_str!("../shaders/types.wgsl");
         let rand_shader_str = include_str!("../shaders/random.wgsl");
         let constants_shader_str = include_str!("../shaders/constants.wgsl");
+        let hit_params_str = include_str!("../shaders/hit_params.wgsl");
         let intersects_shader_str = include_str!("../shaders/intersects.wgsl");
 
         let pt_shader_str = [
@@ -229,6 +230,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
             types_str,
             constants_shader_str,
             rand_shader_str,
+            hit_params_str,
             intersects_shader_str,
             pt_main_str,
         ]
@@ -238,6 +240,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
             rt_ubo_str,
             types_str,
             constants_shader_str,
+            hit_params_str,
             intersects_shader_str,
             rt_main_str,
         ]
