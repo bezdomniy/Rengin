@@ -217,12 +217,15 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
     fn create_shaders(&mut self, renderer_type: RendererType) {
         let rt_main_str = include_str!("../shaders/whitted_raytracer.wgsl");
         let pt_main_str = include_str!("../shaders/pathtracer.wgsl");
+        let pt_ubo_str = include_str!("../shaders/ubo_pt.wgsl");
+        let rt_ubo_str = include_str!("../shaders/ubo_rt.wgsl");
         let types_str = include_str!("../shaders/types.wgsl");
         let rand_shader_str = include_str!("../shaders/random.wgsl");
         let constants_shader_str = include_str!("../shaders/constants.wgsl");
         let intersects_shader_str = include_str!("../shaders/intersects.wgsl");
 
         let pt_shader_str = [
+            pt_ubo_str,
             types_str,
             constants_shader_str,
             rand_shader_str,
@@ -232,6 +235,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         .join("\n");
 
         let rt_shader_str = [
+            rt_ubo_str,
             types_str,
             constants_shader_str,
             intersects_shader_str,
