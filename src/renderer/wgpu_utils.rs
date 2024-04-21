@@ -225,6 +225,15 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         let hit_params_str = include_str!("../shaders/hit_params.wgsl");
         let intersects_shader_str = include_str!("../shaders/intersects.wgsl");
 
+        let raygen_shader_str = [
+            pt_ubo_str,
+            types_str,
+            include_str!("../shaders/raygen.wgsl"),
+        ]
+        .join("\n");
+
+        let frag_shader_str = [pt_ubo_str, include_str!("../shaders/render.frag.wgsl")].join("\n");
+
         let pt_shader_str = [
             pt_ubo_str,
             types_str,
@@ -267,9 +276,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                    "../shaders/raygen.wgsl"
-                ))),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(raygen_shader_str.as_str())),
             });
 
         let vt_module = self
@@ -285,9 +292,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                    "../shaders/render.frag.wgsl"
-                ))),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(frag_shader_str.as_str())),
             });
 
         let mut shaders = HashMap::new();
