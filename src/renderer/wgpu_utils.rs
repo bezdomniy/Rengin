@@ -18,6 +18,7 @@ use winit::{dpi::PhysicalSize, window::Window};
 use super::{RenginRenderer, RenginShaderModule};
 
 pub struct RenginWgpu<'a> {
+    pub window: &'a Window,
     pub instance: Instance,
     pub _adapter: Adapter,
     pub device: Device,
@@ -152,6 +153,7 @@ impl<'a> RenginWgpu<'a> {
         window_surface.configure(&device, &config);
 
         RenginWgpu {
+            window,
             instance,
             _adapter: adapter,
             device,

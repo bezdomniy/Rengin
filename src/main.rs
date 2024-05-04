@@ -402,6 +402,8 @@ impl<'a> RenderApp<'a> {
                                 Instant::now() + target_frametime - time_since_last_frame,
                             ))
                         }
+
+                        self.renderer.window.request_redraw();
                     }
                     _ => {}
                 }
