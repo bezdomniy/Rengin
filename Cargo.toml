@@ -31,7 +31,7 @@ clap = { version = "4.5", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures = { version = "0.3" }
-wgpu = { version = "0.19", features = ["vulkan-portability"] }
+wgpu = { version = "0.20", features = ["vulkan-portability"] }
 # wgpu = { git = "https://github.com/gfx-rs/wgpu.git", branch = "trunk", package = "wgpu", features= ["vulkan-portability"] }
 # ash =  { version="0.37", default-features = false, features = ["linked", "debug"] }
 # ash-window = "0.10"

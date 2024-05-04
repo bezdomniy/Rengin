@@ -580,6 +580,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                     },
                     entry_point: "main",
                     buffers: &[],
+                    compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: match self.shaders.as_ref().unwrap().get("frag") {
@@ -594,6 +595,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                         // blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
+                    compilation_options: Default::default(),
                     // targets: &[self.renderer.config.format.into()],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
@@ -611,6 +613,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                     _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
                 },
                 entry_point: "main",
+                compilation_options: Default::default(),
             },
         ));
 
@@ -623,6 +626,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                     _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
                 },
                 entry_point: "main",
+                compilation_options: Default::default(),
             },
         ));
     }
