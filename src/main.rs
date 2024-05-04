@@ -211,12 +211,10 @@ impl<'a> RenderApp<'a> {
         command_encoder.push_debug_group("raygen");
         {
             // compute pass
-            let mut cpass =
-                command_encoder.begin_compute_pass(
-                    &wgpu::ComputePassDescriptor {
-                        label: None,
-                        timestamp_writes: Default::default(),
-                    },);
+            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: Default::default(),
+            });
             cpass.set_pipeline(self.renderer.raygen_pipeline.as_ref().unwrap());
             cpass.set_bind_group(0, self.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
 
@@ -424,9 +422,9 @@ struct Args {
     #[clap(short, long)]
     draw_on_mouseup: bool,
 
-    /// Use Path tracer renderer
+    /// Use Whitted ray tracer renderer (deprecated - no longer works)
     #[clap(short, long)]
-    pathtracer: bool,
+    whitted: bool,
     /// Number of rays per pixel
     #[clap(short, long, default_value_t = 8)]
     rays_per_pixel: u32,
@@ -444,10 +442,11 @@ fn main() {
         Args::parse()
     };
 
-    let renderer_type = if args.pathtracer {
-        RendererType::PathTracer
+    let renderer_type = if args.whitted {
+        panic!("Whitted Ray Tracer has been deprecated and will no longer work.");
+        // RendererType::RayTracer
     } else {
-        RendererType::RayTracer
+        RendererType::PathTracer
     };
 
     let now = Instant::now();

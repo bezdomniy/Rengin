@@ -1,6 +1,4 @@
-// TODO: !! fix so only lights get used as lights, not emissive shapes
-// NOT WORKING AFTER LOOP SHADER UPDATE
-
+// NOT WORKING AFTER LOOP SHADER UPDATE - deprecated
 
 @group(0) @binding(0)
 var imageData: texture_storage_2d<rgba8unorm,read_write>;
