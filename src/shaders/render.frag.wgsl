@@ -1,14 +1,3 @@
-struct UBO {
-    lightPos: vec3<f32>,
-    is_pathtracer: u32,
-    resolution: vec2<u32>,
-    _pad2: vec2<u32>,
-    n_objects: i32,
-    lights_offset: u32,
-    subpixel_idx: u32,
-    _pad3: u32,
-};
-
 @group(0) @binding(0)
 var imageData: texture_storage_2d<rgba8unorm,read_write>;
 @group(0) @binding(1)

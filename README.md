@@ -9,11 +9,11 @@ It is implemented in Rust using the WGPU library and compute shaders in WGSL.
 - A device compatible with WGPU - https://github.com/gfx-rs/wgpu 
 
 ### How to run:
-Raytracer scene:
-`cargo run --release -- -s assets/scenes/reflectionScene.yaml`
-
 Pathtracer scene:
-`cargo run --release -- -s assets/scenes/models.yaml -p -r 256`
+`cargo run --release -- -s assets/scenes/models.yaml -r 256 -b 8`
+
+Raytracer scene:
+`Whitted ray tracer as described in Jamis Buck's book has been deprecated and will no longer work.`
 
 You can find more scenes under `assets/scenes`
 

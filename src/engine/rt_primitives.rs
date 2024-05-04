@@ -3,12 +3,22 @@ use wgpu_gecko as wgpu;
 
 use std::f32::consts::FRAC_PI_2;
 
-use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 // use rand::Rng;
 use wgpu::SurfaceConfiguration;
 use winit::dpi::PhysicalSize;
 
 const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct Ray {
+    origin: Vec3,
+    refractive_index: f32,
+    direction: Vec3,
+    bounce_idx: i32,
+    throughput: Vec4,
+}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -22,13 +32,14 @@ pub struct Material {
     pub diffuse: f32,
     pub specular: f32,
     pub shininess: f32,
-    _padding: u32,
+    pub texture_index: u32,
 }
 
 impl Material {
     #![allow(dead_code)]
     pub fn new(
         colour: Vec4,
+        texture_index: Option<u32>,
         emissiveness: Vec4,
         ambient: f32,
         diffuse: f32,
@@ -38,6 +49,11 @@ impl Material {
         transparency: f32,
         refractive_index: f32,
     ) -> Self {
+        let texture_index = match texture_index {
+            Some(idx) => idx,
+            None => u32::MAX,
+        };
+
         Material {
             colour,
             emissiveness,
@@ -48,7 +64,7 @@ impl Material {
             reflective,
             transparency,
             refractive_index,
-            _padding: 0,
+            texture_index,
         }
     }
 }
@@ -65,7 +81,7 @@ impl Default for Material {
             diffuse: 0.9,
             specular: 0.9,
             shininess: 200.0,
-            _padding: 0,
+            texture_index: u32::MAX,
         }
     }
 }
@@ -214,28 +230,30 @@ impl Camera {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ubo {
-    _remove: [u32; 3],
-    is_pathtracer: u32,
+    inverse_camera_transform: [f32; 16],
+    half_width_height: [f32; 2],
+    pixel_size: f32,
+    sqrt_rays_per_pixel: u32,
     width: u32,
     height: u32,
-    _pad1: [u32; 2],
     n_objects: u32,
     lights_offset: u32,
+    specular_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
+    is_pathtracer: u32,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub struct ScreenData {
     // Compute shader uniform block object
-    _remove: [u32; 3],
     pub size: PhysicalSize<u32>,
     pub resolution: PhysicalSize<u32>,
     pub inverse_camera_transform: Mat4,
     pixel_size: f32,
-    half_width: f32,
-    half_height: f32,
+    half_width_height: Vec2,
     fov: f32,
+    specular_offset: u32,
     lights_offset: u32,
     n_objects: u32,
     pub subpixel_idx: u32,
@@ -248,6 +266,7 @@ impl ScreenData {
     pub fn new(
         inverse_camera_transform: Mat4,
         n_objects: u32,
+        specular_offset: u32,
         lights_offset: u32,
         ray_bounces: u32,
         size: PhysicalSize<u32>,
@@ -259,28 +278,26 @@ impl ScreenData {
         let half_view = (fov / 2f32).tan();
         let aspect = size.width as f32 / size.height as f32;
 
-        let mut half_width = half_view;
-        let mut half_height = half_view / aspect;
+        let mut half_width_height = Vec2::new(half_view, half_view / aspect);
 
         if aspect < 1f32 {
-            half_height = half_view;
-            half_width = half_view / aspect;
+            half_width_height.x = half_view;
+            half_width_height.y = half_view / aspect;
         }
-        let pixel_size = (half_width * 2f32) / size.width as f32;
+        let pixel_size = (half_width_height.x * 2f32) / size.width as f32;
 
         log::info!("Window size: {:?}", size);
 
         ScreenData {
-            _remove: [0u32; 3],
             size,
             resolution,
             inverse_camera_transform,
             pixel_size,
-            half_width,
-            half_height,
+            half_width_height,
             fov,
             n_objects,
             lights_offset,
+            specular_offset,
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
             ray_bounces,
@@ -294,108 +311,31 @@ impl ScreenData {
 
         self.size = *size;
 
-        self.half_width = half_view;
-        self.half_height = half_view / aspect;
+        self.half_width_height.x = half_view;
+        self.half_width_height.y = half_view / aspect;
 
         if aspect < 1f32 {
-            self.half_height = half_view;
-            self.half_width = half_view / aspect;
+            self.half_width_height.x = half_view;
+            self.half_width_height.y = half_view / aspect;
         }
-        self.pixel_size = (self.half_width * 2f32) / size.width as f32;
-    }
 
-    // pub fn update_random_seed(&mut self) {
-    //     self.rnd_seed = rand::thread_rng().gen_range(0.0..1.0);
-    // }
+        self.pixel_size = (self.half_width_height.x * 2f32) / size.width as f32;
+    }
 
     pub fn generate_ubo(&self) -> Ubo {
         Ubo {
-            _remove: self._remove,
+            inverse_camera_transform: self.inverse_camera_transform.to_cols_array(),
+            half_width_height: self.half_width_height.to_array(),
+            pixel_size: self.pixel_size,
+            sqrt_rays_per_pixel: self.sqrt_rays_per_pixel,
             is_pathtracer: self.is_pathtracer,
             width: self.size.width,
             height: self.size.height,
             n_objects: self.n_objects,
             subpixel_idx: self.subpixel_idx,
             ray_bounces: self.ray_bounces,
-            _pad1: [0u32; 2],
             lights_offset: self.lights_offset,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Ray {
-    origin: Vec3,
-    x: i32,
-    direction: Vec3,
-    y: i32,
-}
-
-impl Ray {
-    pub fn new(x: i32, y: i32, ubo: &ScreenData) -> Self {
-        let half_sub_pixel_size = 1.0 / (ubo.sqrt_rays_per_pixel as f32) / 2.0;
-
-        let sub_pixel_row_number: u32 = ubo.subpixel_idx / ubo.sqrt_rays_per_pixel;
-        let sub_pixel_col_number: u32 = ubo.subpixel_idx % ubo.sqrt_rays_per_pixel;
-        let sub_pixel_x_offset: f32 = half_sub_pixel_size * (sub_pixel_col_number as f32);
-        let sub_pixel_y_offset: f32 = half_sub_pixel_size * (sub_pixel_row_number as f32);
-
-        let x_offset: f32 = ((x as f32) + sub_pixel_x_offset) * ubo.pixel_size;
-        let y_offset: f32 = ((y as f32) + sub_pixel_y_offset) * ubo.pixel_size;
-
-        let world_x: f32 = ubo.half_width - x_offset;
-        let world_y: f32 = ubo.half_height - y_offset;
-
-        let pixel = ubo.inverse_camera_transform * Vec4::new(world_x, world_y, -1.0, 1.0);
-
-        let ray_o = ubo.inverse_camera_transform * Vec4::new(0.0, 0.0, 0.0, 1.0);
-
-        Ray {
-            origin: ray_o.xyz(),
-            x,
-            direction: (pixel - ray_o).normalize().xyz(),
-            y,
-        }
-    }
-}
-
-impl Default for Ray {
-    fn default() -> Self {
-        Ray {
-            x: -1,
-            y: -1,
-            direction: Vec3::default(),
-            origin: Vec3::default(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Default)]
-pub struct Rays {
-    pub data: Vec<Ray>,
-}
-
-// TODO: implement sorting before output to gpu buffer
-impl Rays {
-    pub fn new(size: &PhysicalSize<u32>, resolution: &PhysicalSize<u32>, ubo: &ScreenData) -> Self {
-        // println!("new rays, subpixel: {:?}", ubo.subpixel_idx);
-        let mut rays = Rays::empty(resolution);
-
-        for x in 0..size.width {
-            for y in 0..size.height {
-                // TODO: fix this so size is never bigger than resolution
-                rays.data[((y * size.width) + x) as usize] = Ray::new(x as i32, y as i32, ubo);
-            }
-        }
-
-        rays
-    }
-
-    pub fn empty(resolution: &PhysicalSize<u32>) -> Self {
-        Rays {
-            data: vec![Ray::default(); (resolution.width * resolution.height) as usize],
+            specular_offset: self.specular_offset,
         }
     }
 }

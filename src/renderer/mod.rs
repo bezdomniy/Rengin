@@ -7,7 +7,7 @@ use winit::dpi::PhysicalSize;
 use crate::{
     engine::{
         bvh::Bvh,
-        rt_primitives::{ObjectParam, Rays, ScreenData},
+        rt_primitives::{ObjectParam, ScreenData},
     },
     RendererType,
 };
@@ -24,14 +24,13 @@ pub trait RenginRenderer {
         &mut self,
         bvh: &Bvh,
         screen_data: &ScreenData,
-        rays: &Rays,
         object_params: &[ObjectParam],
     );
     fn create_pipelines(
         &mut self,
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
         bvh: &Bvh,
-        rays: &Rays,
+        screen_data: &ScreenData,
         object_params: &[ObjectParam],
     );
     fn create_bind_groups(&mut self, physical_size: &PhysicalSize<u32>);

@@ -26,16 +26,14 @@ use futures::executor;
 #[cfg(target_arch = "wasm32")]
 use wasm_rs_async_executor::single_threaded as executor;
 
-use clap::Parser;
-use engine::scene_importer::Scene;
-
-use crate::engine::rt_primitives::Rays;
 use crate::renderer::{
     // vk_utils::RenginVk,
     wgpu_utils::RenginWgpu,
     RenginRenderer,
 };
+use clap::Parser;
 use engine::rt_primitives::{Camera, ScreenData};
+use engine::scene_importer::Scene;
 
 static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
 
@@ -92,6 +90,7 @@ impl<'a> RenderApp<'a> {
         let screen_data = ScreenData::new(
             game_state.camera.get_inverse_transform(),
             scene.object_params.as_ref().unwrap().len() as u32,
+            scene.specular_offset as u32,
             scene.lights_offset as u32,
             ray_bounces,
             physical_size,
@@ -100,8 +99,6 @@ impl<'a> RenderApp<'a> {
             (renderer.rays_per_pixel as f32).sqrt() as u32,
             is_pathtracer,
         );
-
-        let rays = Rays::empty(resolution);
 
         log::debug!("screen_data: {:?}", screen_data);
 
@@ -116,12 +113,11 @@ impl<'a> RenderApp<'a> {
         renderer.create_buffers(
             scene.bvh.as_ref().unwrap(),
             &screen_data,
-            &rays,
             scene.object_params.as_ref().unwrap(),
         );
         renderer.create_pipelines(
             scene.bvh.as_ref().unwrap(),
-            &rays,
+            &screen_data,
             scene.object_params.as_ref().unwrap(),
         );
 
@@ -195,17 +191,6 @@ impl<'a> RenderApp<'a> {
     }
 
     pub fn update(&mut self) {
-        let rays = Rays::new(
-            &self.screen_data.size,
-            &self.screen_data.resolution,
-            &self.screen_data,
-        );
-
-        self.renderer.queue.write_buffer(
-            self.renderer.buffers.as_ref().unwrap().get("rays").unwrap(),
-            0,
-            bytemuck::cast_slice(&rays.data),
-        );
         self.renderer.queue.write_buffer(
             self.renderer.buffers.as_ref().unwrap().get("ubo").unwrap(),
             0,
@@ -213,6 +198,41 @@ impl<'a> RenderApp<'a> {
         );
 
         self.screen_data.subpixel_idx += 1;
+
+        self.generate_primary_rays();
+    }
+
+    fn generate_primary_rays(&self) {
+        let mut command_encoder = self
+            .renderer
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        command_encoder.push_debug_group("raygen");
+        {
+            // compute pass
+            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: Default::default(),
+            });
+            cpass.set_pipeline(self.renderer.raygen_pipeline.as_ref().unwrap());
+            cpass.set_bind_group(0, self.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
+
+            cpass.dispatch_workgroups(
+                self.screen_data.size.width / WORKGROUP_SIZE[0],
+                // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
+                self.screen_data.size.height / WORKGROUP_SIZE[1],
+                // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
+                WORKGROUP_SIZE[2],
+            );
+        }
+        command_encoder.pop_debug_group();
+
+        self.renderer
+            .queue
+            .submit(std::iter::once(command_encoder.finish()));
+
+        // self.renderer.device.poll(wgpu::Maintain::Wait);
     }
 
     pub async fn render(mut self, event_loop: EventLoop<()>) {
@@ -338,15 +358,15 @@ impl<'a> RenderApp<'a> {
                                         &[],
                                     );
 
-                                    // TODO: move ray bounce loop out of shader, and do it here
-
-                                    cpass.dispatch_workgroups(
-                                        (self.screen_data.size.width / WORKGROUP_SIZE[0])
-                                            + WORKGROUP_SIZE[0],
-                                        (self.screen_data.size.height / WORKGROUP_SIZE[1])
-                                            + WORKGROUP_SIZE[1],
-                                        WORKGROUP_SIZE[2],
-                                    );
+                                    for _ in 0..self.renderer.ray_bounces {
+                                        cpass.dispatch_workgroups(
+                                            self.screen_data.size.width / WORKGROUP_SIZE[0],
+                                            // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
+                                            self.screen_data.size.height / WORKGROUP_SIZE[1],
+                                            // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
+                                            WORKGROUP_SIZE[2],
+                                        );
+                                    }
                                 }
                                 command_encoder.pop_debug_group();
 
@@ -382,6 +402,8 @@ impl<'a> RenderApp<'a> {
                                 Instant::now() + target_frametime - time_since_last_frame,
                             ))
                         }
+
+                        self.renderer.window.request_redraw();
                     }
                     _ => {}
                 }
@@ -402,9 +424,9 @@ struct Args {
     #[clap(short, long)]
     draw_on_mouseup: bool,
 
-    /// Use Path tracer renderer
+    /// Use Whitted ray tracer renderer (deprecated - no longer works)
     #[clap(short, long)]
-    pathtracer: bool,
+    whitted: bool,
     /// Number of rays per pixel
     #[clap(short, long, default_value_t = 8)]
     rays_per_pixel: u32,
@@ -422,10 +444,11 @@ fn main() {
         Args::parse()
     };
 
-    let renderer_type = if args.pathtracer {
-        RendererType::PathTracer
+    let renderer_type = if args.whitted {
+        panic!("Whitted Ray Tracer has been deprecated and will no longer work.");
+        // RendererType::RayTracer
     } else {
-        RendererType::RayTracer
+        RendererType::PathTracer
     };
 
     let now = Instant::now();
