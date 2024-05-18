@@ -26,7 +26,7 @@ linked-hash-map = "0.5.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 image = "0.25"
-itertools = "0.12"
+itertools = "0.13"
 clap = { version = "4.5", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
