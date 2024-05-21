@@ -1,6 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use wgpu_gecko as wgpu;
-
 use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 
 use crate::{

@@ -13,6 +13,7 @@ native = ["glam/std"]
 webgl = ["glam/libm"]
 
 [dependencies]
+wgpu = { version = "0.20", features = ["vulkan-portability"] }
 glam = { version = "0.27", default-features = false, features = ["bytemuck"] }
 winit = "0.29"
 tobj = "4.0"
@@ -31,21 +32,15 @@ clap = { version = "4.5", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures = { version = "0.3" }
-wgpu = { version = "0.20", features = ["vulkan-portability"] }
-# wgpu = { git = "https://github.com/gfx-rs/wgpu.git", branch = "trunk", package = "wgpu", features= ["vulkan-portability"] }
-# ash =  { version="0.37", default-features = false, features = ["linked", "debug"] }
-# ash-window = "0.10"
-#renderdoc = "0.10.1"
 
-# [target.'cfg(target_arch = "wasm32")'.dependencies]
-# wasm-rs-async-executor = "0.9.0"
-# wgpu_gecko = { git = "https://github.com/gfx-rs/wgpu.git", branch = "gecko", package = "wgpu" }
-# console_error_panic_hook = "0.1.6"
-# console_log = "0.1.2"
-# wasm-bindgen-futures = "0.4.23"
-# wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
-# instant = { version = "0.1", features = [ "stdweb" ] }
-# getrandom = { version = "0.2", features = ["js"] }
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-rs-async-executor = "0.9.0"
+console_error_panic_hook = "0.1.7"
+console_log = "1.0"
+wasm-bindgen-futures = "0.4.42"
+wasm-bindgen = { version = "0.2.87", features = ["serde-serialize"] }
+instant = { version = "0.1", features = ["stdweb"] }
+getrandom = { version = "0.2", features = ["js"] }
 
 [profile.release]
 debug = true
