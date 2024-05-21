@@ -65,6 +65,7 @@ impl<'a> RenginWgpu<'a> {
         });
         log::info!("instance: {:?}", instance);
 
+        #[cfg(not(target_arch = "wasm32"))]
         for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
             log::debug!("Found adapter {:?}", adapter)
         }

@@ -29,18 +29,19 @@ serde_yaml = "0.9"
 image = "0.25"
 itertools = "0.13"
 clap = { version = "4.5", features = ["derive"] }
+cfg-if = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures = { version = "0.3" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-rs-async-executor = "0.9.0"
 console_error_panic_hook = "0.1.7"
 console_log = "1.0"
 wasm-bindgen-futures = "0.4.42"
 wasm-bindgen = { version = "0.2.87", features = ["serde-serialize"] }
-instant = { version = "0.1", features = ["stdweb"] }
+web-time = { version = "1.1" }
 getrandom = { version = "0.2", features = ["js"] }
+web-sys = { version = "0.3", features = ["Document", "Window", "Element"] }
 
 [profile.release]
 debug = true
