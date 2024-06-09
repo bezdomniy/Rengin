@@ -124,14 +124,13 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
         // TODO
         return 1.0;
     } else if light.model_type == 2u {
-        let p = ray.rayO + normalize(ray.rayD) * intersection.closestT;
-        let normal = normalAt(p, intersection, light.model_type);
-        let light_area = surface_area(light);
-        // return 1f - light_area;
-        let distance_squared = pow(intersection.closestT, 2f);
-        let cosine = abs(dot(normal, -ray.rayD));
-
-        return distance_squared / (cosine * light_area);
+        let centre = light.transform[3].xyz;
+        let scale = vec3<f32>(length(light.transform[0].xyz), length(light.transform[1].xyz), length(light.transform[2].xyz));
+        let radius = max(scale.x, max(scale.y, scale.z));
+        let length = length(centre - ray.rayO);
+        let cos_theta_max = sqrt(1f - radius * radius / (length * length));
+        let solid_angle = 2f * PI * (1f - cos_theta_max);
+        return  1f / solid_angle;
     } else if light.model_type == 9u {
         return 1.0;
     }
