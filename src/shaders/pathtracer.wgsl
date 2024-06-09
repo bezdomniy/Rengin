@@ -171,7 +171,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
 
     if is_specular {
         if ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0 {
-            scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective));
+            scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
         } else {
             var eta_t = ob_params.material.refractive_index;
 
@@ -190,7 +190,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
             if sin_2t > 1.0 || reflectance >= f32_zero_to_one(rand_pcg4d.w) {
                 // scattering_target = hitParams.reflectv;
                 // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
-                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective));
+                scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
                 // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
             } else {
                 let cos_t = sqrt(1.0 - sin_2t);
