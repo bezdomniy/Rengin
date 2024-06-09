@@ -94,32 +94,13 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
     let light = object_params.ObjectParams[intersection.model_id];
 
     if light.model_type == 0u {
+        let centre = light.transform[3].xyz;
         let scale = vec3<f32>(length(light.transform[0].xyz), length(light.transform[1].xyz), length(light.transform[2].xyz));
-        let radius = max(max(scale.x, scale.y), scale.z);
-
-        // let hit_point = ray.rayO + intersection.closestT * normalize(ray.rayD);
-        // let normal = normalAt(hit_point, intersection, 0u);
-        // let center = hit_point - (normal * radius );
-        let center = (light.transform * vec4<f32>(0.0, 0.0, 0.0, 1.0)).xyz;
-
-        let cos_theta_max = sqrt(1.0 - (radius * radius / pow(length(center - ray.rayO), 2.0)));
-        let solid_angle = 2.0 * PI * (1.0 - cos_theta_max);
-        return 1.0 / solid_angle;
-
-
-        // let cos_theta = dot(-ray.rayD, normalize(hit_point - center));
-        // let light_area = surface_area(light);
-        // return pow(intersection.closestT,2.0) / (light_area * cos_theta * 0.5);
-
-
-        // let light_area = surface_area(light);
-        // return pow(intersection.closestT,2.0) / (cosine * light_area);
-
-        // let light_area = surface_area(light);
-        // let point = ray.rayO + normalize(ray.rayD) * intersection.closestT;
-        // let n_light = normalAt(point, intersection,0u);
-        // let solid_angle = (light_area * dot(n_light, ray.rayD)) / pow(intersection.closestT,2.0);
-        // return 1.0 / solid_angle;
+        let radius = max(scale.x, max(scale.y, scale.z));
+        let length = length(centre - ray.rayO);
+        let cos_theta_max = sqrt(1f - radius * radius / (length * length));
+        let solid_angle = 2f * PI * (1f - cos_theta_max);
+        return  1f / solid_angle;
     } else if light.model_type == 1u {
         // TODO
         return 1.0;
