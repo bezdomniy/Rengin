@@ -87,10 +87,6 @@ fn surface_area(object: ObjectParam) -> f32 {
 }
 
 fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
-    if intersection.id == -1 || intersection.closestT >= MAXLEN {
-        return 0f;
-    }
-
     let light = object_params.ObjectParams[intersection.model_id];
 
     if light.model_type == 0u {
