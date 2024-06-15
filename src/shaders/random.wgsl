@@ -1,8 +1,7 @@
 
 var<private> rand_pcg4d: vec4<u32>;
 
-fn init_pcg4d(v: vec4<u32>)
-{
+fn init_pcg4d(v: vec4<u32>) {
     rand_pcg4d = v * 1664525u + 1013904223u;
 
     rand_pcg4d.x = rand_pcg4d.x + (rand_pcg4d.y * rand_pcg4d.w);
@@ -10,7 +9,7 @@ fn init_pcg4d(v: vec4<u32>)
     rand_pcg4d.z = rand_pcg4d.z + (rand_pcg4d.x * rand_pcg4d.y);
     rand_pcg4d.w = rand_pcg4d.w + (rand_pcg4d.y * rand_pcg4d.z);
 
-    let _rand_pcg4d = vec4<u32>(rand_pcg4d.x >> 16u,rand_pcg4d.y >> 16u,rand_pcg4d.z >> 16u,rand_pcg4d.w >> 16u);
+    let _rand_pcg4d = vec4<u32>(rand_pcg4d.x >> 16u, rand_pcg4d.y >> 16u, rand_pcg4d.z >> 16u, rand_pcg4d.w >> 16u);
     rand_pcg4d = rand_pcg4d ^ _rand_pcg4d;
 
     // rand_pcg4d = rand_pcg4d ^ (rand_pcg4d >> 16u);
@@ -43,14 +42,14 @@ fn random_in_unit_sphere() -> vec3<f32> {
     let x = r * sin(theta) * cos(phi);
     let y = r * sin(theta) * sin(phi);
     let z = r * cos(theta);
-    return vec3<f32>(x,y,z);
+    return vec3<f32>(x, y, z);
 }
 
 fn random_in_cube() -> vec3<f32> {
     let x = f32_negone_to_one(rand_pcg4d.x);
     let y = f32_negone_to_one(rand_pcg4d.y);
     let z = f32_negone_to_one(rand_pcg4d.z);
-    return vec3<f32>(x,y,z);
+    return vec3<f32>(x, y, z);
 }
 
 
@@ -112,25 +111,24 @@ fn random_in_cube() -> vec3<f32> {
 fn random_cosine_direction() -> vec3<f32> {
     let r1 = f32_zero_to_one(rand_pcg4d.x);
     let r2 = f32_zero_to_one(rand_pcg4d.y);
-    let z = sqrt(1.0-r2);
+    let z = sqrt(1.0 - r2);
 
-    let phi = 2.0*PI*r1;
-    let x = cos(phi)*sqrt(r2);
-    let y = sin(phi)*sqrt(r2);
+    let phi = 2.0 * PI * r1;
+    let x = cos(phi) * sqrt(r2);
+    let y = sin(phi) * sqrt(r2);
 
     return vec3<f32>(x, y, z);
 }
 
-// TODO: update so it can handle non-spherical shapes
 fn random_to_sphere(radius: f32, distance_squared: f32) -> vec3<f32> {
     let r1 = f32_zero_to_one(rand_pcg4d.x);
     let r2 = f32_zero_to_one(rand_pcg4d.y);
-    let z = 1.0 + r2*(sqrt(1.0-radius*radius/distance_squared) - 1.0);
+    let z = 1.0 + r2 * (sqrt(1.0 - radius * radius / distance_squared) - 1.0);
 
-    let phi = 2.0*PI*r1;
-    let scale = sqrt(1.0-(z*z));
-    let x = cos(phi)*scale;
-    let y = sin(phi)*scale;
+    let phi = 2.0 * PI * r1;
+    let scale = sqrt(1.0 - (z * z));
+    let x = cos(phi) * scale;
+    let y = sin(phi) * scale;
 
     return vec3<f32>(x, y, z);
 }
@@ -138,21 +136,21 @@ fn random_to_sphere(radius: f32, distance_squared: f32) -> vec3<f32> {
 fn random_uniform_direction() -> vec3<f32> {
     let r1 = f32_zero_to_one(rand_pcg4d.x);
     let r2 = f32_zero_to_one(rand_pcg4d.y);
-    let x = cos(2.0*PI*r1)*2.0*sqrt(r2*(1.0-r2));
-    let y = sin(2.0*PI*r1)*2.0*sqrt(r2*(1.0-r2));
-    let z = 1.0 - 2.0*r2;
+    let x = cos(2.0 * PI * r1) * 2.0 * sqrt(r2 * (1.0 - r2));
+    let y = sin(2.0 * PI * r1) * 2.0 * sqrt(r2 * (1.0 - r2));
+    let z = 1.0 - 2.0 * r2;
 
     return vec3<f32>(x, y, z);
 }
 
 fn random_uniform_on_hemisphere() -> vec3<f32> {
-    let azimuthal = 2.0*PI*f32_zero_to_one(rand_pcg4d.x);
+    let azimuthal = 2.0 * PI * f32_zero_to_one(rand_pcg4d.x);
     let z = f32_zero_to_one(rand_pcg4d.y);
 
-    let xyproj = sqrt(1.0-(z*z));
+    let xyproj = sqrt(1.0 - (z * z));
 
-    let x = cos(azimuthal)*xyproj;
-    let y = sin(azimuthal)*xyproj;
+    let x = cos(azimuthal) * xyproj;
+    let y = sin(azimuthal) * xyproj;
 
     return vec3<f32>(x, y, z);
 }
@@ -169,10 +167,9 @@ fn random_uniform_on_hemisphere() -> vec3<f32> {
 //     return normalize(vec3<f32>(x,y,z) * radius);
 // }
 
-fn hemisphericalRand(normal: vec3<f32>) -> vec3<f32>
-{
+fn hemisphericalRand(normal: vec3<f32>) -> vec3<f32> {
     let in_unit_sphere = random_uniform_direction();
-    if (dot(in_unit_sphere, normal) > 0.0) { // In the same hemisphere as the normal
+    if dot(in_unit_sphere, normal) > 0.0 { // In the same hemisphere as the normal
         return in_unit_sphere;
     }
     return -in_unit_sphere;
@@ -184,28 +181,26 @@ fn random_light() -> ObjectParam {
 }
 
 fn random_to_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
-    let center = (light.transform * vec4<f32>(0.0,0.0,0.0,1.0)).xyz;
+    let center = light.transform[3].xyz;
     let direction = center - origin;
-    let distance_squared = pow(length(direction),2.0);
+    let distance_squared = pow(length(direction), 2.0);
 
     let onb = onb(normalize(direction));
 
-    let scale = vec3<f32>(length(light.transform[0].xyz),length(light.transform[1].xyz),length(light.transform[2].xyz));
+    let scale = vec3<f32>(length(light.transform[0].xyz), length(light.transform[1].xyz), length(light.transform[2].xyz));
 
-    // TODO: fix the negative offset - lots of hot pixels without it, something wrong
-    let radius = max(max(scale.x,scale.y),scale.z) - 0.05f;
-    
-    if (light.model_type == 0u) {
-        let r = onb * random_to_sphere(radius,distance_squared);
+
+    if light.model_type == 0u {
+        let radius = max(max(scale.x, scale.y), scale.z);
+        // let radius = 1.0;
+        let r = onb * random_to_sphere(radius, distance_squared);
         return r;
-    }
-    else if (light.model_type == 1u) {
+    } else if light.model_type == 1u {
         return vec3<f32>(0.0);
-    }
-    else if (light.model_type == 2u) {
+    } else if light.model_type == 2u {
         let p = random_in_cube();
         // let p = random_to_cube_face((light.inverse_transform * vec4<f32>(direction,0f)).xyz);
-        let r = (light.transform * vec4<f32>(p,1f)).xyz;
+        let r = (light.transform * vec4<f32>(p, 1f)).xyz;
         return normalize(r - origin);
     }
 
