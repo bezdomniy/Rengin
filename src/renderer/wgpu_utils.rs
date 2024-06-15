@@ -224,8 +224,14 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         let hit_params_str = include_str!("../shaders/hit_params.wgsl");
         let intersects_shader_str = include_str!("../shaders/intersects.wgsl");
 
-        let raygen_shader_str =
-            [ubo_str, types_str, include_str!("../shaders/raygen.wgsl")].join("\n");
+        let raygen_shader_str = [
+            ubo_str,
+            types_str,
+            constants_shader_str,
+            rand_shader_str,
+            include_str!("../shaders/raygen.wgsl"),
+        ]
+        .join("\n");
 
         let frag_shader_str = [ubo_str, include_str!("../shaders/render.frag.wgsl")].join("\n");
 
