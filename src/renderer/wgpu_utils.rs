@@ -129,6 +129,7 @@ impl<'a> RenginWgpu<'a> {
                     label: None,
                     required_features: (optional_features & adapter_features) | required_features,
                     required_limits,
+                    ..Default::default()
                 },
                 trace_dir.ok().as_ref().map(std::path::Path::new),
             )
@@ -601,6 +602,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
+                cache: None,
             },
         ));
 
@@ -614,6 +616,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                 },
                 entry_point: "main",
                 compilation_options: Default::default(),
+                cache: None,
             },
         ));
 
@@ -627,6 +630,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                 },
                 entry_point: "main",
                 compilation_options: Default::default(),
+                cache: None,
             },
         ));
     }
