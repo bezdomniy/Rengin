@@ -85,6 +85,39 @@ fn surface_area(object: ObjectParam) -> f32 {
     return 1.0;
 }
 
+fn random_light() -> ObjectParam {
+    let i = u32(rescale(f32_zero_to_one(rand_pcg4d.x), f32(ubo.lights_offset), f32(ubo.n_objects)));
+    return object_params.ObjectParams[i];
+}
+
+fn random_to_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
+    let center = light.transform[3].xyz;
+    let direction = center - origin;
+    let distance_squared = pow(length(direction), 2.0);
+
+    let onb = onb(normalize(direction));
+
+    let scale = vec3<f32>(length(light.transform[0].xyz), length(light.transform[1].xyz), length(light.transform[2].xyz));
+
+
+    if light.model_type == 0u {
+        let radius = max(max(scale.x, scale.y), scale.z);
+        // let radius = 1.0;
+        let r = onb * random_to_sphere(radius, distance_squared);
+        return r;
+    } else if light.model_type == 1u {
+        return vec3<f32>(0.0);
+    } else if light.model_type == 2u {
+        let p = random_in_cube();
+        // let p = random_to_cube_face((light.inverse_transform * vec4<f32>(direction,0f)).xyz);
+        let r = (light.transform * vec4<f32>(p, 1f)).xyz;
+        return normalize(r - origin);
+    }
+
+    // TODO: for model mesh, choose random triangle, then random point on it
+    return vec3<f32>(1.0);
+}
+
 fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
     let light = object_params.ObjectParams[intersection.model_id];
 

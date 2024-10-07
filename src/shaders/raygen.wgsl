@@ -6,13 +6,22 @@ var<storage, read_write> rays: array<Ray>;
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) 
 {
-    let sub_pixel = vec2<u32>(
-        ubo.subpixel_idx / ubo.sqrt_rays_per_pixel,
-        ubo.subpixel_idx % ubo.sqrt_rays_per_pixel,
-    );
+    var sub_pixel_offset = vec2<f32>(0f);
 
-    let half_sub_pixel_size = 1f / f32(ubo.sqrt_rays_per_pixel) / 2f;
-    let sub_pixel_offset = half_sub_pixel_size * vec2<f32>(sub_pixel);
+    if RANDOM_SUBPIXEL {
+        init_pcg4d(vec4<u32>(global_invocation_id.x, ubo.subpixel_idx, global_invocation_id.y, 0u));
+        sub_pixel_offset = random_in_square();
+    }
+    else {
+        let half_sub_pixel_size = 1f / f32(ubo.sqrt_rays_per_pixel) / 2f;
+
+        let sub_pixel = vec2<u32>(
+            ubo.subpixel_idx / ubo.sqrt_rays_per_pixel,
+            ubo.subpixel_idx % ubo.sqrt_rays_per_pixel,
+        );
+
+        sub_pixel_offset = half_sub_pixel_size * vec2<f32>(sub_pixel);
+    }
 
     let offset = (vec2<f32>(global_invocation_id.xy) + sub_pixel_offset) * ubo.pixel_size;
     let world = ubo.half_width_height - offset;
