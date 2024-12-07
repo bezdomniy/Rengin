@@ -327,7 +327,7 @@ impl Scene {
         // let scene: Vec<serde_yaml::Value> = serde_yaml::from_reader(f).unwrap();
 
         let commands: Vec<Command> =
-            serde_yaml::from_reader(f).expect("Failed to load scene description.");
+            serde_yml::from_reader(f).expect("Failed to load scene description.");
         let (camera, object_params, bvh, specular_offset, lights_offset) =
             Scene::load_assets(&commands, renderer_type);
 
