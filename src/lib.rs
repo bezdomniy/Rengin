@@ -459,8 +459,9 @@ pub async fn run() {
 
     let event_loop = EventLoop::new().unwrap();
 
-    let monitor_scale_factor = event_loop.primary_monitor().unwrap().scale_factor();
-    let resolution = event_loop.primary_monitor().unwrap().size();
+    let monitor = event_loop.available_monitors().next().unwrap();
+    let monitor_scale_factor = monitor.scale_factor();
+    let resolution = monitor.size();
 
     let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(
         scene.camera.as_ref().unwrap().width,
