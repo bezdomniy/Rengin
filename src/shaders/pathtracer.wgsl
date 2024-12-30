@@ -263,6 +263,13 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     }
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
+    //TODO: why this needed
+    if ubo.ray_bounces == ubo.bounce_idx + 1 {
+        color = mix(color, RAY_MISS_COLOUR, scale);
+        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+        return;
+    }
+
     var light_sample = true;
     if ubo.lights_offset == ubo.n_objects {
         light_sample = false;
