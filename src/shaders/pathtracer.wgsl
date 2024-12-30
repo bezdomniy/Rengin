@@ -259,18 +259,18 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
         return;
     }
 
+    var color: vec4<f32> = RAY_MISS_COLOUR;
+    if ubo.subpixel_idx > 0u {
+        color = textureLoad(imageData, vec2<i32>(global_invocation_id.xy));
+    }
+    let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
+
     var light_sample = true;
     if ubo.lights_offset == ubo.n_objects {
         light_sample = false;
     }
 
     init_pcg3d(vec3<u32>(bitcast<u32>(ray.rayD.x), bitcast<u32>(ray.rayD.y), bitcast<u32>(ray.rayD.z)));
-
-    var color: vec4<f32> = RAY_MISS_COLOUR;
-    if ubo.subpixel_idx > 0u {
-        color = textureLoad(imageData, vec2<i32>(global_invocation_id.xy));
-    }
-    let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
     let ray_color = renderScene(ray, offset, light_sample);
 
