@@ -9,5 +9,5 @@ struct UBO {
     specular_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
-    bounce_idx: u32,
+    _pad: u32,
 };
