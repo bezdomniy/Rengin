@@ -428,6 +428,16 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(4 as _,),
+                        },
+                        count: None,
+                    },
                 ],
                 label: None,
             },
@@ -715,6 +725,16 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                             .as_ref()
                             .unwrap()
                             .get("rays")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("counter")
                             .unwrap()
                             .as_entire_binding(),
                     },

@@ -2,10 +2,13 @@
 var<uniform> ubo: UBO;
 @group(0) @binding(1)
 var<storage, read_write> rays: array<Ray>;
+@group(0) @binding(2)
+var<storage, read_write> counter_data: CounterData;
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) 
 {
+    atomicStore(&counter_data.counter, 0u);
     var sub_pixel_offset = vec2<f32>(0f);
 
     if RANDOM_SUBPIXEL {
