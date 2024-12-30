@@ -8,7 +8,10 @@ var<storage, read_write> counter_data: CounterData;
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) 
 {
-    atomicStore(&counter_data.counter, 0u);
+    if global_invocation_id.x == 0u && global_invocation_id.y == 0u {
+        atomicStore(&counter_data.counter, 0u);
+    }
+
     var sub_pixel_offset = vec2<f32>(0f);
 
     if RANDOM_SUBPIXEL {
