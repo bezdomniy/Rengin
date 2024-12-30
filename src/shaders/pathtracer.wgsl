@@ -13,6 +13,8 @@ var<storage, read> object_params: ObjectParams;
 @group(0) @binding(6)
 var<storage, read_write> rays: array<Ray>;
 
+var<workgroup> counter: atomic<u32>;
+
 
 // // Buggy
 // fn onb(n: vec3<f32>) -> mat3x3<f32> {
@@ -273,6 +275,7 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     let ray_color = renderScene(ray, offset, light_sample);
 
     if ray_color.w > -EPSILON {
+        var next_pos = atomicAdd(&counter, 1u);
         color = mix(color, ray_color, scale);
         textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
     }
