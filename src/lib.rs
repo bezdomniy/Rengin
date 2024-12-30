@@ -181,7 +181,6 @@ impl<'a> RenderApp<'a> {
         );
 
         self.screen_data.subpixel_idx += 1;
-        self.screen_data.bounce_idx += 1;
 
         self.generate_primary_rays();
     }

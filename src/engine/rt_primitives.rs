@@ -324,7 +324,7 @@ impl ScreenData {
             half_width_height: self.half_width_height.to_array(),
             pixel_size: self.pixel_size,
             sqrt_rays_per_pixel: self.sqrt_rays_per_pixel,
-            bounce_idx: 0,
+            bounce_idx: self.bounce_idx,
             width: self.size.width,
             height: self.size.height,
             n_objects: self.n_objects,
