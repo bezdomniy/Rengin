@@ -12,8 +12,8 @@ var<storage, read> normal_nodes: Normals;
 var<storage, read> object_params: ObjectParams;
 @group(0) @binding(6)
 var<storage, read_write> rays: array<Ray>;
-
-var<workgroup> counter: atomic<u32>;
+@group(0) @binding(7)
+var<storage, read_write> counter_data: CounterData;
 
 
 // // Buggy
@@ -148,12 +148,13 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
     return 1.0;
 }
 
-fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
+fn renderScene(ray: Ray, light_sample: bool) -> vec4<f32> {
     // Get intersected object ID
     let intersection = intersect(ray, 0u, false);
+    let next_pos = atomicAdd(&counter_data.counter, 1u);
 
     if intersection.id == -1 || intersection.closestT >= MAXLEN {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
+        rays[next_pos] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
         return ray.throughput * RAY_MISS_COLOUR;
     }
 
@@ -161,7 +162,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     let ob_params = object_params.ObjectParams[intersection.model_id];
 
     if ob_params.material.emissiveness.x > 0.0 {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
+        rays[next_pos] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
         return ray.throughput * ob_params.material.emissiveness;
     }
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
@@ -171,6 +172,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     var p = hitParams.overPoint;
 
     let onb = onb(hitParams.normalv);
+
 
     if is_specular {
         if ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0 {
@@ -205,7 +207,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
             }
         }
 
-        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(direction), ray.pos, ray.throughput * ob_params.material.colour);
+        rays[next_pos] = Ray(p, ob_params.material.refractive_index, normalize(direction), ray.pos, ray.throughput * ob_params.material.colour);
     } else {
         if light_sample {
             let p_scatter = 0.5;
@@ -238,11 +240,11 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
 
             next_ray.throughput = ray.throughput * ob_params.material.colour * scattering_pdf / pdf;
 
-            rays[offset] = next_ray;
+            rays[next_pos] = next_ray;
         } else {
             let scattering_target = onb * random_cosine_direction();
             direction = normalize(scattering_target);
-            rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.pos, ray.throughput * ob_params.material.colour);
+            rays[next_pos] = Ray(p, ob_params.material.refractive_index, direction, ray.pos, ray.throughput * ob_params.material.colour);
         }
     }
 
@@ -250,10 +252,10 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
 }
 
 
-@compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
-    let offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
-    let ray = rays[offset];
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {    
+    let ray = rays[global_invocation_id.x];
+    let screen_pos = vec2<u32>(ray.pos % ubo.resolution.x, ray.pos / ubo.resolution.x);
 
     if ray.throughput.w < -EPSILON {
         return;
@@ -261,7 +263,7 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
 
     var color: vec4<f32> = RAY_MISS_COLOUR;
     if ubo.subpixel_idx > 0u {
-        color = textureLoad(imageData, vec2<i32>(global_invocation_id.xy));
+        color = textureLoad(imageData, screen_pos);
     }
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
@@ -272,11 +274,10 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
 
     init_pcg3d(vec3<u32>(bitcast<u32>(ray.rayD.x), bitcast<u32>(ray.rayD.y), bitcast<u32>(ray.rayD.z)));
 
-    let ray_color = renderScene(ray, offset, light_sample);
+    let ray_color = renderScene(ray, light_sample);
 
     if ray_color.w > -EPSILON {
-        var next_pos = atomicAdd(&counter, 1u);
         color = mix(color, ray_color, scale);
-        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+        textureStore(imageData, screen_pos, color);
     }
 }

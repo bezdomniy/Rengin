@@ -369,6 +369,14 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
+        let buf_counter = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Counter storage Buffer"),
+                contents: bytemuck::bytes_of(&0u32),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+
         log::info!(
             "Finshed loading buffers in {} millis",
             now.elapsed().as_millis()
@@ -381,6 +389,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
             ("normals", buf_normals),
             ("object_params", buf_op),
             ("rays", buf_rays),
+            ("counter", buf_counter),
         ]));
     }
 
@@ -518,6 +527,19 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                                 ((screen_data.resolution.width * screen_data.resolution.height)
                                     as usize
                                     * mem::size_of::<Ray>()) as _,
+                            ),
+                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                4 as _,
                             ),
                             // min_binding_size: None,
                         },
@@ -766,6 +788,16 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                             .as_ref()
                             .unwrap()
                             .get("rays")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("counter")
                             .unwrap()
                             .as_entire_binding(),
                     },

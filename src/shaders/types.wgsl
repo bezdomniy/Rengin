@@ -88,3 +88,7 @@ struct Intersection {
     closestT: f32,
     model_id: u32,
 };
+
+struct CounterData {
+    counter: atomic<u32>
+};

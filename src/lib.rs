@@ -343,11 +343,14 @@ impl<'a> RenderApp<'a> {
 
                                     for _ in 0..self.renderer.ray_bounces {
                                         cpass.dispatch_workgroups(
-                                            self.screen_data.size.width / WORKGROUP_SIZE[0],
-                                            // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
-                                            self.screen_data.size.height / WORKGROUP_SIZE[1],
-                                            // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
-                                            WORKGROUP_SIZE[2],
+                                            // self.screen_data.size.width / WORKGROUP_SIZE[0],
+                                            // // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
+                                            // self.screen_data.size.height / WORKGROUP_SIZE[1],
+                                            // // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
+                                            // WORKGROUP_SIZE[2],
+                                            (self.screen_data.size.width * self.screen_data.size.height) / (WORKGROUP_SIZE[0] * WORKGROUP_SIZE[1]), 
+                                            1, 
+                                            1
                                         );
                                     }
                                 }
