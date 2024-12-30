@@ -9,7 +9,7 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
     var sub_pixel_offset = vec2<f32>(0f);
 
     if RANDOM_SUBPIXEL {
-        init_pcg4d(vec4<u32>(global_invocation_id.x, ubo.subpixel_idx, global_invocation_id.y, 0u));
+        init_pcg3d(vec3<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx));
         sub_pixel_offset = random_in_square();
     }
     else {

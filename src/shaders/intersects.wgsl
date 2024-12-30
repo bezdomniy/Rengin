@@ -181,7 +181,7 @@ fn intersect(ray: Ray, start: u32, immediate_ret: bool) -> Intersection {
         // {
         //     continue;
         // }
-        let transformed_ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO, 1.0)).xyz, ray.refractive_index, (ob_params.inverse_transform * vec4<f32>(ray.rayD, 0.0)).xyz, ray.bounce_idx, vec4<f32>(-1f));
+        let transformed_ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO, 1.0)).xyz, ray.refractive_index, (ob_params.inverse_transform * vec4<f32>(ray.rayD, 0.0)).xyz, ray.pos, vec4<f32>(-1f));
 
         if ob_params.model_type == 0u { //Sphere
             ret = intersectSphere(transformed_ray, ret, i);

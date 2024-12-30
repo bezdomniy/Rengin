@@ -13,7 +13,7 @@ pub struct Ray {
     origin: Vec3,
     refractive_index: f32,
     direction: Vec3,
-    bounce_idx: i32,
+    pos: u32,
     throughput: Vec4,
 }
 
