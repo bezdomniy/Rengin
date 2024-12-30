@@ -71,11 +71,6 @@ impl<'a> RenderApp<'a> {
             ),
         };
 
-        let is_pathtracer = match &renderer_type {
-            RendererType::PathTracer => 1u32,
-            RendererType::RayTracer => 0u32,
-        };
-
         let screen_data = ScreenData::new(
             game_state.camera.get_inverse_transform(),
             scene.object_params.as_ref().unwrap().len() as u32,
@@ -86,7 +81,6 @@ impl<'a> RenderApp<'a> {
             *resolution,
             scene.camera.as_ref().unwrap().field_of_view,
             (renderer.rays_per_pixel as f32).sqrt() as u32,
-            is_pathtracer,
         );
 
         log::debug!("screen_data: {:?}", screen_data);
@@ -187,6 +181,7 @@ impl<'a> RenderApp<'a> {
         );
 
         self.screen_data.subpixel_idx += 1;
+        self.screen_data.bounce_idx += 1;
 
         self.generate_primary_rays();
     }

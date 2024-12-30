@@ -238,7 +238,7 @@ pub struct Ubo {
     specular_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
-    is_pathtracer: u32,
+    bounce_idx: u32,
 }
 
 #[derive(Debug)]
@@ -256,7 +256,7 @@ pub struct ScreenData {
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
     pub ray_bounces: u32,
-    is_pathtracer: u32,
+    pub bounce_idx: u32,
 }
 
 impl ScreenData {
@@ -270,7 +270,6 @@ impl ScreenData {
         resolution: PhysicalSize<u32>,
         fov: f32,
         sqrt_rays_per_pixel: u32,
-        is_pathtracer: u32,
     ) -> ScreenData {
         let half_view = (fov / 2f32).tan();
         let aspect = size.width as f32 / size.height as f32;
@@ -298,7 +297,7 @@ impl ScreenData {
             subpixel_idx: 0,
             sqrt_rays_per_pixel,
             ray_bounces,
-            is_pathtracer,
+            bounce_idx: 0,
         }
     }
 
@@ -325,7 +324,7 @@ impl ScreenData {
             half_width_height: self.half_width_height.to_array(),
             pixel_size: self.pixel_size,
             sqrt_rays_per_pixel: self.sqrt_rays_per_pixel,
-            is_pathtracer: self.is_pathtracer,
+            bounce_idx: 0,
             width: self.size.width,
             height: self.size.height,
             n_objects: self.n_objects,
