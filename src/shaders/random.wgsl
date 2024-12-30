@@ -1,23 +1,38 @@
 
-var<private> rand_pcg4d: vec4<u32>;
+var<private> rand_pcg3d: vec3<u32>;
+fn init_pcg3d(v: vec3<u32>) {
+    rand_pcg3d = v * 1664525u + 1013904223u;
 
-fn init_pcg4d(v: vec4<u32>) {
-    rand_pcg4d = v * 1664525u + 1013904223u;
+    rand_pcg3d.x = rand_pcg3d.x + (rand_pcg3d.y * rand_pcg3d.z);
+    rand_pcg3d.y = rand_pcg3d.y + (rand_pcg3d.z * rand_pcg3d.x);
+    rand_pcg3d.z = rand_pcg3d.z + (rand_pcg3d.x * rand_pcg3d.y);
 
-    rand_pcg4d.x = rand_pcg4d.x + (rand_pcg4d.y * rand_pcg4d.w);
-    rand_pcg4d.y = rand_pcg4d.y + (rand_pcg4d.z * rand_pcg4d.x);
-    rand_pcg4d.z = rand_pcg4d.z + (rand_pcg4d.x * rand_pcg4d.y);
-    rand_pcg4d.w = rand_pcg4d.w + (rand_pcg4d.y * rand_pcg4d.z);
+    let _rand_pcg3d = vec3<u32>(rand_pcg3d.x >> 16u, rand_pcg3d.y >> 16u, rand_pcg3d.z >> 16u);
+    rand_pcg3d = rand_pcg3d ^ _rand_pcg3d;
 
-    let _rand_pcg4d = vec4<u32>(rand_pcg4d.x >> 16u, rand_pcg4d.y >> 16u, rand_pcg4d.z >> 16u, rand_pcg4d.w >> 16u);
-    rand_pcg4d = rand_pcg4d ^ _rand_pcg4d;
-
-    // rand_pcg4d = rand_pcg4d ^ (rand_pcg4d >> 16u);
-    rand_pcg4d.x = rand_pcg4d.x + (rand_pcg4d.y * rand_pcg4d.w);
-    rand_pcg4d.y = rand_pcg4d.y + (rand_pcg4d.z * rand_pcg4d.x);
-    rand_pcg4d.z = rand_pcg4d.z + (rand_pcg4d.x * rand_pcg4d.y);
-    rand_pcg4d.w = rand_pcg4d.w + (rand_pcg4d.y * rand_pcg4d.z);
+    rand_pcg3d.x = rand_pcg3d.x + (rand_pcg3d.y * rand_pcg3d.z);
+    rand_pcg3d.y = rand_pcg3d.y + (rand_pcg3d.z * rand_pcg3d.x);
+    rand_pcg3d.z = rand_pcg3d.z + (rand_pcg3d.x * rand_pcg3d.y);
 }
+
+// var<private> rand_pcg4d: vec4<u32>;
+// fn init_pcg4d(v: vec4<u32>) {
+//     rand_pcg4d = v * 1664525u + 1013904223u;
+
+//     rand_pcg4d.x = rand_pcg4d.x + (rand_pcg4d.y * rand_pcg4d.w);
+//     rand_pcg4d.y = rand_pcg4d.y + (rand_pcg4d.z * rand_pcg4d.x);
+//     rand_pcg4d.z = rand_pcg4d.z + (rand_pcg4d.x * rand_pcg4d.y);
+//     rand_pcg4d.w = rand_pcg4d.w + (rand_pcg4d.y * rand_pcg4d.z);
+
+//     let _rand_pcg4d = vec4<u32>(rand_pcg4d.x >> 16u, rand_pcg4d.y >> 16u, rand_pcg4d.z >> 16u, rand_pcg4d.w >> 16u);
+//     rand_pcg4d = rand_pcg4d ^ _rand_pcg4d;
+
+//     // rand_pcg4d = rand_pcg4d ^ (rand_pcg4d >> 16u);
+//     rand_pcg4d.x = rand_pcg4d.x + (rand_pcg4d.y * rand_pcg4d.w);
+//     rand_pcg4d.y = rand_pcg4d.y + (rand_pcg4d.z * rand_pcg4d.x);
+//     rand_pcg4d.z = rand_pcg4d.z + (rand_pcg4d.x * rand_pcg4d.y);
+//     rand_pcg4d.w = rand_pcg4d.w + (rand_pcg4d.y * rand_pcg4d.z);
+// }
 
 fn f32_zero_to_one(seed: u32) -> f32 {
     return bitcast<f32>(0x3f800000u | (seed & 0x007fffffu)) - 1.0;
@@ -32,9 +47,9 @@ fn rescale(value: f32, min: f32, max: f32) -> f32 {
 }
 
 fn random_in_unit_sphere() -> vec3<f32> {
-    let phi = 2.0 * PI * f32_zero_to_one(rand_pcg4d.x);
-    let cos_theta = 2.0 * f32_zero_to_one(rand_pcg4d.y) - 1.0;
-    let u = f32_zero_to_one(rand_pcg4d.z);
+    let phi = 2.0 * PI * f32_zero_to_one(rand_pcg3d.x);
+    let cos_theta = 2.0 * f32_zero_to_one(rand_pcg3d.y) - 1.0;
+    let u = f32_zero_to_one(rand_pcg3d.z);
 
     let theta = acos(cos_theta);
     let r = pow(u, 1.0 / 3.0);
@@ -46,15 +61,15 @@ fn random_in_unit_sphere() -> vec3<f32> {
 }
 
 fn random_in_cube() -> vec3<f32> {
-    let x = f32_negone_to_one(rand_pcg4d.x);
-    let y = f32_negone_to_one(rand_pcg4d.y);
-    let z = f32_negone_to_one(rand_pcg4d.z);
+    let x = f32_negone_to_one(rand_pcg3d.x);
+    let y = f32_negone_to_one(rand_pcg3d.y);
+    let z = f32_negone_to_one(rand_pcg3d.z);
     return vec3<f32>(x, y, z);
 }
 
 fn random_in_square() -> vec2<f32> {
-    let x = f32_zero_to_one(rand_pcg4d.x);
-    let y = f32_zero_to_one(rand_pcg4d.y);
+    let x = f32_zero_to_one(rand_pcg3d.x);
+    let y = f32_zero_to_one(rand_pcg3d.y);
     return vec2<f32>(x, y);
 }
 
@@ -70,15 +85,15 @@ fn random_in_square() -> vec2<f32> {
 //                                     );
 
 // fn random_to_cube_face(view_vector: vec3<f32>) -> vec3<f32> {
-//     let a1 = rescale(u32_to_f32(rand_pcg4d.x), -1f, 1f);
-//     let a2 = rescale(u32_to_f32(rand_pcg4d.y), -1f, 1f);
+//     let a1 = rescale(u32_to_f32(rand_pcg3d.x), -1f, 1f);
+//     let a2 = rescale(u32_to_f32(rand_pcg3d.y), -1f, 1f);
 
-//     let choice_idx = u32_to_f32(rand_pcg4d.z);
+//     let choice_idx = u32_to_f32(rand_pcg3d.z);
 
 //     var faces = array<vec3<f32>,3>(vec3<f32>(0.0),vec3<f32>(0.0),vec3<f32>(0.0));
 //     var thres = array<f32,3>(0f,0f,0f);
 
-//     let start = rand_pcg4d.z % 6u;
+//     let start = rand_pcg3d.z % 6u;
 //     var j = 0u;
 //     for (var i = start; i < start + 6u; i = i+1u) {
 //         let idx = i % 6u;
@@ -114,8 +129,8 @@ fn random_in_square() -> vec2<f32> {
 // }
 
 fn random_cosine_direction() -> vec3<f32> {
-    let r1 = f32_zero_to_one(rand_pcg4d.x);
-    let r2 = f32_zero_to_one(rand_pcg4d.y);
+    let r1 = f32_zero_to_one(rand_pcg3d.x);
+    let r2 = f32_zero_to_one(rand_pcg3d.y);
     let z = sqrt(1.0 - r2);
 
     let phi = 2.0 * PI * r1;
@@ -126,8 +141,8 @@ fn random_cosine_direction() -> vec3<f32> {
 }
 
 fn random_to_sphere(radius: f32, distance_squared: f32) -> vec3<f32> {
-    let r1 = f32_zero_to_one(rand_pcg4d.x);
-    let r2 = f32_zero_to_one(rand_pcg4d.y);
+    let r1 = f32_zero_to_one(rand_pcg3d.x);
+    let r2 = f32_zero_to_one(rand_pcg3d.y);
     let z = 1.0 + r2 * (sqrt(1.0 - radius * radius / distance_squared) - 1.0);
 
     let phi = 2.0 * PI * r1;
@@ -139,8 +154,8 @@ fn random_to_sphere(radius: f32, distance_squared: f32) -> vec3<f32> {
 }
 
 fn random_uniform_direction() -> vec3<f32> {
-    let r1 = f32_zero_to_one(rand_pcg4d.x);
-    let r2 = f32_zero_to_one(rand_pcg4d.y);
+    let r1 = f32_zero_to_one(rand_pcg3d.x);
+    let r2 = f32_zero_to_one(rand_pcg3d.y);
     let x = cos(2.0 * PI * r1) * 2.0 * sqrt(r2 * (1.0 - r2));
     let y = sin(2.0 * PI * r1) * 2.0 * sqrt(r2 * (1.0 - r2));
     let z = 1.0 - 2.0 * r2;
@@ -149,8 +164,8 @@ fn random_uniform_direction() -> vec3<f32> {
 }
 
 fn random_uniform_on_hemisphere() -> vec3<f32> {
-    let azimuthal = 2.0 * PI * f32_zero_to_one(rand_pcg4d.x);
-    let z = f32_zero_to_one(rand_pcg4d.y);
+    let azimuthal = 2.0 * PI * f32_zero_to_one(rand_pcg3d.x);
+    let z = f32_zero_to_one(rand_pcg3d.y);
 
     let xyproj = sqrt(1.0 - (z * z));
 
@@ -162,8 +177,8 @@ fn random_uniform_on_hemisphere() -> vec3<f32> {
 
 // fn random_uniform_direction(radius: f32) -> vec3<f32>
 // {
-//     let theta: f32 = rescale(f32_zero_to_one(rand_pcg4d.x), 0.0, PI * 2.0);
-//     let phi: f32 = acos(rescale(f32_zero_to_one(rand_pcg4d.y), -1.0, 1.0));
+//     let theta: f32 = rescale(f32_zero_to_one(rand_pcg3d.x), 0.0, PI * 2.0);
+//     let phi: f32 = acos(rescale(f32_zero_to_one(rand_pcg3d.y), -1.0, 1.0));
 
 //     let x: f32 = sin(phi) * cos(theta);
 //     let y: f32 = sin(phi) * sin(theta);

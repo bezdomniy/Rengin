@@ -86,7 +86,7 @@ fn surface_area(object: ObjectParam) -> f32 {
 }
 
 fn random_light() -> ObjectParam {
-    let i = u32(rescale(f32_zero_to_one(rand_pcg4d.x), f32(ubo.lights_offset), f32(ubo.n_objects)));
+    let i = u32(rescale(f32_zero_to_one(rand_pcg3d.x), f32(ubo.lights_offset), f32(ubo.n_objects)));
     return object_params.ObjectParams[i];
 }
 
@@ -188,7 +188,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
             let n_ratio = ray.refractive_index / eta_t;
             let sin_2t = pow(n_ratio, 2.0) * (1.0 - pow(cos_i, 2.0));
 
-            if sin_2t > 1.0 || reflectance >= f32_zero_to_one(rand_pcg4d.w) {
+            if sin_2t > 1.0 || reflectance >= f32_zero_to_one(rand_pcg3d.y) {
                 // scattering_target = hitParams.reflectv;
                 // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
                 direction = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
@@ -207,7 +207,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     } else {
         if light_sample {
             let p_scatter = 0.5;
-            if f32_zero_to_one(rand_pcg4d.w) < p_scatter {
+            if f32_zero_to_one(rand_pcg3d.y) < p_scatter {
                 let light = random_light();
                 direction = normalize(random_to_light(light, p));
             } else {
@@ -275,7 +275,7 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
         light_sample = false;
     }
 
-    init_pcg4d(vec4<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx, u32(ray.bounce_idx)));
+    init_pcg3d(vec3<u32>(global_invocation_id.x, global_invocation_id.y, ubo.subpixel_idx));
     let ray_color = renderScene(ray, offset, light_sample);
 
     var color: vec4<f32> = RAY_MISS_COLOUR;
