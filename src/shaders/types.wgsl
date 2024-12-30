@@ -78,7 +78,7 @@ struct Ray {
     rayO: vec3<f32>,
     refractive_index: f32,
     rayD: vec3<f32>,
-    bounce_idx: i32,
+    pos: u32,
     throughput: vec4<f32>,
 };
 

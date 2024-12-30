@@ -151,7 +151,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     let intersection = intersect(ray, 0u, false);
 
     if intersection.id == -1 || intersection.closestT >= MAXLEN {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1, vec4<f32>(-1f));
+        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
         return ray.throughput * RAY_MISS_COLOUR;
     }
 
@@ -159,7 +159,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     let ob_params = object_params.ObjectParams[intersection.model_id];
 
     if ob_params.material.emissiveness.x > 0.0 {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), -1, vec4<f32>(-1f));
+        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
         return ray.throughput * ob_params.material.emissiveness;
     }
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
@@ -203,7 +203,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
             }
         }
 
-        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(direction), ray.bounce_idx + 1, ray.throughput * ob_params.material.colour);
+        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(direction), ray.pos, ray.throughput * ob_params.material.colour);
     } else {
         if light_sample {
             let p_scatter = 0.5;
@@ -216,7 +216,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
                 direction = normalize(scattering_target);
             }
 
-            var next_ray = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1, vec4<f32>(-1f));
+            var next_ray = Ray(p, ob_params.material.refractive_index, direction, ray.pos, vec4<f32>(-1f));
 
             let scattering_cosine = dot(direction, onb[2]);
             let scattering_pdf = max(0f, scattering_cosine / PI);
@@ -240,7 +240,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
         } else {
             let scattering_target = onb * random_cosine_direction();
             direction = normalize(scattering_target);
-            rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.bounce_idx + 1, ray.throughput * ob_params.material.colour);
+            rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.pos, ray.throughput * ob_params.material.colour);
         }
     }
 
@@ -253,20 +253,7 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     let offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
     let ray = rays[offset];
 
-    if ray.bounce_idx < 0 {
-        return;
-    }
-
-    //TODO: why this needed
-    if ubo.ray_bounces == u32(ray.bounce_idx + 1) {
-        var color: vec4<f32> = RAY_MISS_COLOUR;
-        if ubo.subpixel_idx > 0u {
-            color = textureLoad(imageData, vec2<i32>(global_invocation_id.xy));
-        }
-        let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
-
-        color = mix(color, vec4<f32>(0.0, 0.0, 0.0, 1.0), scale);
-        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+    if ray.throughput.w < -EPSILON {
         return;
     }
 
