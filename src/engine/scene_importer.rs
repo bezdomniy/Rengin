@@ -3,7 +3,7 @@ use crate::RendererType;
 use glam::{Mat4, Vec3, Vec4};
 use image::{ImageBuffer, Rgba};
 use itertools::Itertools;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, Rng};
 use serde::Deserialize;
 // use std::collections::HashMap;
 use linked_hash_map::LinkedHashMap;
@@ -497,7 +497,7 @@ impl Scene {
 
         let mut object_map_key = curr_shape.add.clone();
 
-        let hash: String = rand::thread_rng()
+        let hash: String = rand::rng()
             .sample_iter(&Alphanumeric)
             .take(8)
             .map(char::from)

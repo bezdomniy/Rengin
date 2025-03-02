@@ -55,12 +55,11 @@ impl<'a> RenginWgpu<'a> {
         let width = window.inner_size().width;
         let height = window.inner_size().height;
 
-        let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
+        let backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
 
         log::info!("backend: {:?}", backends);
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends,
-            dx12_shader_compiler: Default::default(),
             ..Default::default()
         });
         log::info!("instance: {:?}", instance);
