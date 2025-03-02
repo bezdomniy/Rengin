@@ -12,8 +12,6 @@ var<storage, read> normal_nodes: Normals;
 var<storage, read> object_params: ObjectParams;
 @group(0) @binding(6)
 var<storage, read_write> rays: array<Ray>;
-@group(0) @binding(7)
-var<storage, read_write> counter_data: CounterData;
 
 
 // // Buggy
@@ -151,10 +149,9 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
 fn renderScene(ray: Ray, light_sample: bool) -> vec4<f32> {
     // Get intersected object ID
     let intersection = intersect(ray, 0u, false);
-    let next_pos = atomicAdd(&counter_data.counter, 1u);
 
     if intersection.id == -1 || intersection.closestT >= MAXLEN {
-        rays[next_pos] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
+        rays[ray.pos] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
         return ray.throughput * RAY_MISS_COLOUR;
     }
 
@@ -162,7 +159,7 @@ fn renderScene(ray: Ray, light_sample: bool) -> vec4<f32> {
     let ob_params = object_params.ObjectParams[intersection.model_id];
 
     if ob_params.material.emissiveness.x > 0.0 {
-        rays[next_pos] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
+        rays[ray.pos] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
         return ray.throughput * ob_params.material.emissiveness;
     }
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
@@ -207,7 +204,7 @@ fn renderScene(ray: Ray, light_sample: bool) -> vec4<f32> {
             }
         }
 
-        rays[next_pos] = Ray(p, ob_params.material.refractive_index, normalize(direction), ray.pos, ray.throughput * ob_params.material.colour);
+        rays[ray.pos] = Ray(p, ob_params.material.refractive_index, normalize(direction), ray.pos, ray.throughput * ob_params.material.colour);
     } else {
         if light_sample {
             let p_scatter = 0.5;
@@ -240,11 +237,11 @@ fn renderScene(ray: Ray, light_sample: bool) -> vec4<f32> {
 
             next_ray.throughput = ray.throughput * ob_params.material.colour * scattering_pdf / pdf;
 
-            rays[next_pos] = next_ray;
+            rays[ray.pos] = next_ray;
         } else {
             let scattering_target = onb * random_cosine_direction();
             direction = normalize(scattering_target);
-            rays[next_pos] = Ray(p, ob_params.material.refractive_index, direction, ray.pos, ray.throughput * ob_params.material.colour);
+            rays[ray.pos] = Ray(p, ob_params.material.refractive_index, direction, ray.pos, ray.throughput * ob_params.material.colour);
         }
     }
 
