@@ -332,16 +332,17 @@ impl<'a> RenderApp<'a> {
                                             timestamp_writes: Default::default(),
                                         },
                                     );
-                                    cpass.set_pipeline(
-                                        self.renderer.compute_pipeline.as_ref().unwrap(),
-                                    );
-                                    cpass.set_bind_group(
-                                        0,
-                                        self.renderer.compute_bind_group.as_ref().unwrap(),
-                                        &[],
-                                    );
 
                                     for _ in 0..self.renderer.ray_bounces {
+                                        cpass.set_pipeline(
+                                            self.renderer.compute_pipeline.as_ref().unwrap(),
+                                        );
+                                        cpass.set_bind_group(
+                                            0,
+                                            self.renderer.compute_bind_group.as_ref().unwrap(),
+                                            &[],
+                                        );
+                                        
                                         cpass.dispatch_workgroups(
                                             // self.screen_data.size.width / WORKGROUP_SIZE[0],
                                             // // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
@@ -351,6 +352,14 @@ impl<'a> RenderApp<'a> {
                                             (self.screen_data.size.width * self.screen_data.size.height) / (WORKGROUP_SIZE[0] * WORKGROUP_SIZE[1]), 
                                             1, 
                                             1
+                                        );
+
+
+                                        cpass.set_pipeline(self.renderer.raysort_pipeline.as_ref().unwrap());
+                                        cpass.set_bind_group(0, self.renderer.raysort_bind_group.as_ref().unwrap(), &[]);
+
+                                        cpass.dispatch_workgroups(
+                                            1,1,1,
                                         );
                                     }
                                 }

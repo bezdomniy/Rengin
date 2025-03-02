@@ -20,7 +20,10 @@ pub struct RenginWgpu<'a> {
     pub _adapter: Adapter,
     pub device: Device,
     pub queue: Queue,
+    pub raysort_pipeline: Option<ComputePipeline>,
     pub raygen_pipeline: Option<ComputePipeline>,
+    pub raysort_bind_group_layout: Option<BindGroupLayout>,
+    pub raysort_bind_group: Option<BindGroup>,
     pub raygen_bind_group_layout: Option<BindGroupLayout>,
     pub raygen_bind_group: Option<BindGroup>,
     pub compute_pipeline: Option<ComputePipeline>,
@@ -156,6 +159,9 @@ impl<'a> RenginWgpu<'a> {
             _adapter: adapter,
             device,
             queue,
+            raysort_pipeline: None,
+            raysort_bind_group_layout: None,
+            raysort_bind_group: None,
             raygen_bind_group: None,
             raygen_bind_group_layout: None,
             raygen_pipeline: None,
@@ -232,6 +238,12 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         ]
         .join("\n");
 
+        let raysort_shader_str = [
+            types_str,
+            include_str!("../shaders/raysort.wgsl"),
+        ]
+        .join("\n");
+
         let frag_shader_str = [ubo_str, include_str!("../shaders/render.frag.wgsl")].join("\n");
 
         let pt_shader_str = [
@@ -278,6 +290,13 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(raygen_shader_str.as_str())),
             });
 
+        let raysort_module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(raysort_shader_str.as_str())),
+            });
+
         let vt_module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -298,6 +317,10 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         shaders.insert(
             "raygen",
             RenginShaderModule::WgpuShaderModule(raygen_module),
+        );
+        shaders.insert(
+            "raysort",
+            RenginShaderModule::WgpuShaderModule(raysort_module),
         );
         shaders.insert("comp", RenginShaderModule::WgpuShaderModule(cs_module));
         shaders.insert("vert", RenginShaderModule::WgpuShaderModule(vt_module));
@@ -390,6 +413,29 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         screen_data: &ScreenData,
         object_params: &[ObjectParam],
     ) {
+        // create raysort pipeline
+        self.raysort_bind_group_layout = Some(self.device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                ((screen_data.resolution.width * screen_data.resolution.height)
+                                    as usize
+                                    * mem::size_of::<Ray>()) as _,
+                            ),
+                        },
+                        count: None,
+                    },
+                ],
+                label: None,
+            },
+        ));
+
         // create raygen pipeline
         self.raygen_bind_group_layout = Some(self.device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
@@ -609,6 +655,28 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
             },
         ));
 
+        let raysort_pipeline_layout = Some(self.device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("raysort"),
+                bind_group_layouts: &[self.raysort_bind_group_layout.as_ref().unwrap()],
+                push_constant_ranges: &[],
+            },
+        ));
+        
+        self.raysort_pipeline = Some(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("Raysort pipeline"),
+                layout: raysort_pipeline_layout.as_ref(),
+                module: match self.shaders.as_ref().unwrap().get("raysort") {
+                    Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+                    _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
+                },
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            },
+        ));
+
         self.raygen_pipeline = Some(self.device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
                 label: Some("Raygen pipeline"),
@@ -687,6 +755,25 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("rays")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                ],
+            }),
+        );
+        
+        self.raysort_bind_group = Some(
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("raysort bind group"),
+                layout: self.raysort_bind_group_layout.as_ref().unwrap(),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
                         resource: self
                             .buffers
                             .as_ref()
