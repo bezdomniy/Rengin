@@ -98,14 +98,17 @@ impl<'a> RenderApp<'a> {
             &screen_data,
             scene.object_params.as_ref().unwrap(),
         );
+
+        // TODO: remove buffers as arg and move into RenginWgpu state
+        renderer.create_target_textures(&physical_size);
+        
         renderer.create_pipelines(
             scene.bvh.as_ref().unwrap(),
             &screen_data,
             scene.object_params.as_ref().unwrap(),
         );
 
-        // TODO: remove buffers as arg and move into RenginWgpu state
-        renderer.create_bind_groups(&physical_size);
+        renderer.create_bind_groups();
 
         Self {
             renderer,

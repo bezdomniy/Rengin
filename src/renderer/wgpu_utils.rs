@@ -1,14 +1,14 @@
 use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
 
 use crate::{
+    RendererType,
     engine::bvh::{Bvh, NodeInner, NodeLeaf, NodeNormal},
     engine::rt_primitives::{ObjectParam, Ray, ScreenData, Ubo},
-    RendererType,
 };
 
 use wgpu::{
-    util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device,
-    Instance, Queue, RenderPipeline, Surface, Texture,
+    Adapter, BindGroup,  Buffer, ComputePipeline, Device,
+    Instance, Queue, RenderPipeline, Surface, Texture, util::DeviceExt,
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
@@ -22,18 +22,15 @@ pub struct RenginWgpu<'a> {
     pub queue: Queue,
     pub raysort_pipeline: Option<ComputePipeline>,
     pub raygen_pipeline: Option<ComputePipeline>,
-    pub raysort_bind_group_layout: Option<BindGroupLayout>,
     pub raysort_bind_group: Option<BindGroup>,
-    pub raygen_bind_group_layout: Option<BindGroupLayout>,
     pub raygen_bind_group: Option<BindGroup>,
     pub compute_pipeline: Option<ComputePipeline>,
-    pub compute_bind_group_layout: Option<BindGroupLayout>,
     pub compute_bind_group: Option<BindGroup>,
     pub render_pipeline: Option<RenderPipeline>,
-    pub render_bind_group_layout: Option<BindGroupLayout>,
     pub render_bind_group: Option<BindGroup>,
     pub buffers: Option<HashMap<&'static str, Buffer>>,
     pub compute_target_texture: Option<Texture>,
+    pub compute_target_texture_view: Option<wgpu::TextureView>,
     pub surface: Surface<'a>,
     pub config: wgpu::SurfaceConfiguration,
     pub shaders: Option<HashMap<&'static str, RenginShaderModule>>,
@@ -160,19 +157,16 @@ impl<'a> RenginWgpu<'a> {
             device,
             queue,
             raysort_pipeline: None,
-            raysort_bind_group_layout: None,
             raysort_bind_group: None,
             raygen_bind_group: None,
-            raygen_bind_group_layout: None,
             raygen_pipeline: None,
             compute_bind_group: None,
-            compute_bind_group_layout: None,
             compute_pipeline: None,
             render_bind_group: None,
-            render_bind_group_layout: None,
             render_pipeline: None,
             buffers: None,
             compute_target_texture: None,
+            compute_target_texture_view: None,
             surface: window_surface,
             config,
             shaders: None,
@@ -198,7 +192,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
 
         self.surface.configure(&self.device, &self.config);
 
-        self.create_bind_groups(physical_size);
+        self.create_target_textures(physical_size);
     }
 
     fn create_target_textures(&mut self, physical_size: &PhysicalSize<u32>) {
@@ -218,6 +212,13 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
             usage: wgpu::TextureUsages::STORAGE_BINDING,
             label: None,
         }));
+
+        self.compute_target_texture_view = Some(
+            self.compute_target_texture
+                .as_ref()
+                .unwrap()
+                .create_view(&wgpu::TextureViewDescriptor::default()),
+        );
     }
 
     fn create_shaders(&mut self, renderer_type: RendererType) {
@@ -238,11 +239,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         ]
         .join("\n");
 
-        let raysort_shader_str = [
-            types_str,
-            include_str!("../shaders/raysort.wgsl"),
-        ]
-        .join("\n");
+        let raysort_shader_str = [types_str, include_str!("../shaders/raysort.wgsl")].join("\n");
 
         let frag_shader_str = [ubo_str, include_str!("../shaders/render.frag.wgsl")].join("\n");
 
@@ -406,6 +403,111 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         ]));
     }
 
+    fn create_compute_pipeline(
+        &mut self,
+        pipeline_name: &str,
+        bind_group_layout_entries: &[wgpu::BindGroupLayoutEntry],
+        bind_group_entries: &[wgpu::BindGroupEntry],
+    ) -> Option<wgpu::ComputePipeline> {
+        let pipeline_layout = self.create_pipeline_layout(
+            pipeline_name,
+            bind_group_layout_entries,
+            bind_group_entries,
+        );
+        return Some(
+            self.device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(format!("{} pipeline", pipeline_name).as_str()),
+                    layout: pipeline_layout.as_ref(),
+                    module: match self.shaders.as_ref().unwrap().get(pipeline_name) {
+                        Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+                        _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
+                    },
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                }),
+        );
+    }
+
+    fn create_render_pipeline(
+        &mut self,
+        pipeline_name: &str,
+        bind_group_layout_entries: &[wgpu::BindGroupLayoutEntry],
+        bind_group_entries: &[wgpu::BindGroupEntry],
+    ) -> Option<wgpu::RenderPipeline> {
+        let pipeline_layout = self.create_pipeline_layout(
+            pipeline_name,
+            bind_group_layout_entries,
+            bind_group_entries,
+        );
+
+        return Some(
+            self.device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: None,
+                    layout: pipeline_layout.as_ref(),
+                    multiview: None,
+                    vertex: wgpu::VertexState {
+                        module: match self.shaders.as_ref().unwrap().get("vert") {
+                            Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+                            _ => panic!("Invalid WGPU vertex shader passed to render pipeline."),
+                        },
+                        entry_point: Some("main"),
+                        buffers: &[],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: match self.shaders.as_ref().unwrap().get("vert") {
+                            Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+                            _ => panic!("Invalid WGPU fragment shader passed to render pipeline."),
+                        },
+                        entry_point: Some("main"),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: self.config.format,
+                            // TODO: change subpixel to blending, rather than doing it in shader
+                            blend: Some(wgpu::BlendState::REPLACE),
+                            // blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                        // targets: &[self.renderer.config.format.into()],
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    cache: None,
+                }),
+        );
+    }
+
+    fn create_pipeline_layout(
+        &mut self,
+        pipeline_name: &str,
+        bind_group_layout_entries: &[wgpu::BindGroupLayoutEntry],
+        bind_group_entries: &[wgpu::BindGroupEntry],
+    ) -> Option<wgpu::PipelineLayout> {
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: bind_group_layout_entries,
+                    label: None,
+                });
+        self.render_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            entries: bind_group_entries,
+            layout: &bind_group_layout,
+            label: Some(format!("{} bind group", pipeline_name).as_str()),
+        }));
+        return Some(
+            self.device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(pipeline_name),
+                    bind_group_layouts: &[&bind_group_layout],
+                    push_constant_ranges: &[],
+                }),
+        );
+    }
+
     fn create_pipelines(
         &mut self,
         // TODO: bvh is only needed to get lengths, is there a better way to pass these?
@@ -413,450 +515,275 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         screen_data: &ScreenData,
         object_params: &[ObjectParam],
     ) {
-        // create raysort pipeline
-        self.raysort_bind_group_layout = Some(self.device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                ((screen_data.resolution.width * screen_data.resolution.height)
-                                    as usize
-                                    * mem::size_of::<Ray>()) as _,
-                            ),
-                        },
-                        count: None,
-                    },
-                ],
-                label: None,
-            },
-        ));
-
-        // create raygen pipeline
-        self.raygen_bind_group_layout = Some(self.device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                ((screen_data.resolution.width * screen_data.resolution.height)
-                                    as usize
-                                    * mem::size_of::<Ray>()) as _,
-                            ),
-                        },
-                        count: None,
-                    },
-                ],
-                label: None,
-            },
-        ));
-
-        let raygen_pipeline_layout = Some(self.device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                label: Some("raygen"),
-                bind_group_layouts: &[self.raygen_bind_group_layout.as_ref().unwrap()],
-                push_constant_ranges: &[],
-            },
-        ));
-
-        // create compute pipeline
-        self.compute_bind_group_layout = Some(self.device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::ReadWrite,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (bvh.inner_nodes.len() * mem::size_of::<NodeInner>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (bvh.leaf_nodes.len() * mem::size_of::<NodeLeaf>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (bvh.normal_nodes.len() * mem::size_of::<NodeNormal>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            // min_binding_size: None,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (object_params.len() * mem::size_of::<ObjectParam>()) as _,
-                            ),
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                ((screen_data.resolution.width * screen_data.resolution.height)
-                                    as usize
-                                    * mem::size_of::<Ray>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-                label: None,
-            },
-        ));
-
-        let compute_pipeline_layout = Some(self.device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                label: Some("compute"),
-                bind_group_layouts: &[self.compute_bind_group_layout.as_ref().unwrap()],
-                push_constant_ranges: &[],
-            },
-        ));
-
-        // create render pipeline
-        self.render_bind_group_layout = Some(self.device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                label: Some("render bind group layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::ReadWrite,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
-                        },
-                        count: None,
-                    },
-                ],
-            },
-        ));
-
-        let render_pipeline_layout = Some(self.device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                label: Some("render"),
-                bind_group_layouts: &[self.render_bind_group_layout.as_ref().unwrap()],
-                push_constant_ranges: &[],
-            },
-        ));
-
-        self.render_pipeline = Some(self.device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                label: None,
-                layout: render_pipeline_layout.as_ref(),
-                multiview: None,
-                vertex: wgpu::VertexState {
-                    module: match self.shaders.as_ref().unwrap().get("vert") {
-                        Some(RenginShaderModule::WgpuShaderModule(m)) => m,
-                        _ => panic!("Invalid WGPU vertex shader passed to render pipeline."),
-                    },
-                    entry_point: Some("main"),
-                    buffers: &[],
-                    compilation_options: Default::default(),
+        self.raygen_pipeline = self.create_compute_pipeline(
+            "raygen",
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(
+                        ((screen_data.resolution.width * screen_data.resolution.height) as usize
+                            * mem::size_of::<Ray>()) as _,
+                    ),
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: match self.shaders.as_ref().unwrap().get("frag") {
-                        Some(RenginShaderModule::WgpuShaderModule(m)) => m,
-                        _ => panic!("Invalid WGPU fragment shader passed to render pipeline."),
-                    },
-                    entry_point: Some("main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: self.config.format,
-                        // TODO: change subpixel to blending, rather than doing it in shader
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        // blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                    // targets: &[self.renderer.config.format.into()],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                cache: None,
-            },
-        ));
-
-        let raysort_pipeline_layout = Some(self.device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                label: Some("raysort"),
-                bind_group_layouts: &[self.raysort_bind_group_layout.as_ref().unwrap()],
-                push_constant_ranges: &[],
-            },
-        ));
-        
-        self.raysort_pipeline = Some(self.device.create_compute_pipeline(
-            &wgpu::ComputePipelineDescriptor {
-                label: Some("Raysort pipeline"),
-                layout: raysort_pipeline_layout.as_ref(),
-                module: match self.shaders.as_ref().unwrap().get("raysort") {
-                    Some(RenginShaderModule::WgpuShaderModule(m)) => m,
-                    _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
+                count: None,
+            }],
+            &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self
+                        .buffers
+                        .as_ref()
+                        .unwrap()
+                        .get("ubo")
+                        .unwrap()
+                        .as_entire_binding(),
                 },
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            },
-        ));
-
-        self.raygen_pipeline = Some(self.device.create_compute_pipeline(
-            &wgpu::ComputePipelineDescriptor {
-                label: Some("Raygen pipeline"),
-                layout: raygen_pipeline_layout.as_ref(),
-                module: match self.shaders.as_ref().unwrap().get("raygen") {
-                    Some(RenginShaderModule::WgpuShaderModule(m)) => m,
-                    _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self
+                        .buffers
+                        .as_ref()
+                        .unwrap()
+                        .get("rays")
+                        .unwrap()
+                        .as_entire_binding(),
                 },
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            },
-        ));
-
-        self.compute_pipeline = Some(self.device.create_compute_pipeline(
-            &wgpu::ComputePipelineDescriptor {
-                label: Some("Compute pipeline"),
-                layout: compute_pipeline_layout.as_ref(),
-                module: match self.shaders.as_ref().unwrap().get("comp") {
-                    Some(RenginShaderModule::WgpuShaderModule(m)) => m,
-                    _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
-                },
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            },
-        ));
-    }
-
-    fn create_bind_groups(&mut self, physical_size: &PhysicalSize<u32>) {
-        self.create_target_textures(physical_size);
-
-        let compute_target_texture_view = self
-            .compute_target_texture
-            .as_ref()
-            .unwrap()
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        self.render_bind_group = Some(
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&compute_target_texture_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("ubo")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
-                ],
-                layout: self.render_bind_group_layout.as_ref().unwrap(),
-                label: Some("render bind group"),
-            }),
+            ],
         );
 
-        self.raygen_bind_group = Some(
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("raygen bind group"),
-                layout: self.raygen_bind_group_layout.as_ref().unwrap(),
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("ubo")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("rays")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
-                ],
-            }),
-        );
-        
-        self.raysort_bind_group = Some(
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("raysort bind group"),
-                layout: self.raysort_bind_group_layout.as_ref().unwrap(),
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("rays")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
-                ],
-            }),
+        self.raysort_pipeline = self.create_compute_pipeline(
+            "raysort",
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(
+                        ((screen_data.resolution.width * screen_data.resolution.height) as usize
+                            * mem::size_of::<Ray>()) as _,
+                    ),
+                },
+                count: None,
+            }],
+            &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: self
+                    .buffers
+                    .as_ref()
+                    .unwrap()
+                    .get("rays")
+                    .unwrap()
+                    .as_entire_binding(),
+            }],
         );
 
-        self.compute_bind_group = Some(
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("compute bind group"),
-                layout: self.compute_bind_group_layout.as_ref().unwrap(),
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&compute_target_texture_view),
+        self.compute_pipeline = self.create_compute_pipeline(
+            "compute",
+            &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::ReadWrite,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        view_dimension: wgpu::TextureViewDimension::D2,
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("ubo")
-                            .unwrap()
-                            .as_entire_binding(),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("tlas")
-                            .unwrap()
-                            .as_entire_binding(),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(
+                            (bvh.inner_nodes.len() * mem::size_of::<NodeInner>()) as _,
+                        ),
+                        // min_binding_size: None,
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("blas")
-                            .unwrap()
-                            .as_entire_binding(),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(
+                            (bvh.leaf_nodes.len() * mem::size_of::<NodeLeaf>()) as _,
+                        ),
+                        // min_binding_size: None,
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("normals")
-                            .unwrap()
-                            .as_entire_binding(),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(
+                            (bvh.normal_nodes.len() * mem::size_of::<NodeNormal>()) as _,
+                        ),
+                        // min_binding_size: None,
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("object_params")
-                            .unwrap()
-                            .as_entire_binding(),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        // min_binding_size: None,
+                        min_binding_size: wgpu::BufferSize::new(
+                            (object_params.len() * mem::size_of::<ObjectParam>()) as _,
+                        ),
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("rays")
-                            .unwrap()
-                            .as_entire_binding(),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(
+                            ((screen_data.resolution.width * screen_data.resolution.height)
+                                as usize
+                                * mem::size_of::<Ray>()) as _,
+                        ),
+                        // min_binding_size: None,
                     },
-                ],
-            }),
+                    count: None,
+                },
+            ],
+            &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &self.compute_target_texture_view.as_ref().unwrap(),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self
+                        .buffers
+                        .as_ref()
+                        .unwrap()
+                        .get("ubo")
+                        .unwrap()
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self
+                        .buffers
+                        .as_ref()
+                        .unwrap()
+                        .get("tlas")
+                        .unwrap()
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self
+                        .buffers
+                        .as_ref()
+                        .unwrap()
+                        .get("blas")
+                        .unwrap()
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self
+                        .buffers
+                        .as_ref()
+                        .unwrap()
+                        .get("normals")
+                        .unwrap()
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: self
+                        .buffers
+                        .as_ref()
+                        .unwrap()
+                        .get("object_params")
+                        .unwrap()
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: self
+                        .buffers
+                        .as_ref()
+                        .unwrap()
+                        .get("rays")
+                        .unwrap()
+                        .as_entire_binding(),
+                },
+            ],
+        );
+
+        self.render_pipeline = self.create_render_pipeline(
+            "render",
+            &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::ReadWrite,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
+                    },
+                    count: None,
+                },
+            ],
+            &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &self.compute_target_texture_view.as_ref().unwrap(),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self
+                        .buffers
+                        .as_ref()
+                        .unwrap()
+                        .get("ubo")
+                        .unwrap()
+                        .as_entire_binding(),
+                },
+            ],
         );
     }
 }
