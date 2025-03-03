@@ -31,19 +31,19 @@ pub trait RenginRenderer {
         &mut self,
         pipeline_name: &str,
         entries: &[wgpu::BindGroupLayoutEntry],
-        bind_group_entries: &[wgpu::BindGroupEntry]
+        buffer_names: &[&str],
     ) -> Option<wgpu::PipelineLayout>;
     fn create_render_pipeline(
         &mut self,
         pipeline_name: &str,
         bind_group_layout_entries: &[wgpu::BindGroupLayoutEntry],
-        bind_group_entries: &[wgpu::BindGroupEntry]
+        buffer_names: &[&str],
     ) -> Option<wgpu::RenderPipeline>;
     fn create_compute_pipeline(
         &mut self,
         pipeline_name: &str,
         bind_group_layout_entries: &[wgpu::BindGroupLayoutEntry],
-        bind_group_entries: &[wgpu::BindGroupEntry]
+        buffer_names: &[&str],
     ) -> Option<wgpu::ComputePipeline>;
 
     fn create_pipelines(

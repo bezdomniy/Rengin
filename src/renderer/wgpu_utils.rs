@@ -7,8 +7,8 @@ use crate::{
 };
 
 use wgpu::{
-    Adapter, BindGroup,  Buffer, ComputePipeline, Device,
-    Instance, Queue, RenderPipeline, Surface, Texture, util::DeviceExt,
+    Adapter, BindGroup, Buffer, ComputePipeline, Device, Instance, Queue, RenderPipeline, Surface,
+    Texture, util::DeviceExt,
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
@@ -22,18 +22,15 @@ pub struct RenginWgpu<'a> {
     pub queue: Queue,
     pub raysort_pipeline: Option<ComputePipeline>,
     pub raygen_pipeline: Option<ComputePipeline>,
-    pub raysort_bind_group: Option<BindGroup>,
-    pub raygen_bind_group: Option<BindGroup>,
     pub compute_pipeline: Option<ComputePipeline>,
-    pub compute_bind_group: Option<BindGroup>,
     pub render_pipeline: Option<RenderPipeline>,
-    pub render_bind_group: Option<BindGroup>,
-    pub buffers: Option<HashMap<&'static str, Buffer>>,
+    pub bind_groups: HashMap<String, BindGroup>,
+    pub buffers: HashMap<String, Buffer>,
     pub compute_target_texture: Option<Texture>,
     pub compute_target_texture_view: Option<wgpu::TextureView>,
     pub surface: Surface<'a>,
     pub config: wgpu::SurfaceConfiguration,
-    pub shaders: Option<HashMap<&'static str, RenginShaderModule>>,
+    pub shaders: HashMap<String, RenginShaderModule>,
     // pub physical_size: PhysicalSize<u32>,
     // pub logical_size: LogicalSize<u32>,
     // pub workgroup_size: [u32; 3],
@@ -157,19 +154,20 @@ impl<'a> RenginWgpu<'a> {
             device,
             queue,
             raysort_pipeline: None,
-            raysort_bind_group: None,
-            raygen_bind_group: None,
+            // raysort_bind_group: None,
+            // raygen_bind_group: None,
             raygen_pipeline: None,
-            compute_bind_group: None,
+            // compute_bind_group: None,
             compute_pipeline: None,
-            render_bind_group: None,
+            // render_bind_group: None,
             render_pipeline: None,
-            buffers: None,
+            buffers: HashMap::new(),
             compute_target_texture: None,
             compute_target_texture_view: None,
             surface: window_surface,
             config,
-            shaders: None,
+            shaders: HashMap::new(),
+            bind_groups: HashMap::new(),
             // physical_size,
             // logical_size,
             // workgroup_size,
@@ -310,20 +308,26 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(frag_shader_str.as_str())),
             });
 
-        let mut shaders = HashMap::new();
-        shaders.insert(
-            "raygen",
+        self.shaders.insert(
+            "raygen".to_string(),
             RenginShaderModule::WgpuShaderModule(raygen_module),
         );
-        shaders.insert(
-            "raysort",
+        self.shaders.insert(
+            "raysort".to_string(),
             RenginShaderModule::WgpuShaderModule(raysort_module),
         );
-        shaders.insert("comp", RenginShaderModule::WgpuShaderModule(cs_module));
-        shaders.insert("vert", RenginShaderModule::WgpuShaderModule(vt_module));
-        shaders.insert("frag", RenginShaderModule::WgpuShaderModule(fg_module));
-
-        self.shaders = Some(shaders);
+        self.shaders.insert(
+            "compute".to_string(),
+            RenginShaderModule::WgpuShaderModule(cs_module),
+        );
+        self.shaders.insert(
+            "vert".to_string(),
+            RenginShaderModule::WgpuShaderModule(vt_module),
+        );
+        self.shaders.insert(
+            "frag".to_string(),
+            RenginShaderModule::WgpuShaderModule(fg_module),
+        );
     }
 
     fn create_buffers(
@@ -393,33 +397,28 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
             now.elapsed().as_millis()
         );
 
-        self.buffers = Some(HashMap::from([
-            ("ubo", buf_ubo),
-            ("tlas", buf_tlas),
-            ("blas", buf_blas),
-            ("normals", buf_normals),
-            ("object_params", buf_op),
-            ("rays", buf_rays),
-        ]));
+        self.buffers.insert("ubo".to_string(), buf_ubo);
+        self.buffers.insert("tlas".to_string(), buf_tlas);
+        self.buffers.insert("blas".to_string(), buf_blas);
+        self.buffers.insert("normals".to_string(), buf_normals);
+        self.buffers.insert("object_params".to_string(), buf_op);
+        self.buffers.insert("rays".to_string(), buf_rays);
     }
 
     fn create_compute_pipeline(
         &mut self,
         pipeline_name: &str,
         bind_group_layout_entries: &[wgpu::BindGroupLayoutEntry],
-        bind_group_entries: &[wgpu::BindGroupEntry],
+        buffer_names: &[&str],
     ) -> Option<wgpu::ComputePipeline> {
-        let pipeline_layout = self.create_pipeline_layout(
-            pipeline_name,
-            bind_group_layout_entries,
-            bind_group_entries,
-        );
+        let pipeline_layout =
+            self.create_pipeline_layout(pipeline_name, bind_group_layout_entries, buffer_names);
         return Some(
             self.device
                 .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                     label: Some(format!("{} pipeline", pipeline_name).as_str()),
                     layout: pipeline_layout.as_ref(),
-                    module: match self.shaders.as_ref().unwrap().get(pipeline_name) {
+                    module: match self.shaders.get(pipeline_name) {
                         Some(RenginShaderModule::WgpuShaderModule(m)) => m,
                         _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
                     },
@@ -434,13 +433,10 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         &mut self,
         pipeline_name: &str,
         bind_group_layout_entries: &[wgpu::BindGroupLayoutEntry],
-        bind_group_entries: &[wgpu::BindGroupEntry],
+        buffer_names: &[&str],
     ) -> Option<wgpu::RenderPipeline> {
-        let pipeline_layout = self.create_pipeline_layout(
-            pipeline_name,
-            bind_group_layout_entries,
-            bind_group_entries,
-        );
+        let pipeline_layout =
+            self.create_pipeline_layout(pipeline_name, bind_group_layout_entries, buffer_names);
 
         return Some(
             self.device
@@ -449,7 +445,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                     layout: pipeline_layout.as_ref(),
                     multiview: None,
                     vertex: wgpu::VertexState {
-                        module: match self.shaders.as_ref().unwrap().get("vert") {
+                        module: match self.shaders.get("vert") {
                             Some(RenginShaderModule::WgpuShaderModule(m)) => m,
                             _ => panic!("Invalid WGPU vertex shader passed to render pipeline."),
                         },
@@ -458,7 +454,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                         compilation_options: Default::default(),
                     },
                     fragment: Some(wgpu::FragmentState {
-                        module: match self.shaders.as_ref().unwrap().get("vert") {
+                        module: match self.shaders.get("vert") {
                             Some(RenginShaderModule::WgpuShaderModule(m)) => m,
                             _ => panic!("Invalid WGPU fragment shader passed to render pipeline."),
                         },
@@ -485,7 +481,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
         &mut self,
         pipeline_name: &str,
         bind_group_layout_entries: &[wgpu::BindGroupLayoutEntry],
-        bind_group_entries: &[wgpu::BindGroupEntry],
+        buffer_names: &[&str],
     ) -> Option<wgpu::PipelineLayout> {
         let bind_group_layout =
             self.device
@@ -493,11 +489,38 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                     entries: bind_group_layout_entries,
                     label: None,
                 });
-        self.render_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            entries: bind_group_entries,
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            entries: buffer_names
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    if *name == "texture" {
+                        return wgpu::BindGroupEntry {
+                            binding: i as u32,
+                            resource: wgpu::BindingResource::TextureView(
+                                self.compute_target_texture_view.as_ref().unwrap(),
+                            ),
+                        };
+                    }
+                    wgpu::BindGroupEntry {
+                        binding: i as u32,
+                        resource: self
+                            .buffers
+                            .get(*name)
+                            .expect("Buffer not found")
+                            .as_entire_binding(),
+                    }
+                })
+                .collect::<Vec<wgpu::BindGroupEntry>>()
+                .as_slice(),
             layout: &bind_group_layout,
             label: Some(format!("{} bind group", pipeline_name).as_str()),
-        }));
+        });
+
+        self.bind_groups
+            .insert(pipeline_name.to_string(), bind_group);
+
         return Some(
             self.device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -517,41 +540,33 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
     ) {
         self.raygen_pipeline = self.create_compute_pipeline(
             "raygen",
-            &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(
-                        ((screen_data.resolution.width * screen_data.resolution.height) as usize
-                            * mem::size_of::<Ray>()) as _,
-                    ),
-                },
-                count: None,
-            }],
             &[
-                wgpu::BindGroupEntry {
+                wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    resource: self
-                        .buffers
-                        .as_ref()
-                        .unwrap()
-                        .get("ubo")
-                        .unwrap()
-                        .as_entire_binding(),
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
+                    },
+                    count: None,
                 },
-                wgpu::BindGroupEntry {
+                wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    resource: self
-                        .buffers
-                        .as_ref()
-                        .unwrap()
-                        .get("rays")
-                        .unwrap()
-                        .as_entire_binding(),
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(
+                            ((screen_data.resolution.width * screen_data.resolution.height)
+                                as usize
+                                * mem::size_of::<Ray>()) as _,
+                        ),
+                    },
+                    count: None,
                 },
             ],
+            &["ubo", "rays"],
         );
 
         self.raysort_pipeline = self.create_compute_pipeline(
@@ -569,16 +584,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                 },
                 count: None,
             }],
-            &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: self
-                    .buffers
-                    .as_ref()
-                    .unwrap()
-                    .get("rays")
-                    .unwrap()
-                    .as_entire_binding(),
-            }],
+            &["rays"],
         );
 
         self.compute_pipeline = self.create_compute_pipeline(
@@ -673,72 +679,13 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                 },
             ],
             &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &self.compute_target_texture_view.as_ref().unwrap(),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: self
-                        .buffers
-                        .as_ref()
-                        .unwrap()
-                        .get("ubo")
-                        .unwrap()
-                        .as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self
-                        .buffers
-                        .as_ref()
-                        .unwrap()
-                        .get("tlas")
-                        .unwrap()
-                        .as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: self
-                        .buffers
-                        .as_ref()
-                        .unwrap()
-                        .get("blas")
-                        .unwrap()
-                        .as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: self
-                        .buffers
-                        .as_ref()
-                        .unwrap()
-                        .get("normals")
-                        .unwrap()
-                        .as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: self
-                        .buffers
-                        .as_ref()
-                        .unwrap()
-                        .get("object_params")
-                        .unwrap()
-                        .as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: self
-                        .buffers
-                        .as_ref()
-                        .unwrap()
-                        .get("rays")
-                        .unwrap()
-                        .as_entire_binding(),
-                },
+                "texture",
+                "ubo",
+                "tlas",
+                "blas",
+                "normals",
+                "object_params",
+                "rays",
             ],
         );
 
@@ -766,24 +713,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                     count: None,
                 },
             ],
-            &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &self.compute_target_texture_view.as_ref().unwrap(),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: self
-                        .buffers
-                        .as_ref()
-                        .unwrap()
-                        .get("ubo")
-                        .unwrap()
-                        .as_entire_binding(),
-                },
-            ],
+            &["texture", "ubo"],
         );
     }
 }

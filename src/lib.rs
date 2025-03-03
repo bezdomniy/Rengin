@@ -108,8 +108,6 @@ impl<'a> RenderApp<'a> {
             scene.object_params.as_ref().unwrap(),
         );
 
-        renderer.create_bind_groups();
-
         Self {
             renderer,
             screen_data,
@@ -178,7 +176,7 @@ impl<'a> RenderApp<'a> {
 
     pub fn update(&mut self) {
         self.renderer.queue.write_buffer(
-            self.renderer.buffers.as_ref().unwrap().get("ubo").unwrap(),
+            self.renderer.buffers.get("ubo").unwrap(),
             0,
             bytemuck::bytes_of(&self.screen_data.generate_ubo()),
         );
@@ -202,7 +200,7 @@ impl<'a> RenderApp<'a> {
                 timestamp_writes: Default::default(),
             });
             cpass.set_pipeline(self.renderer.raygen_pipeline.as_ref().unwrap());
-            cpass.set_bind_group(0, self.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
+            cpass.set_bind_group(0, self.renderer.bind_groups.get("raygen").unwrap(), &[]);
 
             cpass.dispatch_workgroups(
                 self.screen_data.size.width / WORKGROUP_SIZE[0],
@@ -342,7 +340,7 @@ impl<'a> RenderApp<'a> {
                                         );
                                         cpass.set_bind_group(
                                             0,
-                                            self.renderer.compute_bind_group.as_ref().unwrap(),
+                                            self.renderer.bind_groups.get("compute").unwrap(),
                                             &[],
                                         );
                                         
@@ -359,7 +357,7 @@ impl<'a> RenderApp<'a> {
 
 
                                         cpass.set_pipeline(self.renderer.raysort_pipeline.as_ref().unwrap());
-                                        cpass.set_bind_group(0, self.renderer.raysort_bind_group.as_ref().unwrap(), &[]);
+                                        cpass.set_bind_group(0, self.renderer.bind_groups.get("raysort").unwrap(), &[]);
 
                                         cpass.dispatch_workgroups(
                                             1,1,1,
@@ -378,7 +376,7 @@ impl<'a> RenderApp<'a> {
                                     );
                                     rpass.set_bind_group(
                                         0,
-                                        self.renderer.render_bind_group.as_ref().unwrap(),
+                                        self.renderer.bind_groups.get("render").unwrap(),
                                         &[],
                                     );
                                     // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
