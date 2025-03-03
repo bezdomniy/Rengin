@@ -360,7 +360,8 @@ impl<'a> RenderApp<'a> {
                                         cpass.set_bind_group(0, self.renderer.bind_groups.get("raysort").unwrap(), &[]);
 
                                         cpass.dispatch_workgroups(
-                                            1,1,1,
+                                            ((self.screen_data.resolution.width * self.screen_data.resolution.height) / 2) / 256,
+                                            1,1,
                                         );
                                     }
                                 }

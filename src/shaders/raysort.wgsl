@@ -7,12 +7,12 @@ fn swap(i: u32, j: u32) {
 }
 
 //TODO
-@compute @workgroup_size(1)
+@compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     let n = arrayLength(&rays);
 
     if global_invocation_id.x > n / 2 {
         return;
     }
-    swap(global_invocation_id.x,n-global_invocation_id.x);
+    swap(global_invocation_id.x, n - global_invocation_id.x - 1u);
 }
