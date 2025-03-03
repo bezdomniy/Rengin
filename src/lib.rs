@@ -359,8 +359,9 @@ impl<'a> RenderApp<'a> {
                                         cpass.set_pipeline(self.renderer.raysort_pipeline.as_ref().unwrap());
                                         cpass.set_bind_group(0, self.renderer.bind_groups.get("raysort").unwrap(), &[]);
 
+                                        // println!("{:?}",self.screen_data.resolution.width * self.screen_data.resolution.height);
                                         cpass.dispatch_workgroups(
-                                            ((self.screen_data.resolution.width * self.screen_data.resolution.height) / 2) / 256,
+                                            ((self.screen_data.size.width * self.screen_data.size.height)/2) / 256,
                                             1,1,
                                         );
                                     }
