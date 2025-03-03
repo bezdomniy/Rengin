@@ -454,7 +454,7 @@ impl<'a> RenginRenderer for RenginWgpu<'a> {
                         compilation_options: Default::default(),
                     },
                     fragment: Some(wgpu::FragmentState {
-                        module: match self.shaders.get("vert") {
+                        module: match self.shaders.get("frag") {
                             Some(RenginShaderModule::WgpuShaderModule(m)) => m,
                             _ => panic!("Invalid WGPU fragment shader passed to render pipeline."),
                         },
