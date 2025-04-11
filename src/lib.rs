@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 #[cfg(target_arch = "wasm32")]
 use web_time::{Duration, Instant};
 
-use crate::renderer::{wgpu_utils::RenginWgpu, RenginRenderer};
+use renderer::RenginRenderer;
+use renderer::wgpu_utils::RenginWgpu;
 use clap::Parser;
 use engine::rt_primitives::{Camera, ScreenData};
 use engine::scene_importer::Scene;
