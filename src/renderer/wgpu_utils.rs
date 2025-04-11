@@ -90,8 +90,6 @@ impl<'a> RenginWgpu<'a> {
             log::info!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
         }
 
-        let trace_dir = std::env::var("WGPU_TRACE");
-
         let optional_features = {
             wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
                 | wgpu::Features::PUSH_CONSTANTS
@@ -130,7 +128,6 @@ impl<'a> RenginWgpu<'a> {
                     required_limits,
                     ..Default::default()
                 },
-                trace_dir.ok().as_ref().map(std::path::Path::new),
             )
             .await
             .unwrap();

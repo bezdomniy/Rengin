@@ -13,14 +13,14 @@ native = ["glam/std"]
 webgl = ["glam/libm"]
 
 [dependencies]
-wgpu = { version = "24.0", features = ["vulkan-portability"] }
+wgpu = { version = "25.0", features = ["vulkan-portability"] }
 glam = { version = "0.30", default-features = false, features = ["bytemuck"] }
 winit = "0.29"
 tobj = "4.0"
-bincode = "1.3.3"
+bincode = "2.0"
 env_logger = "0.11"
 log = "0.4"
-bytemuck = { version = "1.21", features = ["derive"] }
+bytemuck = { version = "1.22", features = ["derive"] }
 rand = "0.9"
 yaml-rust2 = "0.10"
 linked-hash-map = "0.5.6"

@@ -376,7 +376,7 @@ impl<'a> RenderApp<'a> {
                                     .queue
                                     .submit(std::iter::once(command_encoder.finish()));
 
-                                self.renderer.device.poll(wgpu::Maintain::Wait);
+                                let _ = self.renderer.device.poll(wgpu::PollType::Wait);
                                 frame.present();
                             }
                         } else {
