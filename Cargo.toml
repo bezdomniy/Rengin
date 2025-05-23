@@ -15,7 +15,8 @@ webgl = ["glam/libm"]
 [dependencies]
 wgpu = { version = "25.0", features = ["vulkan-portability"] }
 glam = { version = "0.30", default-features = false, features = ["bytemuck"] }
-winit = "0.29"
+winit = "0.30"
+pollster = "0.4"
 tobj = "4.0"
 bincode = "2.0"
 env_logger = "0.11"
