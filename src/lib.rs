@@ -295,7 +295,6 @@ impl ApplicationHandler for RenderApp {
             }
             | WindowEvent::CloseRequested => event_loop.exit(),
 
-            // #[cfg(not(target_arch = "wasm32"))]
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -362,6 +361,7 @@ impl ApplicationHandler for RenderApp {
                 let color_attachments = [Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
+                    depth_slice: None,
                     ops: wgpu::Operations {
                         // load: wgpu::LoadOp::Load,
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),

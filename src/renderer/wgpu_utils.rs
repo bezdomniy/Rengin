@@ -64,7 +64,6 @@ impl RenginWgpu {
         });
         log::info!("instance: {:?}", instance);
 
-        #[cfg(not(target_arch = "wasm32"))]
         for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
             log::debug!("Found adapter {:?}", adapter)
         }
@@ -83,7 +82,6 @@ impl RenginWgpu {
 
         log::info!("adapter: {:?}", adapter);
 
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let adapter_info = adapter.get_info();
             log::info!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
@@ -98,13 +96,7 @@ impl RenginWgpu {
         let required_features = { wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES };
         // let required_features = { wgpu::Features::empty() };
 
-        let required_limits = if cfg!(target_arch = "wasm32") {
-            wgpu::Limits {
-                max_push_constant_size: 0,
-                max_storage_buffer_binding_size: 1024 << 20,
-                ..wgpu::Limits::downlevel_webgl2_defaults()
-            }
-        } else {
+        let required_limits = {
             wgpu::Limits {
                 max_push_constant_size: 0,
                 max_storage_buffer_binding_size: 1024 << 20,
