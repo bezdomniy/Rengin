@@ -4,18 +4,16 @@ version = "0.1.0"
 authors = ["Ilia <ilia.shibaev@gmail.com>"]
 edition = "2024"
 
-[workspace]
-members = ["run-wasm"]
-
 [features]
 default = ["native"]
 native = ["glam/std"]
 webgl = ["glam/libm"]
 
 [dependencies]
-wgpu = { version = "25.0", features = ["vulkan-portability"] }
+wgpu = { version = "27.0", features = ["vulkan-portability"] }
 glam = { version = "0.30", default-features = false, features = ["bytemuck"] }
-winit = "0.29"
+winit = "0.30"
+pollster = "0.4"
 tobj = "4.0"
 bincode = "2.0"
 env_logger = "0.11"
@@ -30,18 +28,7 @@ image = "0.25"
 itertools = "0.14"
 clap = { version = "4.5", features = ["derive"] }
 cfg-if = "1"
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures = { version = "0.3" }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-console_error_panic_hook = "0.1.7"
-console_log = "1.0"
-wasm-bindgen-futures = "0.4.42"
-wasm-bindgen = { version = "0.2.87", features = ["serde-serialize"] }
-web-time = { version = "1.1" }
-getrandom = { version = "0.3.3", features = ["wasm_js"] }
-web-sys = { version = "0.3", features = ["Document", "Window", "Element"] }
 
 [profile.release]
 debug = true

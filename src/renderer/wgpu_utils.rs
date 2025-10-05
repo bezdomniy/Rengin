@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, mem, time::Instant};
+use std::{borrow::Cow, collections::HashMap, mem, sync::Arc, time::Instant};
 
 use crate::{
     engine::bvh::{Bvh, NodeInner, NodeLeaf, NodeNormal},
@@ -14,8 +14,8 @@ use winit::{dpi::PhysicalSize, window::Window};
 
 use super::{RenginRenderer, RenginShaderModule};
 
-pub struct RenginWgpu<'a> {
-    pub window: &'a Window,
+pub struct RenginWgpu {
+    pub window: Arc<Window>,
     pub instance: Instance,
     pub _adapter: Adapter,
     pub device: Device,
@@ -31,7 +31,7 @@ pub struct RenginWgpu<'a> {
     pub render_bind_group: Option<BindGroup>,
     pub buffers: Option<HashMap<&'static str, Buffer>>,
     pub compute_target_texture: Option<Texture>,
-    pub surface: Surface<'a>,
+    pub surface: Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub shaders: Option<HashMap<&'static str, RenginShaderModule>>,
     // pub physical_size: PhysicalSize<u32>,
@@ -44,9 +44,9 @@ pub struct RenginWgpu<'a> {
     // pub resolution: PhysicalSize<u32>,
 }
 
-impl<'a> RenginWgpu<'a> {
+impl RenginWgpu {
     pub async fn new(
-        window: &'a Window,
+        window: Arc<Window>,
         // workgroup_size: [u32; 3],
         continous_motion: bool,
         rays_per_pixel: u32,
@@ -64,12 +64,11 @@ impl<'a> RenginWgpu<'a> {
         });
         log::info!("instance: {:?}", instance);
 
-        #[cfg(not(target_arch = "wasm32"))]
         for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
             log::debug!("Found adapter {:?}", adapter)
         }
 
-        let window_surface = instance.create_surface(window).unwrap();
+        let window_surface = instance.create_surface(window.clone()).unwrap();
         log::info!("window_surface: {:?}", window_surface);
 
         let adapter = instance
@@ -83,7 +82,6 @@ impl<'a> RenginWgpu<'a> {
 
         log::info!("adapter: {:?}", adapter);
 
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let adapter_info = adapter.get_info();
             log::info!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
@@ -98,13 +96,7 @@ impl<'a> RenginWgpu<'a> {
         let required_features = { wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES };
         // let required_features = { wgpu::Features::empty() };
 
-        let required_limits = if cfg!(target_arch = "wasm32") {
-            wgpu::Limits {
-                max_push_constant_size: 0,
-                max_storage_buffer_binding_size: 1024 << 20,
-                ..wgpu::Limits::downlevel_webgl2_defaults()
-            }
-        } else {
+        let required_limits = {
             wgpu::Limits {
                 max_push_constant_size: 0,
                 max_storage_buffer_binding_size: 1024 << 20,
@@ -179,7 +171,7 @@ impl<'a> RenginWgpu<'a> {
     }
 }
 
-impl<'a> RenginRenderer for RenginWgpu<'a> {
+impl<'a> RenginRenderer for RenginWgpu {
     fn update_window_size(&mut self, physical_size: &PhysicalSize<u32>) {
         // self.physical_size = winit::dpi::PhysicalSize::new(width, height);
         // self.logical_size = self.physical_size.to_logical(self.scale_factor);

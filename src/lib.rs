@@ -1,28 +1,23 @@
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 mod engine;
 mod renderer;
 
+use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{
-    DeviceEvent, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
+    DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
-use winit::event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget};
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{Key, NamedKey};
-use winit::window::{Window, WindowBuilder};
+use winit::window::{Window, WindowAttributes, WindowId};
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-#[cfg(target_arch = "wasm32")]
-use web_time::{Duration, Instant};
-
-use renderer::RenginRenderer;
-use renderer::wgpu_utils::RenginWgpu;
 use clap::Parser;
 use engine::rt_primitives::{Camera, ScreenData};
 use engine::scene_importer::Scene;
+use renderer::RenginRenderer;
+use renderer::wgpu_utils::RenginWgpu;
 
 static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
 
@@ -37,15 +32,22 @@ struct GameState {
     pub camera: Camera,
 }
 
-pub struct RenderApp<'a> {
-    renderer: RenginWgpu<'a>,
+struct State {
+    renderer: RenginWgpu,
     screen_data: ScreenData,
     game_state: GameState,
+    left_mouse_down: bool,
+    last_update_inst: Instant,
 }
 
-impl<'a> RenderApp<'a> {
+#[derive(Default)]
+pub struct RenderApp {
+    state: Option<State>,
+}
+
+impl State {
     pub async fn new(
-        window: &'a Window,
+        window: Arc<Window>,
         resolution: &PhysicalSize<u32>,
         scene: &Scene,
         continous_motion: bool,
@@ -112,14 +114,16 @@ impl<'a> RenderApp<'a> {
             renderer,
             screen_data,
             game_state,
+            left_mouse_down: false,
+            last_update_inst: Instant::now(),
         }
     }
 
-    fn update_device_event(&mut self, event: DeviceEvent, left_mouse_down: &mut bool) {
+    fn update_device_event(&mut self, event: DeviceEvent) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
                 // println!("x:{}, y:{}", position.x, position.y);
-                if *left_mouse_down {
+                if self.left_mouse_down {
                     self.game_state
                         .camera
                         .rotate(-delta.0 as f32, delta.1 as f32);
@@ -154,21 +158,21 @@ impl<'a> RenderApp<'a> {
         }
     }
 
-    fn update_window_event(&mut self, event: WindowEvent, left_mouse_down: &mut bool) {
+    fn update_window_event(&mut self, event: WindowEvent) {
         match event {
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
             } => {
-                *left_mouse_down = true;
+                self.left_mouse_down = true;
             }
             WindowEvent::MouseInput {
                 state: ElementState::Released,
                 button: MouseButton::Left,
                 ..
             } => {
-                *left_mouse_down = false;
+                self.left_mouse_down = false;
             }
             _ => {}
         }
@@ -218,180 +222,227 @@ impl<'a> RenderApp<'a> {
 
         // self.renderer.device.poll(wgpu::Maintain::Wait);
     }
+}
 
-    pub async fn render(mut self, event_loop: EventLoop<()>) {
-        let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
-        let mut last_update_inst = Instant::now();
-        let mut left_mouse_down = false;
+impl ApplicationHandler for RenderApp {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let monitor = event_loop.available_monitors().next().unwrap();
+        let monitor_scale_factor = monitor.scale_factor();
+        let resolution = monitor.size();
 
-        let _ = event_loop.run(
-            move |event: Event<()>, target: &EventLoopWindowTarget<()>| {
-                match event {
-                    winit::event::Event::WindowEvent { event, .. } => match event {
-                        WindowEvent::Resized(size) => {
-                            self.screen_data.update_dims(&size);
-                            self.screen_data.subpixel_idx = 0;
-                            self.renderer.update_window_size(&size);
-                        }
-                        WindowEvent::KeyboardInput {
-                            event:
-                                KeyEvent {
-                                    logical_key: Key::Named(NamedKey::Escape),
-                                    state: ElementState::Pressed,
-                                    ..
-                                },
-                            ..
-                        }
-                        | WindowEvent::CloseRequested => target.exit(),
+        let args = Args::parse();
+        let renderer_type = if args.whitted {
+            panic!("Whitted Ray Tracer has been deprecated and will no longer work.");
+        } else {
+            RendererType::PathTracer
+        };
 
-                        // #[cfg(not(target_arch = "wasm32"))]
-                        WindowEvent::KeyboardInput {
-                            event:
-                                KeyEvent {
-                                    logical_key: Key::Character(s),
-                                    state: ElementState::Pressed,
-                                    ..
-                                },
-                            ..
-                        } if s == "R" => {
-                            println!("{:#?}", self.renderer.instance.generate_report());
-                        }
-                        WindowEvent::RedrawRequested => {}
-                        _ => {
-                            self.update_window_event(event, &mut left_mouse_down);
-                        }
-                    },
-                    Event::DeviceEvent { event, .. } => {
-                        self.update_device_event(event, &mut left_mouse_down);
-                    }
-                    Event::AboutToWait => {
-                        let time_since_last_frame = last_update_inst.elapsed();
+        let now = Instant::now();
+        log::info!("Loading models...{}", args.scene);
 
-                        if (!left_mouse_down || self.renderer.continous_motion)
-                            && ((self.screen_data.subpixel_idx < self.renderer.rays_per_pixel)
-                                || (self.screen_data.subpixel_idx == 0
-                                    && time_since_last_frame >= target_frametime))
-                        {
-                            log::info!(
-                                "Drawing ray index: {}, framerate: {}",
-                                self.screen_data.subpixel_idx,
-                                1000u128 / time_since_last_frame.as_millis()
-                            );
-
-                            last_update_inst = Instant::now();
-                            if self.screen_data.subpixel_idx < self.renderer.rays_per_pixel {
-                                self.update();
-
-                                let frame = match self.renderer.surface.get_current_texture() {
-                                    Ok(frame) => frame,
-                                    Err(_) => {
-                                        self.renderer.surface.configure(
-                                            &self.renderer.device,
-                                            &self.renderer.config,
-                                        );
-                                        self.renderer
-                                            .surface
-                                            .get_current_texture()
-                                            .expect("Failed to acquire next surface texture!")
-                                    }
-                                };
-                                let view = frame
-                                    .texture
-                                    .create_view(&wgpu::TextureViewDescriptor::default());
-
-                                // TODO: create send texture to use to keep track of previous frame
-
-                                // create render pass descriptor and its color attachments
-                                let color_attachments = [Some(wgpu::RenderPassColorAttachment {
-                                    view: &view,
-                                    resolve_target: None,
-                                    ops: wgpu::Operations {
-                                        // load: wgpu::LoadOp::Load,
-                                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                        store: wgpu::StoreOp::Store,
-                                    },
-                                })];
-                                let render_pass_descriptor = wgpu::RenderPassDescriptor {
-                                    label: None,
-                                    color_attachments: &color_attachments,
-                                    depth_stencil_attachment: None,
-                                    occlusion_query_set: Default::default(),
-                                    timestamp_writes: Default::default(),
-                                };
-
-                                let mut command_encoder =
-                                    self.renderer.device.create_command_encoder(
-                                        &wgpu::CommandEncoderDescriptor { label: None },
-                                    );
-
-                                command_encoder.push_debug_group("compute ray trace");
-                                {
-                                    // compute pass
-                                    let mut cpass = command_encoder.begin_compute_pass(
-                                        &wgpu::ComputePassDescriptor {
-                                            label: None,
-                                            timestamp_writes: Default::default(),
-                                        },
-                                    );
-                                    cpass.set_pipeline(
-                                        self.renderer.compute_pipeline.as_ref().unwrap(),
-                                    );
-                                    cpass.set_bind_group(
-                                        0,
-                                        self.renderer.compute_bind_group.as_ref().unwrap(),
-                                        &[],
-                                    );
-
-                                    for _ in 0..self.renderer.ray_bounces {
-                                        cpass.dispatch_workgroups(
-                                            self.screen_data.size.width / WORKGROUP_SIZE[0],
-                                            // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
-                                            self.screen_data.size.height / WORKGROUP_SIZE[1],
-                                            // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
-                                            WORKGROUP_SIZE[2],
-                                        );
-                                    }
-                                }
-                                command_encoder.pop_debug_group();
-
-                                command_encoder.push_debug_group("render texture");
-                                {
-                                    // render pass
-                                    let mut rpass =
-                                        command_encoder.begin_render_pass(&render_pass_descriptor);
-                                    rpass.set_pipeline(
-                                        self.renderer.render_pipeline.as_ref().unwrap(),
-                                    );
-                                    rpass.set_bind_group(
-                                        0,
-                                        self.renderer.render_bind_group.as_ref().unwrap(),
-                                        &[],
-                                    );
-                                    // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
-                                    // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
-                                    rpass.draw(0..3, 0..1);
-                                }
-                                command_encoder.pop_debug_group();
-
-                                self.renderer
-                                    .queue
-                                    .submit(std::iter::once(command_encoder.finish()));
-
-                                let _ = self.renderer.device.poll(wgpu::PollType::Wait);
-                                frame.present();
-                            }
-                        } else {
-                            target.set_control_flow(ControlFlow::WaitUntil(
-                                Instant::now() + target_frametime - time_since_last_frame,
-                            ))
-                        }
-
-                        self.renderer.window.request_redraw();
-                    }
-                    _ => {}
-                }
-            },
+        let scene = Scene::new(&args.scene, &renderer_type);
+        log::info!(
+            "Finished loading models in {} millis.",
+            now.elapsed().as_millis()
         );
+
+        let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(
+            scene.camera.as_ref().unwrap().width,
+            scene.camera.as_ref().unwrap().height,
+        );
+        let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
+
+        let window_attributes = WindowAttributes::default()
+            .with_title("Fantastic window number one!")
+            .with_resizable(true)
+            .with_inner_size(physical_size);
+
+        // Create window object
+        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+
+        let state = pollster::block_on(State::new(
+            window.clone(),
+            &resolution,
+            &scene,
+            !args.draw_on_mouseup,
+            args.rays_per_pixel,
+            args.bounces,
+            renderer_type,
+        ));
+        self.state = Some(state);
+
+        window.request_redraw();
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        let state = self.state.as_mut().unwrap();
+
+        match event {
+            WindowEvent::Resized(size) => {
+                state.screen_data.update_dims(&size);
+                state.screen_data.subpixel_idx = 0;
+                state.renderer.update_window_size(&size);
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key: Key::Named(NamedKey::Escape),
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            }
+            | WindowEvent::CloseRequested => event_loop.exit(),
+
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key: Key::Character(s),
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } if s == "R" => {
+                println!("{:#?}", state.renderer.instance.generate_report());
+            }
+            WindowEvent::RedrawRequested => {}
+            _ => {
+                state.update_window_event(event);
+            }
+        }
+    }
+
+    fn device_event(&mut self, _event_loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
+        let state = self.state.as_mut().unwrap();
+        state.update_device_event(event);
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let state = self.state.as_mut().unwrap();
+        let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
+        // let mut last_update_inst = Instant::now();
+        let time_since_last_frame = state.last_update_inst.elapsed();
+
+        if (!state.left_mouse_down || state.renderer.continous_motion)
+            && ((state.screen_data.subpixel_idx < state.renderer.rays_per_pixel)
+                || (state.screen_data.subpixel_idx == 0
+                    && time_since_last_frame >= target_frametime))
+        {
+            log::info!(
+                "Drawing ray index: {}, framerate: {}",
+                state.screen_data.subpixel_idx,
+                1000u128 / time_since_last_frame.as_millis()
+            );
+
+            state.last_update_inst = Instant::now();
+            if state.screen_data.subpixel_idx < state.renderer.rays_per_pixel {
+                state.update();
+
+                let frame = match state.renderer.surface.get_current_texture() {
+                    Ok(frame) => frame,
+                    Err(_) => {
+                        state
+                            .renderer
+                            .surface
+                            .configure(&state.renderer.device, &state.renderer.config);
+                        state
+                            .renderer
+                            .surface
+                            .get_current_texture()
+                            .expect("Failed to acquire next surface texture!")
+                    }
+                };
+                let view = frame
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+
+                // TODO: create send texture to use to keep track of previous frame
+
+                // create render pass descriptor and its color attachments
+                let color_attachments = [Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        // load: wgpu::LoadOp::Load,
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })];
+                let render_pass_descriptor = wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &color_attachments,
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: Default::default(),
+                    timestamp_writes: Default::default(),
+                };
+
+                let mut command_encoder = state
+                    .renderer
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+                command_encoder.push_debug_group("compute ray trace");
+                {
+                    // compute pass
+                    let mut cpass =
+                        command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: None,
+                            timestamp_writes: Default::default(),
+                        });
+                    cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
+                    cpass.set_bind_group(
+                        0,
+                        state.renderer.compute_bind_group.as_ref().unwrap(),
+                        &[],
+                    );
+
+                    for _ in 0..state.renderer.ray_bounces {
+                        cpass.dispatch_workgroups(
+                            state.screen_data.size.width / WORKGROUP_SIZE[0],
+                            // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
+                            state.screen_data.size.height / WORKGROUP_SIZE[1],
+                            // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
+                            WORKGROUP_SIZE[2],
+                        );
+                    }
+                }
+                command_encoder.pop_debug_group();
+
+                command_encoder.push_debug_group("render texture");
+                {
+                    // render pass
+                    let mut rpass = command_encoder.begin_render_pass(&render_pass_descriptor);
+                    rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
+                    rpass.set_bind_group(
+                        0,
+                        state.renderer.render_bind_group.as_ref().unwrap(),
+                        &[],
+                    );
+                    // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
+                    // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
+                    rpass.draw(0..3, 0..1);
+                }
+                command_encoder.pop_debug_group();
+
+                state
+                    .renderer
+                    .queue
+                    .submit(std::iter::once(command_encoder.finish()));
+
+                let _ = state.renderer.device.poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: None,
+                });
+                frame.present();
+            }
+        } else {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + target_frametime - time_since_last_frame,
+            ))
+        }
+
+        state.renderer.window.request_redraw();
     }
 }
 
@@ -416,90 +467,4 @@ pub struct Args {
     /// Number of bounces per ray
     #[clap(short, long, default_value_t = 8)]
     bounces: u32,
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
-pub async fn run() {
-    cfg_if::cfg_if! {
-        if #[cfg(target_arch = "wasm32")] {
-            std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-            console_log::init_with_level(log::Level::Info).expect("Could't initialize logger");
-        } else {
-            env_logger::init();
-        }
-    }
-
-    let args = if cfg!(target_arch = "wasm32") {
-        Args {
-            ..Default::default()
-        }
-    } else {
-        Args::parse()
-    };
-    let renderer_type = if args.whitted {
-        panic!("Whitted Ray Tracer has been deprecated and will no longer work.");
-        // RendererType::RayTracer
-    } else {
-        RendererType::PathTracer
-    };
-
-    let now = Instant::now();
-    log::info!("Loading models...{}", args.scene);
-
-    let scene = Scene::new(&args.scene, &renderer_type);
-    log::info!(
-        "Finished loading models in {} millis.",
-        now.elapsed().as_millis()
-    );
-
-    let event_loop = EventLoop::new().unwrap();
-
-    let monitor = event_loop.available_monitors().next().unwrap();
-    let monitor_scale_factor = monitor.scale_factor();
-    let resolution = monitor.size();
-
-    let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(
-        scene.camera.as_ref().unwrap().width,
-        scene.camera.as_ref().unwrap().height,
-    );
-    let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
-
-    let window = WindowBuilder::new()
-        .with_title("Rengin")
-        .with_resizable(true)
-        .with_inner_size(physical_size)
-        .build(&event_loop)
-        .unwrap();
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        // Winit prevents sizing with CSS, so we have to set
-        // the size manually when on web.
-        use winit::dpi::PhysicalSize;
-        let _ = window.request_inner_size(PhysicalSize::new(450, 400));
-
-        use winit::platform::web::WindowExtWebSys;
-        web_sys::window()
-            .and_then(|win| win.document())
-            .and_then(|doc| {
-                let dst = doc.get_element_by_id("wasm-example")?;
-                let canvas = web_sys::Element::from(window.canvas()?);
-                dst.append_child(&canvas).ok()?;
-                Some(())
-            })
-            .expect("Couldn't append canvas to document body.");
-    }
-
-    let app = RenderApp::new(
-        &window,
-        &resolution,
-        &scene,
-        !args.draw_on_mouseup,
-        args.rays_per_pixel,
-        args.bounces,
-        renderer_type,
-    )
-    .await;
-
-    app.render(event_loop).await;
 }
