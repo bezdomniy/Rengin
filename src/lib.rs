@@ -4,8 +4,7 @@ mod renderer;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{
-    DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, MouseScrollDelta,
-    WindowEvent,
+    DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{Key, NamedKey};
@@ -342,10 +341,12 @@ impl ApplicationHandler for RenderApp {
                 let frame = match state.renderer.surface.get_current_texture() {
                     Ok(frame) => frame,
                     Err(_) => {
-                        state.renderer
+                        state
+                            .renderer
                             .surface
                             .configure(&state.renderer.device, &state.renderer.config);
-                        state.renderer
+                        state
+                            .renderer
                             .surface
                             .get_current_texture()
                             .expect("Failed to acquire next surface texture!")
@@ -413,18 +414,26 @@ impl ApplicationHandler for RenderApp {
                     // render pass
                     let mut rpass = command_encoder.begin_render_pass(&render_pass_descriptor);
                     rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
-                    rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
+                    rpass.set_bind_group(
+                        0,
+                        state.renderer.render_bind_group.as_ref().unwrap(),
+                        &[],
+                    );
                     // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
                     // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
                     rpass.draw(0..3, 0..1);
                 }
                 command_encoder.pop_debug_group();
 
-                state.renderer
+                state
+                    .renderer
                     .queue
                     .submit(std::iter::once(command_encoder.finish()));
 
-                let _ = state.renderer.device.poll(wgpu::PollType::Wait);
+                let _ = state.renderer.device.poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: None,
+                });
                 frame.present();
             }
         } else {
@@ -459,4 +468,3 @@ pub struct Args {
     #[clap(short, long, default_value_t = 8)]
     bounces: u32,
 }
-
