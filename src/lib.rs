@@ -371,6 +371,7 @@ impl ApplicationHandler for RenderApp {
                 })];
                 let render_pass_descriptor = wgpu::RenderPassDescriptor {
                     label: None,
+                    multiview_mask: None,
                     color_attachments: &color_attachments,
                     depth_stencil_attachment: None,
                     occlusion_query_set: Default::default(),

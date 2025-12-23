@@ -1,14 +1,14 @@
 use std::{borrow::Cow, collections::HashMap, mem, sync::Arc, time::Instant};
 
 use crate::{
+    RendererType,
     engine::bvh::{Bvh, NodeInner, NodeLeaf, NodeNormal},
     engine::rt_primitives::{ObjectParam, Ray, ScreenData, Ubo},
-    RendererType,
 };
 
 use wgpu::{
-    util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device,
-    Instance, Queue, RenderPipeline, Surface, Texture,
+    Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Instance, Queue,
+    RenderPipeline, Surface, Texture, util::DeviceExt,
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
@@ -64,7 +64,7 @@ impl RenginWgpu {
         });
         log::info!("instance: {:?}", instance);
 
-        for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
+        for adapter in instance.enumerate_adapters(wgpu::Backends::all()).await {
             log::debug!("Found adapter {:?}", adapter)
         }
 
@@ -88,17 +88,14 @@ impl RenginWgpu {
             log::info!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
         }
 
-        let optional_features = {
-            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
-                | wgpu::Features::PUSH_CONSTANTS
-        };
+        let optional_features =
+            { wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING };
         // let required_features = { wgpu::Features::TEXTURE_BINDING_ARRAY };
         let required_features = { wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES };
         // let required_features = { wgpu::Features::empty() };
 
         let required_limits = {
             wgpu::Limits {
-                max_push_constant_size: 0,
                 max_storage_buffer_binding_size: 1024 << 20,
                 ..wgpu::Limits::default()
             }
@@ -113,14 +110,12 @@ impl RenginWgpu {
         );
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: None,
-                    required_features: (optional_features & adapter_features) | required_features,
-                    required_limits,
-                    ..Default::default()
-                },
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: None,
+                required_features: (optional_features & adapter_features) | required_features,
+                required_limits,
+                ..Default::default()
+            })
             .await
             .unwrap();
 
@@ -416,7 +411,7 @@ impl<'a> RenginRenderer for RenginWgpu {
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("raygen"),
                 bind_group_layouts: &[self.raygen_bind_group_layout.as_ref().unwrap()],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             },
         ));
 
@@ -520,7 +515,7 @@ impl<'a> RenginRenderer for RenginWgpu {
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("compute"),
                 bind_group_layouts: &[self.compute_bind_group_layout.as_ref().unwrap()],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             },
         ));
 
@@ -557,7 +552,7 @@ impl<'a> RenginRenderer for RenginWgpu {
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("render"),
                 bind_group_layouts: &[self.render_bind_group_layout.as_ref().unwrap()],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             },
         ));
 
@@ -565,7 +560,7 @@ impl<'a> RenginRenderer for RenginWgpu {
             &wgpu::RenderPipelineDescriptor {
                 label: None,
                 layout: render_pipeline_layout.as_ref(),
-                multiview: None,
+                multiview_mask: None,
                 vertex: wgpu::VertexState {
                     module: match self.shaders.as_ref().unwrap().get("vert") {
                         Some(RenginShaderModule::WgpuShaderModule(m)) => m,

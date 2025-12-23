@@ -3,7 +3,7 @@ use crate::RendererType;
 use glam::{Mat4, Vec3, Vec4};
 use image::{ImageBuffer, Rgba};
 use itertools::Itertools;
-use rand::{distr::Alphanumeric, Rng};
+use rand::{Rng, distr::Alphanumeric};
 use serde::Deserialize;
 // use std::collections::HashMap;
 use linked_hash_map::LinkedHashMap;
@@ -327,7 +327,7 @@ impl Scene {
         // let scene: Vec<serde_yaml::Value> = serde_yaml::from_reader(f).unwrap();
 
         let commands: Vec<Command> =
-            serde_yml::from_reader(f).expect("Failed to load scene description.");
+            serde_yaml_ng::from_reader(f).expect("Failed to load scene description.");
         let (camera, object_params, bvh, specular_offset, lights_offset) =
             Scene::load_assets(&commands, renderer_type);
 
