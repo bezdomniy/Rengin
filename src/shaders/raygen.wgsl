@@ -1,10 +1,15 @@
 @group(0) @binding(0)
 var<uniform> ubo: UBO;
+// SOA ray buffers
 @group(0) @binding(1)
-var<storage, read_write> rays: array<Ray>;
+var<storage, read_write> ray_origins: array<vec4<f32>>;
+@group(0) @binding(2)
+var<storage, read_write> ray_directions: array<vec4<f32>>;
+@group(0) @binding(3)
+var<storage, read_write> ray_throughputs: array<vec4<f32>>;
 
 @compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) 
+fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
 {
     var sub_pixel_offset = vec2<f32>(0f);
 
@@ -30,5 +35,7 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
     let direction = normalize((pixel - origin)).xyz;
 
     let rays_offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
-    rays[rays_offset] = Ray(origin.xyz, 1f, direction, 0, vec4<f32>(1f));
+    ray_origins[rays_offset] = vec4<f32>(origin.xyz, 1f);
+    ray_directions[rays_offset] = vec4<f32>(direction, 0f);
+    ray_throughputs[rays_offset] = vec4<f32>(1f);
 }

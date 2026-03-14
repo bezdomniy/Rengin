@@ -7,15 +7,10 @@ use winit::dpi::PhysicalSize;
 
 const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 
-#[repr(C)]
-#[derive(Debug)]
-pub struct Ray {
-    origin: Vec3,
-    refractive_index: f32,
-    direction: Vec3,
-    pos: u32,
-    throughput: Vec4,
-}
+// Ray data is now stored as SOA (Structure of Arrays) in GPU buffers:
+// - ray_origins: array<vec4<f32>>     (xyz=origin, w=refractive_index)
+// - ray_directions: array<vec4<f32>>  (xyz=direction, w=bitcast(pos))
+// - ray_throughputs: array<vec4<f32>> (xyzw=throughput)
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]

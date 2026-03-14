@@ -3,7 +3,7 @@ use std::{borrow::Cow, collections::HashMap, mem, sync::Arc, time::Instant};
 use crate::{
     RendererType,
     engine::bvh::{Bvh, NodeInner, NodeLeaf, NodeNormal},
-    engine::rt_primitives::{ObjectParam, Ray, ScreenData, Ubo},
+    engine::rt_primitives::{ObjectParam, ScreenData, Ubo},
 };
 
 use wgpu::{
@@ -340,16 +340,29 @@ impl<'a> RenginRenderer for RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
-        let buf_rays = self
+        // SOA ray buffers: 3 separate vec4<f32> arrays for coalesced GPU access
+        let ray_buf_size = (screen_data.resolution.width * screen_data.resolution.height)
+            as usize
+            * mem::size_of::<glam::Vec4>();
+        let buf_ray_origins = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Ray Buffer"),
-                contents: &vec![
-                    0xff;
-                    (screen_data.resolution.width * screen_data.resolution.height)
-                        as usize
-                        * mem::size_of::<Ray>()
-                ],
+                label: Some("Ray Origins Buffer"),
+                contents: &vec![0xff; ray_buf_size],
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let buf_ray_directions = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Ray Directions Buffer"),
+                contents: &vec![0xff; ray_buf_size],
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let buf_ray_throughputs = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Ray Throughputs Buffer"),
+                contents: &vec![0xff; ray_buf_size],
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -364,7 +377,9 @@ impl<'a> RenginRenderer for RenginWgpu {
             ("blas", buf_blas),
             ("normals", buf_normals),
             ("object_params", buf_op),
-            ("rays", buf_rays),
+            ("ray_origins", buf_ray_origins),
+            ("ray_directions", buf_ray_directions),
+            ("ray_throughputs", buf_ray_throughputs),
         ]));
     }
 
@@ -389,6 +404,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                         },
                         count: None,
                     },
+                    // SOA ray buffers (bindings 1-3)
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::COMPUTE,
@@ -398,7 +414,35 @@ impl<'a> RenginRenderer for RenginWgpu {
                             min_binding_size: wgpu::BufferSize::new(
                                 ((screen_data.resolution.width * screen_data.resolution.height)
                                     as usize
-                                    * mem::size_of::<Ray>()) as _,
+                                    * mem::size_of::<glam::Vec4>()) as _,
+                            ),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                ((screen_data.resolution.width * screen_data.resolution.height)
+                                    as usize
+                                    * mem::size_of::<glam::Vec4>()) as _,
+                            ),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                ((screen_data.resolution.width * screen_data.resolution.height)
+                                    as usize
+                                    * mem::size_of::<glam::Vec4>()) as _,
                             ),
                         },
                         count: None,
@@ -492,6 +536,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                         },
                         count: None,
                     },
+                    // SOA ray buffers (bindings 6-8)
                     wgpu::BindGroupLayoutEntry {
                         binding: 6,
                         visibility: wgpu::ShaderStages::COMPUTE,
@@ -501,9 +546,36 @@ impl<'a> RenginRenderer for RenginWgpu {
                             min_binding_size: wgpu::BufferSize::new(
                                 ((screen_data.resolution.width * screen_data.resolution.height)
                                     as usize
-                                    * mem::size_of::<Ray>()) as _,
+                                    * mem::size_of::<glam::Vec4>()) as _,
                             ),
-                            // min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                ((screen_data.resolution.width * screen_data.resolution.height)
+                                    as usize
+                                    * mem::size_of::<glam::Vec4>()) as _,
+                            ),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 8,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                ((screen_data.resolution.width * screen_data.resolution.height)
+                                    as usize
+                                    * mem::size_of::<glam::Vec4>()) as _,
+                            ),
                         },
                         count: None,
                     },
@@ -676,7 +748,27 @@ impl<'a> RenginRenderer for RenginWgpu {
                             .buffers
                             .as_ref()
                             .unwrap()
-                            .get("rays")
+                            .get("ray_origins")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("ray_directions")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("ray_throughputs")
                             .unwrap()
                             .as_entire_binding(),
                     },
@@ -749,7 +841,27 @@ impl<'a> RenginRenderer for RenginWgpu {
                             .buffers
                             .as_ref()
                             .unwrap()
-                            .get("rays")
+                            .get("ray_origins")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("ray_directions")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("ray_throughputs")
                             .unwrap()
                             .as_entire_binding(),
                     },

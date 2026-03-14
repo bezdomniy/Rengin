@@ -10,8 +10,31 @@ var<storage, read> leaf_nodes: LeafNodes;
 var<storage, read> normal_nodes: Normals;
 @group(0) @binding(5)
 var<storage, read> object_params: ObjectParams;
+// SOA ray buffers for coalesced GPU memory access
 @group(0) @binding(6)
-var<storage, read_write> rays: array<Ray>;
+var<storage, read_write> ray_origins: array<vec4<f32>>;    // xyz=origin, w=refractive_index
+@group(0) @binding(7)
+var<storage, read_write> ray_directions: array<vec4<f32>>; // xyz=direction, w=bitcast(pos)
+@group(0) @binding(8)
+var<storage, read_write> ray_throughputs: array<vec4<f32>>;
+
+fn load_ray(offset: u32) -> Ray {
+    let o = ray_origins[offset];
+    let d = ray_directions[offset];
+    return Ray(o.xyz, o.w, d.xyz, bitcast<u32>(d.w), ray_throughputs[offset]);
+}
+
+fn store_ray(offset: u32, r: Ray) {
+    ray_origins[offset] = vec4<f32>(r.rayO, r.refractive_index);
+    ray_directions[offset] = vec4<f32>(r.rayD, bitcast<f32>(r.pos));
+    ray_throughputs[offset] = r.throughput;
+}
+
+fn store_dead_ray(offset: u32) {
+    ray_origins[offset] = vec4<f32>(-1f, -1f, -1f, -1f);
+    ray_directions[offset] = vec4<f32>(-1f, -1f, -1f, 0f);
+    ray_throughputs[offset] = vec4<f32>(-1f);
+}
 
 
 // // Buggy
@@ -172,12 +195,30 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
     return 1.0;
 }
 
-fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
+fn renderScene(in_ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
+    var ray = in_ray;
+
+    // Russian roulette (pbrt-style): probabilistically terminate low-throughput paths
+    // Only apply after depth > 1 to preserve initial bounces unconditionally
+    let max_component = max(ray.throughput.x, max(ray.throughput.y, ray.throughput.z));
+    if max_component < 1.0 {
+        // Cap at 0.5: the MIS one-sample estimator can produce very low throughput
+        // for light-sampled paths (scattering_pdf/pdf << 1) which are still valuable.
+        // Unlike pbrt where BSDF*cos/pdf ≤ 1, our MIS weight spans orders of magnitude.
+        let rr_q = min(0.5, max(0.0, 1.0 - max_component));
+        next_pcg3d();
+        if f32_zero_to_one(rand_pcg3d.z) < rr_q {
+            store_dead_ray(offset);
+            return ray.throughput * RAY_MISS_COLOUR;
+        }
+        ray.throughput = vec4<f32>(ray.throughput.xyz / (1.0 - rr_q), ray.throughput.w);
+    }
+
     // Get intersected object ID
     let intersection = intersect(ray, 0u, false);
 
     if intersection.id == -1 || intersection.closestT >= MAXLEN {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
+        store_dead_ray(offset);
         return ray.throughput * RAY_MISS_COLOUR;
     }
 
@@ -185,7 +226,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     let ob_params = object_params.ObjectParams[intersection.model_id];
 
     if any(ob_params.material.emissiveness.xyz > vec3<f32>(0.0)) {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
+        store_dead_ray(offset);
         return ray.throughput * ob_params.material.emissiveness;
     }
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
@@ -200,8 +241,16 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
         // Track the medium the ray will be in after this interaction
         var next_ri = ray.refractive_index;
 
+        // Path regularization (pbrt 13.1.4): after non-specular interactions,
+        // increase roughness to reduce variance from indirect caustics.
+        // throughput < 1 indicates the path has been through at least one attenuating bounce.
+        var roughness = 1.0 - ob_params.material.reflective;
+        if max_component < 0.99 {
+            roughness = clamp(roughness * 2.0, 0.1, 0.5);
+        }
+
         if ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0 {
-            direction = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
+            direction = hitParams.reflectv + (roughness * onb * random_cosine_direction());
             // Reflection stays in the same medium
         } else {
             var eta_t = ob_params.material.refractive_index;
@@ -224,7 +273,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
 
             next_pcg3d();
             if sin_2t > 1.0 || reflectance >= f32_zero_to_one(rand_pcg3d.y) {
-                direction = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
+                direction = hitParams.reflectv + (roughness * onb * random_cosine_direction());
                 // Reflection stays in the same medium
             } else {
                 let cos_t = sqrt(1.0 - sin_2t);
@@ -239,7 +288,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
         if ob_params.material.reflective > 0.0 && ob_params.material.reflective < 1.0 {
             specular_weight = specular_weight * ob_params.material.reflective;
         }
-        rays[offset] = Ray(p, next_ri, normalize(direction), ray.pos, ray.throughput * specular_weight);
+        store_ray(offset, Ray(p, next_ri, normalize(direction), ray.pos, ray.throughput * specular_weight));
     } else {
         if light_sample {
             let p_scatter = 0.5;
@@ -273,11 +322,11 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
 
             next_ray.throughput = ray.throughput * ob_params.material.colour * scattering_pdf / pdf;
 
-            rays[offset] = next_ray;
+            store_ray(offset, next_ray);
         } else {
             let scattering_target = onb * random_cosine_direction();
             direction = normalize(scattering_target);
-            rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.pos, ray.throughput * ob_params.material.colour);
+            store_ray(offset, Ray(p, ob_params.material.refractive_index, direction, ray.pos, ray.throughput * ob_params.material.colour));
         }
     }
 
@@ -288,7 +337,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     let offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
-    let ray = rays[offset];
+    let ray = load_ray(offset);
 
     if ray.throughput.w < -EPSILON {
         return;
