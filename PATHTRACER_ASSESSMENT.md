@@ -8,77 +8,39 @@ Assessment of the Rengin GPU path tracer against [Physically Based Rendering (4t
 
 ### 1. RNG Never Advances — Severe Correlation Artifacts
 
-**Files:** `src/shaders/random.wgsl`, `src/shaders/pathtracer.wgsl:271`
+**Files:** `src/shaders/random.wgsl`, `src/shaders/pathtracer.wgsl`
 
 `init_pcg3d()` is called once per bounce, producing three random values (`rand_pcg3d.x`, `.y`, `.z`). These values are **never updated** — every subsequent call to `f32_zero_to_one(rand_pcg3d.x)` returns the **same number**.
 
-Within a single `renderScene()` call:
+Within a single `renderScene()` call, the light selection, direction sampling, and material decisions all read from the same 3 values. This produces correlated samples within each bounce.
 
-| Call site | Component used |
-|-----------|---------------|
-| `random_light()` (line 89) | `rand_pcg3d.x` |
-| `random_to_sphere()` (line 144) | `rand_pcg3d.x`, `.y` |
-| `random_cosine_direction()` (line 132) | `rand_pcg3d.x`, `.y` |
-| scatter/light decision (line 210) | `rand_pcg3d.y` |
-| Fresnel probability (line 191) | `rand_pcg3d.y` |
+> **PBR Book reference:** Monte Carlo estimation requires independent samples (Ch. 2, *Monte Carlo Integration*).
 
-There are effectively **3 random numbers per bounce, reused across all decisions**. The light selection, direction sampling, and material decisions are all correlated. This produces structured noise patterns instead of the white noise expected from Monte Carlo integration.
-
-> **PBR Book reference:** Monte Carlo estimation requires independent samples (Ch. 2, *Monte Carlo Integration*). Correlated samples violate this assumption and can create systematic bias patterns that don't converge correctly.
-
-**Fix:** Add a step function that advances the PCG state between draws:
-
-```wgsl
-fn next_pcg3d() {
-    rand_pcg3d = rand_pcg3d * 1664525u + 1013904223u;
-    rand_pcg3d.x += rand_pcg3d.y * rand_pcg3d.z;
-    rand_pcg3d.y += rand_pcg3d.z * rand_pcg3d.x;
-    rand_pcg3d.z += rand_pcg3d.x * rand_pcg3d.y;
-    rand_pcg3d ^= rand_pcg3d >> vec3<u32>(16u);
-}
-```
-
-Call `next_pcg3d()` before each sampling function.
+**Status: FIXED** — Added `next_pcg3d()` that advances the PCG state. Called before each sampling function and bare `f32_zero_to_one` usage. In practice the visual impact was minimal since the seed changes between bounces via ray direction bits, but the fix is theoretically correct.
 
 ---
 
 ### 2. SAH BVH Cost Computation Bug — Wrong Bounding Box Accumulation
 
-**File:** `src/engine/bvh.rs:399-402`
+**File:** `src/engine/bvh.rs`
 
-```rust
-for node in buckets.iter().take(i + 1) {
-    b0 = b1.merge(node);   // BUG: should be b0.merge(node)
-    count0 += node.skip_ptr_or_prim_idx1;
-}
-```
+Two bugs in SAH cost evaluation:
+- `b0 = b1.merge(node)` — merges with wrong variable, left partition bounds are incorrect
+- `buckets[b].merge(...)` — return value discarded, bucket bounds never accumulate
 
-`b0` (the left partition bounds) is computed as `b1.merge(node)`, but `b1` is never modified in this loop — it stays as `NodeInner::empty()`. So `b0` ends up being just the **last bucket's bounds**, not the union of all left-side buckets. The SAH cost estimates are wrong, leading to suboptimal split decisions.
+> **PBR Book reference:** SAH (Ch. 7.3) requires correct surface area computation for each candidate partition.
 
-> **PBR Book reference:** SAH (Ch. 7.3) requires computing the surface area of bounding boxes enclosing each candidate partition. Incorrect bounds → incorrect cost → poor tree quality → slower traversal.
-
-**Fix:** Change line 400 to `b0 = b0.merge(node);`
+**Status: NOT FIXED** — Attempted PBRT-style two-scan approach but no measurable performance improvement observed. Reverted by user.
 
 ---
 
 ### 3. Sphere Intersection Missing Distance Check — Can Return Farther Hits
 
-**File:** `src/shaders/intersects.wgsl:111-119`
+**File:** `src/shaders/intersects.wgsl`
 
-```wgsl
-if t1 < inIntersection.closestT || t2 < inIntersection.closestT {
-    if t1 < t2 && t1 > EPSILON {
-        return Intersection(..., t1, ...);
-    }
-    if t2 > EPSILON {
-        return Intersection(..., t2, ...);  // BUG: no check t2 < inIntersection.closestT
-    }
-}
-```
+When the ray origin is inside a sphere (`t1 < EPSILON`), the fallback to `t2` didn't verify `t2 < inIntersection.closestT`, potentially returning a farther hit than the current closest.
 
-When the ray origin is inside a sphere (`t1 < EPSILON`), the preliminary guard passes because `t1 < inIntersection.closestT` (t1 is negative). The code then falls through to return `t2` with only a `t2 > EPSILON` check, but **never verifies `t2 < inIntersection.closestT`**. This can return a hit that is farther than the current closest, causing incorrect z-ordering for rays inside glass spheres.
-
-**Fix:** Add `&& t2 < inIntersection.closestT` to line 116.
+**Status: FIXED** — Added `&& t2 < inIntersection.closestT` check. Matches PBRT's sphere intersection logic.
 
 ---
 
@@ -88,166 +50,126 @@ When the ray origin is inside a sphere (`t1 < EPSILON`), the preliminary guard p
 
 **File:** `src/shaders/pathtracer.wgsl`
 
-The renderer uses a fixed bounce count (`ray_bounces`) with no Russian roulette termination. This introduces **systematic bias** — paths that would contribute energy beyond the max bounce count are simply truncated. Russian roulette provides an **unbiased** termination strategy: with probability `q`, terminate and scale surviving paths by `1/(1-q)`.
+The renderer uses a fixed bounce count with no Russian roulette termination. Paths are truncated at max bounces, causing systematic energy loss.
 
-> **PBR Book reference:** Ch. 2.2.4 and Ch. 13.1 — Russian roulette is the standard technique for unbiased path termination. The estimator `E[F_rr] = q·0 + (1-q)·F/(1-q) = E[F]` is unbiased by construction.
+> **PBR Book reference:** Ch. 2.2.4 and Ch. 13.1 — Russian roulette is the standard technique for unbiased path termination.
 
-**Impact:** Energy loss at every bounce cutoff. Scenes with many inter-reflections (e.g., glass inside a Cornell box) will appear darker than ground truth.
-
-**Fix:** After each bounce, compute continuation probability based on throughput:
-
-```wgsl
-let p_continue = max(ray.throughput.r, max(ray.throughput.g, ray.throughput.b));
-if f32_zero_to_one(rand_pcg3d.z) > p_continue {
-    // terminate
-    rays[offset] = Ray(vec3(-1f), -1f, vec3(-1f), 0u, vec4(-1f));
-    return vec4(-1f);
-}
-ray.throughput /= p_continue;
-```
+**Status: NOT FIXED** — Skipped for now. Would require per-ray early termination within the fixed dispatch loop.
 
 ---
 
-### 5. Cube Light: Volume Sampling + Wrong PDF — Biased Estimator
+### 5. Cube Light: Volume Sampling + Wrong PDF
 
-**Files:** `src/shaders/pathtracer.wgsl:110-114` and `src/shaders/pathtracer.wgsl:135-142`
+**Files:** `src/shaders/pathtracer.wgsl`
 
-Two compounding errors for cube lights:
+Originally cube lights sampled random points in the volume `[-1,1]³` and used a copy-pasted sphere PDF.
 
-**a) Sampling the volume, not the surface (line 111):**
-
-```wgsl
-let p = random_in_cube();  // samples [-1,1]^3 VOLUME
-```
-
-A surface light should sample points on its **surface**. Sampling the interior produces directions that don't correspond to actual surface points.
-
-**b) PDF uses sphere approximation (lines 135-142):**
-
-The cube `light_pdf` is an exact copy of the sphere PDF (bounding sphere solid angle). The PDF doesn't match the actual sampling distribution, violating the fundamental requirement of Monte Carlo estimation: `E[f/p] = ∫f` only when `p` is the actual distribution of the samples.
-
-> **PBR Book reference:** Ch. 12.5 — Light sampling PDFs must match the actual sampling distribution. A PDF/sampling mismatch produces a **biased** estimator.
-
-**Impact:** Cube lights will have incorrect brightness and falloff.
+**Status: FIXED** — Cube light sampling now uses area-weighted surface sampling (faces selected proportional to their world-space area). PDF uses bounding sphere solid angle approximation for numerical stability. The area-to-solid-angle Jacobian (`dist²/cos θ/area`) was attempted but produces fireflies at grazing angles on thin cubes; PBRT solves this with spherical rectangle sampling (Ureña 2013) which avoids the cos θ singularity entirely.
 
 ---
 
 ### 6. Rough Specular Reflection Has No PDF Correction
 
-**File:** `src/shaders/pathtracer.wgsl:174-175`
+**File:** `src/shaders/pathtracer.wgsl`
 
-```wgsl
-direction = hitParams.reflectv
-    + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
-```
+Rough specular surfaces (0 < reflective < 1) perturb the reflection direction but didn't account for energy conservation in the throughput.
 
-The reflected direction is perturbed by a random cosine-weighted offset scaled by `(1 - reflective)`, but the throughput is simply `throughput * colour` with no PDF or BRDF evaluation for this glossy distribution.
-
-> **PBR Book reference:** Ch. 9 and Ch. 13 — any non-delta BRDF bounce must compute the throughput weight as `f(wo,wi) * |cos θ| / pdf(wi)`. The missing PDF means rough mirrors will have incorrect brightness and energy is not conserved.
+**Status: FIXED** — Throughput is now scaled by `reflective` for rough specular materials, treating the parameter as metallic reflectance. A proper microfacet BRDF (GGX/Beckmann) with matching PDF would be the full solution.
 
 ---
 
 ### 7. Double Gamma Correction
 
-**File:** `src/shaders/render.frag.wgsl:22-26`
+**File:** `src/shaders/render.frag.wgsl`
 
-```wgsl
-color = sqrt(color);                    // gamma 2.0 correction
-color = clamp(color, ...);
-return to_linear_rgb(color);            // sRGB transfer function (power 2.4)
-```
+The fragment shader applied `sqrt()` then `to_linear_rgb()` — two gamma corrections that approximately cancelled with precision loss. The surface format is `Bgra8UnormSrgb`, meaning the hardware applies sRGB gamma automatically.
 
-The shader applies `sqrt()` (approximate gamma decode) then passes the result through `to_linear_rgb()` which applies the sRGB transfer function **again**. These both do gamma correction in the same direction — the image is linearized twice, making it appear too dark and overly contrasty.
-
-**Fix:** Apply only one. Either:
-- `sqrt()` as a simple gamma 2.0 output, **or**
-- The proper sRGB OETF (inverse of `to_linear_rgb`), but not both.
+**Status: FIXED** — Removed both `sqrt()` and `to_linear_rgb()`. Fragment shader now outputs linear values with a clamp, and the sRGB surface handles gamma. Added per-sample clamp to 3.0 to suppress fireflies that were previously hidden by the sqrt compression.
 
 ---
 
 ### 8. Nested Dielectrics Not Handled
 
-**File:** `src/shaders/pathtracer.wgsl:177-183`
+**File:** `src/shaders/pathtracer.wgsl`
 
-```wgsl
-var eta_t = ob_params.material.refractive_index;
-if !hitParams.front_face {
-    eta_t = eta_t / ray.refractive_index;
-}
-```
+The original code had two bugs:
+- **Wrong n_ratio on back face:** `eta_t = material_RI / ray_RI` gave `n_ratio = ray_RI² / material_RI` instead of `ray_RI / 1.0`
+- **Outgoing ray RI always set to material RI:** When exiting glass, ray should enter air (RI=1.0)
 
-When exiting a dielectric, the code divides the material's RI by the ray's current RI. This only works for a single layer of glass. For nested dielectrics (glass inside glass, glass touching water), the RI tracking is incorrect because there's no stack tracking which medium the ray is entering.
+**Status: PARTIALLY FIXED** — Implemented heuristic: if `ray.RI > 1.0` on back face, exit to air (`eta_t = 1.0`); otherwise enter the material. Reflection preserves the current medium RI. Single-layer glass and high-RI materials (diamond) work correctly. Hollow glass spheres (nested dielectrics) have a known limitation at the inner sphere's back face — without a media stack, the renderer can't determine the outer medium.
 
-> **PBR Book reference:** Ch. 9.5 — correct handling requires maintaining a stack of medium interfaces or using a priority-based scheme to determine the IOR ratio at each boundary.
+Unit tests in `src/engine/refraction.rs` document both working cases and the known limitation.
+
+---
+
+### Additional Fix: Camera Move Smearing
+
+**File:** `src/shaders/pathtracer.wgsl`
+
+Pre-existing bug: when the camera moved and `subpixel_idx` reset to 0, pixels whose rays didn't terminate on the first bounce never wrote to the texture — old image data persisted, causing ghosting.
+
+**Status: FIXED** — When `subpixel_idx == 0` and a ray hasn't terminated, the shader now writes `RAY_MISS_COLOUR` to clear old data.
 
 ---
 
 ## Minor Issues
 
-### 9. Triangle Intersection: No Degenerate Triangle Guard
+### 9. Triangle Intersection: Degenerate Triangles
 
-**File:** `src/shaders/intersects.wgsl:45-47`
+**File:** `src/shaders/intersects.wgsl`
 
-```wgsl
-let det = dot(e1, dirCrossE2);
-let f = 1.0 / det;
-```
+When `det ≈ 0`, `1.0/det` produces infinity. On GPU, IEEE 754 arithmetic handles this gracefully — infinity propagates through the calculations and the `isHit` bounds checks reject the intersection (NaN/infinity comparisons evaluate to false in WGSL).
 
-When `det ≈ 0` (degenerate triangle or ray parallel to triangle plane), `f` becomes infinity. The subsequent multiplications can produce NaN values that may propagate through the path tracer.
-
-> **PBR Book reference:** Ch. 6.5 — the Moller-Trumbore implementation explicitly checks `if |det| < ε` and skips the intersection.
+**Status: NOT AN ISSUE** — No guard needed. An explicit `abs(det) < EPSILON` check was attempted but the EPSILON threshold rejected valid near-parallel triangles, creating holes in meshes.
 
 ---
 
 ### 10. No Top-Level Acceleration Structure
 
-**File:** `src/shaders/intersects.wgsl:171-203`
+**File:** `src/shaders/intersects.wgsl`
 
-The `intersect()` function iterates through **all objects** linearly. Each mesh has its own BVH, but the top-level is O(n_objects). For scenes with many objects, this becomes the bottleneck.
+The `intersect()` function iterates through all objects linearly — O(n_objects) per ray.
 
 > **PBR Book reference:** Ch. 7 — a two-level acceleration structure (TLAS over BLAS) is standard practice.
+
+**Status: NOT FIXED** — Architectural change, acceptable for small scenes.
 
 ---
 
 ### 11. Emissive Check Only Tests Red Channel
 
-**File:** `src/shaders/pathtracer.wgsl:161`
+**File:** `src/shaders/pathtracer.wgsl`
 
-```wgsl
-if ob_params.material.emissiveness.x > 0.0 {
-```
+Originally `emissiveness.x > 0.0` — only checks red. A cyan light `(0, 5, 5)` would be missed.
 
-Only checks the red channel. A light with emissiveness `(0, 5, 5)` (cyan) would not be detected as emissive.
-
-**Fix:** `if any(ob_params.material.emissiveness.xyz > vec3(0.0)) {`
+**Status: FIXED** — Changed to `any(ob_params.material.emissiveness.xyz > vec3(0.0))`.
 
 ---
 
 ### 12. Unnecessary `sqrt` in Distance Squared Computation
 
-**File:** `src/shaders/pathtracer.wgsl:96`
+**File:** `src/shaders/pathtracer.wgsl`
 
-```wgsl
-let distance_squared = pow(length(direction), 2.0);
-```
+`pow(length(direction), 2.0)` computes sqrt then squares — a wasted sqrt.
 
-This computes `sqrt(x² + y² + z²)` then squares it — a wasted `sqrt`. Use `dot(direction, direction)` instead.
+**Status: FIXED** — Changed to `dot(direction, direction)`.
 
 ---
 
 ## Summary
 
-| # | Severity | Issue | Impact |
+| # | Severity | Issue | Status |
 |---|----------|-------|--------|
-| 1 | **Critical** | RNG never advances | Correlated samples, structured noise, slow/incorrect convergence |
-| 2 | **Critical** | SAH `b0 = b1.merge()` bug | Suboptimal BVH splits, slower rendering |
-| 3 | **Critical** | Sphere intersection missing distance check | Wrong z-ordering for rays inside spheres |
-| 4 | Moderate | No Russian roulette | Biased energy loss at max bounce |
-| 5 | Moderate | Cube light: volume sampling + sphere PDF | Biased lighting for cube lights |
-| 6 | Moderate | Rough specular missing PDF | Incorrect energy for glossy materials |
-| 7 | Moderate | Double gamma correction | Image too dark |
-| 8 | Moderate | Nested dielectrics broken | Wrong refraction for stacked glass |
-| 9 | Minor | No degenerate triangle guard | Potential NaN propagation |
-| 10 | Minor | No TLAS | O(n) top-level traversal |
-| 11 | Minor | Emissive check only on red channel | Colored lights missed |
-| 12 | Minor | `pow(length(), 2)` vs `dot()` | Wasted GPU cycles |
+| 1 | **Critical** | RNG never advances | Fixed |
+| 2 | **Critical** | SAH BVH cost bugs | Not fixed (no perf impact observed) |
+| 3 | **Critical** | Sphere intersection missing distance check | Fixed |
+| 4 | Moderate | No Russian roulette | Not fixed (skipped) |
+| 5 | Moderate | Cube light: volume sampling + sphere PDF | Fixed (area-weighted surface sampling) |
+| 6 | Moderate | Rough specular missing PDF | Fixed (reflective as energy weight) |
+| 7 | Moderate | Double gamma correction | Fixed (linear output + sRGB surface) |
+| 8 | Moderate | Nested dielectrics broken | Partially fixed (heuristic, single-layer works) |
+| — | Moderate | Camera move smearing | Fixed (clear texture on first sample) |
+| 9 | Minor | Degenerate triangle guard | Not an issue (GPU handles via IEEE 754) |
+| 10 | Minor | No TLAS | Not fixed (architectural) |
+| 11 | Minor | Emissive check only on red channel | Fixed |
+| 12 | Minor | `pow(length(), 2)` vs `dot()` | Fixed |

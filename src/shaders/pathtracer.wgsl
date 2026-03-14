@@ -94,7 +94,7 @@ fn random_light() -> ObjectParam {
 fn random_to_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
     let center = light.transform[3].xyz;
     let direction = center - origin;
-    let distance_squared = pow(length(direction), 2.0);
+    let distance_squared = dot(direction, direction);
 
     let onb = onb(normalize(direction));
 
@@ -184,7 +184,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     // TODO: just hard code object type in the intersection rather than looking it up
     let ob_params = object_params.ObjectParams[intersection.model_id];
 
-    if ob_params.material.emissiveness.x > 0.0 {
+    if any(ob_params.material.emissiveness.xyz > vec3<f32>(0.0)) {
         rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
         return ray.throughput * ob_params.material.emissiveness;
     }
@@ -197,18 +197,26 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     let onb = onb(hitParams.normalv);
 
     if is_specular {
+        // Track the medium the ray will be in after this interaction
+        var next_ri = ray.refractive_index;
+
         if ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0 {
             direction = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
+            // Reflection stays in the same medium
         } else {
             var eta_t = ob_params.material.refractive_index;
 
             let cos_i = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
 
             if !hitParams.front_face {
-                eta_t = eta_t / ray.refractive_index;
+                if ray.refractive_index > 1.0 + EPSILON {
+                    // Ray is inside a dense medium (glass) → exiting to air
+                    eta_t = 1.0;
+                }
+                // else: ray is in air (RI~1.0) hitting back face → entering this material
+                // eta_t stays as material RI
             }
 
-            // let reflectance = schlick(cos_i, eta_t, ray.refractive_index);
             let reflectance = schlick_lazanyi(cos_i, eta_t, 0.0);
 
             let n_ratio = ray.refractive_index / eta_t;
@@ -216,17 +224,14 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
 
             next_pcg3d();
             if sin_2t > 1.0 || reflectance >= f32_zero_to_one(rand_pcg3d.y) {
-                // scattering_target = hitParams.reflectv;
-                // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
                 direction = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
-                // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
+                // Reflection stays in the same medium
             } else {
                 let cos_t = sqrt(1.0 - sin_2t);
-
-                // scattering_target = (hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
-                //                 (hitParams.eyev * n_ratio)) + ((1.0 - ob_params.material.transparency) * onb_local(-random_cosine_direction(), onb));
                 direction = hitParams.normalv * ((n_ratio * cos_i) - cos_t) - (hitParams.eyev * n_ratio);
                 p = hitParams.underPoint;
+                // Refraction enters the transmitted medium
+                next_ri = eta_t;
             }
         }
 
@@ -234,7 +239,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
         if ob_params.material.reflective > 0.0 && ob_params.material.reflective < 1.0 {
             specular_weight = specular_weight * ob_params.material.reflective;
         }
-        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(direction), ray.pos, ray.throughput * specular_weight);
+        rays[offset] = Ray(p, next_ri, normalize(direction), ray.pos, ray.throughput * specular_weight);
     } else {
         if light_sample {
             let p_scatter = 0.5;
@@ -308,6 +313,9 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
         // Clamp per-sample contribution to prevent fireflies from extreme throughput paths
         let clamped_color = clamp(ray_color, vec4<f32>(0.0), vec4<f32>(3.0));
         color = mix(color, clamped_color, scale);
+        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+    } else if ubo.subpixel_idx == 0u {
+        // Clear old image data on first sample to prevent smearing on camera move
         textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
     }
 }
