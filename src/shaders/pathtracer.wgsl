@@ -1,5 +1,5 @@
 @group(0) @binding(0)
-var imageData: texture_storage_2d<rgba8unorm,read_write>;
+var imageData: texture_storage_2d<rgba16float,read_write>;
 @group(0) @binding(1)
 var<uniform> ubo: UBO;
 @group(0) @binding(2)
