@@ -450,6 +450,35 @@ impl Scene {
             obparam_value.len_inner_nodes = inner_len;
             obparam_value.offset_leaf_nodes = leaf_offset;
             obparam_value.model_type += i as u32;
+
+            // Get BVH root AABB for mesh objects and compute world-space AABB
+            let bvh_ref = bvh.as_ref().unwrap();
+            let root_node = &bvh_ref.inner_nodes[inner_offset as usize];
+            obparam_value.compute_world_aabb(root_node.first, root_node.second);
+        }
+
+        // Compute world-space AABBs for primitive objects
+        for (_, obparam_value) in lambertian_params.iter_mut() {
+            match obparam_value.model_type {
+                0 | 9 => {
+                    // Sphere / light: unit sphere [-1,1]^3
+                    obparam_value.compute_world_aabb(
+                        Vec3::new(-1.0, -1.0, -1.0),
+                        Vec3::new(1.0, 1.0, 1.0),
+                    );
+                }
+                2 => {
+                    // Cube: unit cube [-1,1]^3
+                    obparam_value.compute_world_aabb(
+                        Vec3::new(-1.0, -1.0, -1.0),
+                        Vec3::new(1.0, 1.0, 1.0),
+                    );
+                }
+                1 => {
+                    // Plane: infinite, AABB test is skipped in shader
+                }
+                _ => {} // Meshes already handled above
+            }
         }
 
         // TODO: change so n_objects is calculated here

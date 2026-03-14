@@ -88,6 +88,8 @@ pub struct ObjectParam {
     pub len_inner_nodes: u32,
     pub offset_leaf_nodes: u32,
     pub model_type: u32,
+    pub aabb_min: Vec4,
+    pub aabb_max: Vec4,
 }
 
 impl ObjectParam {
@@ -108,7 +110,35 @@ impl ObjectParam {
             len_inner_nodes,
             offset_leaf_nodes,
             model_type,
+            aabb_min: Vec4::ZERO,
+            aabb_max: Vec4::ZERO,
         }
+    }
+
+    /// Compute world-space AABB by transforming all 8 corners of the local AABB
+    pub fn compute_world_aabb(&mut self, local_min: Vec3, local_max: Vec3) {
+        let corners = [
+            Vec3::new(local_min.x, local_min.y, local_min.z),
+            Vec3::new(local_max.x, local_min.y, local_min.z),
+            Vec3::new(local_min.x, local_max.y, local_min.z),
+            Vec3::new(local_max.x, local_max.y, local_min.z),
+            Vec3::new(local_min.x, local_min.y, local_max.z),
+            Vec3::new(local_max.x, local_min.y, local_max.z),
+            Vec3::new(local_min.x, local_max.y, local_max.z),
+            Vec3::new(local_max.x, local_max.y, local_max.z),
+        ];
+
+        let mut world_min = Vec3::splat(f32::INFINITY);
+        let mut world_max = Vec3::splat(f32::NEG_INFINITY);
+
+        for corner in &corners {
+            let world_point = (self.transform * corner.extend(1.0)).truncate();
+            world_min = world_min.min(world_point);
+            world_max = world_max.max(world_point);
+        }
+
+        self.aabb_min = world_min.extend(0.0);
+        self.aabb_max = world_max.extend(0.0);
     }
 }
 

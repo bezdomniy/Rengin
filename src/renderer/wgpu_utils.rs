@@ -34,23 +34,24 @@ pub struct RenginWgpu {
     pub surface: Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub shaders: Option<HashMap<&'static str, RenginShaderModule>>,
-    // pub physical_size: PhysicalSize<u32>,
-    // pub logical_size: LogicalSize<u32>,
-    // pub workgroup_size: [u32; 3],
     pub continous_motion: bool,
     pub rays_per_pixel: u32,
     pub ray_bounces: u32,
-    // pub scale_factor: f64,
-    // pub resolution: PhysicalSize<u32>,
+    pub profile: bool,
+    // GPU timestamp query support
+    pub timestamp_query_set: Option<wgpu::QuerySet>,
+    pub timestamp_resolve_buffer: Option<Buffer>,
+    pub timestamp_read_buffer: Option<Buffer>,
+    pub timestamp_period: f32,
 }
 
 impl RenginWgpu {
     pub async fn new(
         window: Arc<Window>,
-        // workgroup_size: [u32; 3],
         continous_motion: bool,
         rays_per_pixel: u32,
         ray_bounces: u32,
+        profile: bool,
     ) -> Self {
         let width = window.inner_size().width;
         let height = window.inner_size().height;
@@ -89,10 +90,10 @@ impl RenginWgpu {
         }
 
         let optional_features =
-            { wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING };
-        // let required_features = { wgpu::Features::TEXTURE_BINDING_ARRAY };
+            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
+            | wgpu::Features::TIMESTAMP_QUERY
+            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
         let required_features = { wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES };
-        // let required_features = { wgpu::Features::empty() };
 
         let required_limits = {
             wgpu::Limits {
@@ -135,6 +136,40 @@ impl RenginWgpu {
         // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
 
+        let has_timestamps = profile && device.features().contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
+        let timestamp_period = if has_timestamps {
+            queue.get_timestamp_period()
+        } else {
+            0.0
+        };
+
+        // Create timestamp query set: 2 per bounce + 2 for raygen + 2 for render
+        let (timestamp_query_set, timestamp_resolve_buffer, timestamp_read_buffer) = if has_timestamps {
+            let query_count = 2 + ray_bounces * 2 + 2;
+            let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some("timestamp query set"),
+                ty: wgpu::QueryType::Timestamp,
+                count: query_count,
+            });
+            let resolve_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("timestamp resolve buffer"),
+                size: (query_count as u64) * 8, // u64 per timestamp
+                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            let read_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("timestamp read buffer"),
+                size: (query_count as u64) * 8,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            (Some(query_set), Some(resolve_buf), Some(read_buf))
+        } else {
+            (None, None, None)
+        };
+
+        log::info!("GPU timestamp queries: {}, period: {}ns", has_timestamps, timestamp_period);
+
         RenginWgpu {
             window,
             instance,
@@ -155,14 +190,14 @@ impl RenginWgpu {
             surface: window_surface,
             config,
             shaders: None,
-            // physical_size,
-            // logical_size,
-            // workgroup_size,
             continous_motion,
             rays_per_pixel,
             ray_bounces,
-            // scale_factor,
-            // resolution,
+            profile,
+            timestamp_query_set,
+            timestamp_resolve_buffer,
+            timestamp_read_buffer,
+            timestamp_period,
         }
     }
 }

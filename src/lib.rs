@@ -54,15 +54,16 @@ impl State {
         rays_per_pixel: u32,
         ray_bounces: u32,
         renderer_type: RendererType,
+        profile: bool,
     ) -> Self {
         let physical_size = window.inner_size();
 
         let mut renderer = RenginWgpu::new(
             window,
-            // WORKGROUP_SIZE,
             continous_motion,
             rays_per_pixel,
             ray_bounces,
+            profile,
         )
         .await;
 
@@ -186,42 +187,8 @@ impl State {
         );
 
         self.screen_data.subpixel_idx += 1;
-
-        self.generate_primary_rays();
     }
 
-    fn generate_primary_rays(&self) {
-        let mut command_encoder = self
-            .renderer
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        command_encoder.push_debug_group("raygen");
-        {
-            // compute pass
-            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: None,
-                timestamp_writes: Default::default(),
-            });
-            cpass.set_pipeline(self.renderer.raygen_pipeline.as_ref().unwrap());
-            cpass.set_bind_group(0, self.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
-
-            cpass.dispatch_workgroups(
-                self.screen_data.size.width / WORKGROUP_SIZE[0],
-                // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
-                self.screen_data.size.height / WORKGROUP_SIZE[1],
-                // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
-                WORKGROUP_SIZE[2],
-            );
-        }
-        command_encoder.pop_debug_group();
-
-        self.renderer
-            .queue
-            .submit(std::iter::once(command_encoder.finish()));
-
-        // self.renderer.device.poll(wgpu::Maintain::Wait);
-    }
 }
 
 impl ApplicationHandler for RenderApp {
@@ -268,6 +235,7 @@ impl ApplicationHandler for RenderApp {
             args.rays_per_pixel,
             args.bounces,
             renderer_type,
+            args.profile,
         ));
         self.state = Some(state);
 
@@ -328,12 +296,6 @@ impl ApplicationHandler for RenderApp {
                 || (state.screen_data.subpixel_idx == 0
                     && time_since_last_frame >= target_frametime))
         {
-            log::info!(
-                "Drawing ray index: {}, framerate: {}",
-                state.screen_data.subpixel_idx,
-                1000u128 / time_since_last_frame.as_millis()
-            );
-
             state.last_update_inst = Instant::now();
             if state.screen_data.subpixel_idx < state.renderer.rays_per_pixel {
                 state.update();
@@ -356,85 +318,207 @@ impl ApplicationHandler for RenderApp {
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
 
-                // TODO: create send texture to use to keep track of previous frame
-
                 // create render pass descriptor and its color attachments
                 let color_attachments = [Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        // load: wgpu::LoadOp::Load,
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                 })];
-                let render_pass_descriptor = wgpu::RenderPassDescriptor {
-                    label: None,
-                    multiview_mask: None,
-                    color_attachments: &color_attachments,
-                    depth_stencil_attachment: None,
-                    occlusion_query_set: Default::default(),
-                    timestamp_writes: Default::default(),
-                };
-
                 let mut command_encoder = state
                     .renderer
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                command_encoder.push_debug_group("compute ray trace");
-                {
-                    // compute pass
-                    let mut cpass =
-                        command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: None,
-                            timestamp_writes: Default::default(),
-                        });
-                    cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
-                    cpass.set_bind_group(
-                        0,
-                        state.renderer.compute_bind_group.as_ref().unwrap(),
-                        &[],
-                    );
+                if state.renderer.profile {
+                    // === PROFILED MODE: separate passes with GPU timestamps ===
+                    let mut query_idx: u32 = 0;
+                    let qs = state.renderer.timestamp_query_set.as_ref().unwrap();
 
-                    for _ in 0..state.renderer.ray_bounces {
+                    // 1. Raygen pass
+                    {
+                        let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("raygen"),
+                            timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
+                                query_set: qs,
+                                beginning_of_pass_write_index: Some(query_idx),
+                                end_of_pass_write_index: Some(query_idx + 1),
+                            }),
+                        });
+                        cpass.set_pipeline(state.renderer.raygen_pipeline.as_ref().unwrap());
+                        cpass.set_bind_group(0, state.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
                         cpass.dispatch_workgroups(
                             state.screen_data.size.width / WORKGROUP_SIZE[0],
-                            // + (self.screen_data.size.width % WORKGROUP_SIZE[0]),
                             state.screen_data.size.height / WORKGROUP_SIZE[1],
-                            // + (self.screen_data.size.height % WORKGROUP_SIZE[1]),
                             WORKGROUP_SIZE[2],
                         );
                     }
-                }
-                command_encoder.pop_debug_group();
+                    query_idx += 2;
 
-                command_encoder.push_debug_group("render texture");
-                {
-                    // render pass
-                    let mut rpass = command_encoder.begin_render_pass(&render_pass_descriptor);
-                    rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
-                    rpass.set_bind_group(
-                        0,
-                        state.renderer.render_bind_group.as_ref().unwrap(),
-                        &[],
+                    // 2. Each bounce in its own pass for per-bounce timing
+                    for _bounce in 0..state.renderer.ray_bounces {
+                        let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("pathtracer bounce"),
+                            timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
+                                query_set: qs,
+                                beginning_of_pass_write_index: Some(query_idx),
+                                end_of_pass_write_index: Some(query_idx + 1),
+                            }),
+                        });
+                        cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
+                        cpass.set_bind_group(0, state.renderer.compute_bind_group.as_ref().unwrap(), &[]);
+                        cpass.dispatch_workgroups(
+                            state.screen_data.size.width / WORKGROUP_SIZE[0],
+                            state.screen_data.size.height / WORKGROUP_SIZE[1],
+                            WORKGROUP_SIZE[2],
+                        );
+                        query_idx += 2;
+                    }
+
+                    // 3. Render pass
+                    {
+                        let mut rpass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: None,
+                            multiview_mask: None,
+                            color_attachments: &color_attachments,
+                            depth_stencil_attachment: None,
+                            occlusion_query_set: Default::default(),
+                            timestamp_writes: Some(wgpu::RenderPassTimestampWrites {
+                                query_set: qs,
+                                beginning_of_pass_write_index: Some(query_idx),
+                                end_of_pass_write_index: Some(query_idx + 1),
+                            }),
+                        });
+                        rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
+                        rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
+                        rpass.draw(0..3, 0..1);
+                    }
+                    query_idx += 2;
+
+                    // Resolve + copy timestamps
+                    command_encoder.resolve_query_set(
+                        qs, 0..query_idx,
+                        state.renderer.timestamp_resolve_buffer.as_ref().unwrap(), 0,
                     );
-                    // rpass.set_vertex_buffer(0, self.particle_buffers[(self.frame_num + 1) % 2].slice(..));
-                    // rpass.set_vertex_buffer(1, self.vertices_buffer.slice(..));
-                    rpass.draw(0..3, 0..1);
+                    command_encoder.copy_buffer_to_buffer(
+                        state.renderer.timestamp_resolve_buffer.as_ref().unwrap(), 0,
+                        state.renderer.timestamp_read_buffer.as_ref().unwrap(), 0,
+                        (query_idx as u64) * 8,
+                    );
+
+                    state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
+                    let _ = state.renderer.device.poll(wgpu::PollType::Wait {
+                        submission_index: None, timeout: None,
+                    });
+
+                    // Read back GPU timestamps
+                    let read_buf = state.renderer.timestamp_read_buffer.as_ref().unwrap();
+                    let buf_slice = read_buf.slice(..((query_idx as u64) * 8));
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    buf_slice.map_async(wgpu::MapMode::Read, move |result| {
+                        tx.send(result).unwrap();
+                    });
+                    let _ = state.renderer.device.poll(wgpu::PollType::Wait {
+                        submission_index: None, timeout: None,
+                    });
+                    if let Ok(Ok(())) = rx.recv() {
+                        let data = buf_slice.get_mapped_range();
+                        let timestamps: &[u64] = bytemuck::cast_slice(&data);
+                        let period = state.renderer.timestamp_period as f64;
+
+                        let raygen_ns = (timestamps[1] - timestamps[0]) as f64 * period;
+                        let mut bounce_strs = Vec::new();
+                        let mut total_bounce_ns = 0.0;
+                        for b in 0..state.renderer.ray_bounces {
+                            let idx = (2 + b * 2) as usize;
+                            let bounce_ns = (timestamps[idx + 1] - timestamps[idx]) as f64 * period;
+                            total_bounce_ns += bounce_ns;
+                            bounce_strs.push(format!("b{}={:.2}ms", b, bounce_ns / 1_000_000.0));
+                        }
+                        let render_base = (2 + state.renderer.ray_bounces * 2) as usize;
+                        let render_ns = timestamps[render_base + 1].wrapping_sub(timestamps[render_base]) as f64 * period;
+                        let render_ns = if render_ns > 1e12 { 0.0 } else { render_ns };
+
+                        log::info!(
+                            "GPU Sample {}/{} | raygen={:.2}ms | pathtracer={:.2}ms [{}] | render={:.2}ms | total={:.2}ms",
+                            state.screen_data.subpixel_idx,
+                            state.renderer.rays_per_pixel,
+                            raygen_ns / 1_000_000.0,
+                            total_bounce_ns / 1_000_000.0,
+                            bounce_strs.join(", "),
+                            render_ns / 1_000_000.0,
+                            (raygen_ns + total_bounce_ns + render_ns) / 1_000_000.0,
+                        );
+
+                        drop(data);
+                        read_buf.unmap();
+                    }
+                } else {
+                    // === DEFAULT MODE: batched passes, simple fps logging ===
+
+                    // 1. Raygen
+                    {
+                        let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("raygen"),
+                            timestamp_writes: None,
+                        });
+                        cpass.set_pipeline(state.renderer.raygen_pipeline.as_ref().unwrap());
+                        cpass.set_bind_group(0, state.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
+                        cpass.dispatch_workgroups(
+                            state.screen_data.size.width / WORKGROUP_SIZE[0],
+                            state.screen_data.size.height / WORKGROUP_SIZE[1],
+                            WORKGROUP_SIZE[2],
+                        );
+                    }
+
+                    // 2. All bounces in a single compute pass
+                    {
+                        let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("pathtracer"),
+                            timestamp_writes: None,
+                        });
+                        cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
+                        cpass.set_bind_group(0, state.renderer.compute_bind_group.as_ref().unwrap(), &[]);
+                        for _ in 0..state.renderer.ray_bounces {
+                            cpass.dispatch_workgroups(
+                                state.screen_data.size.width / WORKGROUP_SIZE[0],
+                                state.screen_data.size.height / WORKGROUP_SIZE[1],
+                                WORKGROUP_SIZE[2],
+                            );
+                        }
+                    }
+
+                    // 3. Render pass
+                    {
+                        let mut rpass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: None,
+                            multiview_mask: None,
+                            color_attachments: &color_attachments,
+                            depth_stencil_attachment: None,
+                            occlusion_query_set: Default::default(),
+                            timestamp_writes: None,
+                        });
+                        rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
+                        rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
+                        rpass.draw(0..3, 0..1);
+                    }
+
+                    state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
+                    let _ = state.renderer.device.poll(wgpu::PollType::Wait {
+                        submission_index: None, timeout: None,
+                    });
+
+                    log::info!(
+                        "Sample {}/{}, framerate: {} fps",
+                        state.screen_data.subpixel_idx,
+                        state.renderer.rays_per_pixel,
+                        1000u128 / time_since_last_frame.as_millis().max(1),
+                    );
                 }
-                command_encoder.pop_debug_group();
 
-                state
-                    .renderer
-                    .queue
-                    .submit(std::iter::once(command_encoder.finish()));
-
-                let _ = state.renderer.device.poll(wgpu::PollType::Wait {
-                    submission_index: None,
-                    timeout: None,
-                });
                 frame.present();
             }
         } else {
@@ -465,6 +549,9 @@ pub struct Args {
     /// Number of rays per pixel
     #[clap(short, long, default_value_t = 8)]
     rays_per_pixel: u32,
+    /// Enable detailed GPU profiling (per-bounce timestamps)
+    #[clap(short = 'p', long)]
+    profile: bool,
     /// Number of bounces per ray
     #[clap(short, long, default_value_t = 8)]
     bounces: u32,

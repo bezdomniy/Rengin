@@ -67,6 +67,8 @@ struct ObjectParam {
     len_inner_nodes:u32,
     offset_leaf_nodes:u32,
     model_type: u32,
+    aabb_min: vec4<f32>,
+    aabb_max: vec4<f32>,
 };
 
 
