@@ -54,7 +54,7 @@ The renderer uses a fixed bounce count with no Russian roulette termination. Pat
 
 > **PBR Book reference:** Ch. 2.2.4 and Ch. 13.1 — Russian roulette is the standard technique for unbiased path termination.
 
-**Status: NOT FIXED** — Skipped for now. Would require per-ray early termination within the fixed dispatch loop.
+**Status: FIXED** — Russian roulette implemented with `q = min(0.5, max(0, 1 - MaxComponent(throughput)))`. Dead rays are eliminated via wavefront compaction — alive rays write to a compact index buffer and subsequent bounces use indirect dispatch to process only alive rays.
 
 ---
 
@@ -132,7 +132,7 @@ The `intersect()` function iterates through all objects linearly — O(n_objects
 
 > **PBR Book reference:** Ch. 7 — a two-level acceleration structure (TLAS over BLAS) is standard practice.
 
-**Status: NOT FIXED** — Architectural change, acceptable for small scenes.
+**Status: PARTIALLY FIXED** — World-space AABB culling added per object. Rays that miss an object's AABB skip the matrix transform and intersection entirely (75% skip rate on models.yaml). A full TLAS is not implemented but the AABB culling provides similar benefit for small object counts.
 
 ---
 
@@ -163,13 +163,13 @@ Originally `emissiveness.x > 0.0` — only checks red. A cyan light `(0, 5, 5)` 
 | 1 | **Critical** | RNG never advances | Fixed |
 | 2 | **Critical** | SAH BVH cost bugs | Not fixed (no perf impact observed) |
 | 3 | **Critical** | Sphere intersection missing distance check | Fixed |
-| 4 | Moderate | No Russian roulette | Not fixed (skipped) |
+| 4 | Moderate | No Russian roulette | Fixed (RR + wavefront compaction) |
 | 5 | Moderate | Cube light: volume sampling + sphere PDF | Fixed (area-weighted surface sampling) |
 | 6 | Moderate | Rough specular missing PDF | Fixed (reflective as energy weight) |
 | 7 | Moderate | Double gamma correction | Fixed (linear output + sRGB surface) |
 | 8 | Moderate | Nested dielectrics broken | Partially fixed (heuristic, single-layer works) |
 | — | Moderate | Camera move smearing | Fixed (clear texture on first sample) |
 | 9 | Minor | Degenerate triangle guard | Not an issue (GPU handles via IEEE 754) |
-| 10 | Minor | No TLAS | Not fixed (architectural) |
+| 10 | Minor | No TLAS | Partially fixed (world-space AABB culling) |
 | 11 | Minor | Emissive check only on red channel | Fixed |
 | 12 | Minor | `pow(length(), 2)` vs `dot()` | Fixed |
