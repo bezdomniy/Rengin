@@ -398,6 +398,11 @@ impl ApplicationHandler for RenderApp {
                     }
                     query_idx += 2;
 
+                    // Copy shader stats to read buffer
+                    let stats_buf = state.renderer.buffers.as_ref().unwrap().get("stats").unwrap();
+                    let stats_read_buf = state.renderer.buffers.as_ref().unwrap().get("stats_read").unwrap();
+                    command_encoder.copy_buffer_to_buffer(stats_buf, 0, stats_read_buf, 0, 8 * 4);
+
                     // Resolve + copy timestamps
                     command_encoder.resolve_query_set(
                         qs, 0..query_idx,
@@ -456,8 +461,59 @@ impl ApplicationHandler for RenderApp {
                         drop(data);
                         read_buf.unmap();
                     }
+
+                    // Read shader stats
+                    let stats_read = state.renderer.buffers.as_ref().unwrap().get("stats_read").unwrap();
+                    let stats_slice = stats_read.slice(..32);
+                    let (stx, srx) = std::sync::mpsc::channel();
+                    stats_slice.map_async(wgpu::MapMode::Read, move |result| {
+                        stx.send(result).unwrap();
+                    });
+                    let _ = state.renderer.device.poll(wgpu::PollType::Wait {
+                        submission_index: None, timeout: None,
+                    });
+                    if let Ok(Ok(())) = srx.recv() {
+                        let sdata = stats_slice.get_mapped_range();
+                        let stats: &[u32] = bytemuck::cast_slice(&sdata);
+                        let total_pixels = (state.screen_data.size.width * state.screen_data.size.height) as f64;
+                        let alive = stats[0] as f64;
+                        log::info!(
+                            "  Shader stats (all bounces) | rays_alive={} ({:.1}%/dispatch) | world_aabb: tests={}, skips={} ({:.0}%) | bvh_nodes: tests={}, skips={} ({:.0}%) | triangles: tests={}, hits={} | objects_tested={}",
+                            stats[0],
+                            alive / (total_pixels * state.renderer.ray_bounces as f64) * 100.0,
+                            stats[1], stats[2],
+                            if stats[1] > 0 { stats[2] as f64 / stats[1] as f64 * 100.0 } else { 0.0 },
+                            stats[3], stats[4],
+                            if stats[3] > 0 { stats[4] as f64 / stats[3] as f64 * 100.0 } else { 0.0 },
+                            stats[5], stats[6],
+                            stats[7],
+                        );
+                        log::info!(
+                            "  Per-ray averages | world_aabb={:.1} | bvh_nodes={:.1} | triangles={:.1} | objects={:.1}",
+                            if alive > 0.0 { stats[1] as f64 / alive } else { 0.0 },
+                            if alive > 0.0 { stats[3] as f64 / alive } else { 0.0 },
+                            if alive > 0.0 { stats[5] as f64 / alive } else { 0.0 },
+                            if alive > 0.0 { stats[7] as f64 / alive } else { 0.0 },
+                        );
+                        drop(sdata);
+                        stats_read.unmap();
+                    }
+
+                    // Clear stats buffer for next sample
+                    state.renderer.queue.write_buffer(
+                        state.renderer.buffers.as_ref().unwrap().get("stats").unwrap(),
+                        0,
+                        &[0u8; 32],
+                    );
                 } else {
-                    // === DEFAULT MODE: batched passes, simple fps logging ===
+                    // === DEFAULT MODE: wavefront path tracing with dead ray elimination ===
+
+                    // Initialize ray_counts: [0, 0] (will be populated by first bounce)
+                    state.renderer.queue.write_buffer(
+                        state.renderer.buffers.as_ref().unwrap().get("ray_counts").unwrap(),
+                        0,
+                        bytemuck::cast_slice(&[0u32, 0u32]),
+                    );
 
                     // 1. Raygen
                     {
@@ -474,19 +530,54 @@ impl ApplicationHandler for RenderApp {
                         );
                     }
 
-                    // 2. All bounces in a single compute pass
+                    // 2. Bounce 0: 2D dispatch (all pixels, spatially coherent)
+                    // Uses bind group A: in=A, out=B. Alive rays write to B.
                     {
                         let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("pathtracer"),
+                            label: Some("pathtracer bounce 0"),
                             timestamp_writes: None,
                         });
                         cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
                         cpass.set_bind_group(0, state.renderer.compute_bind_group.as_ref().unwrap(), &[]);
-                        for _ in 0..state.renderer.ray_bounces {
-                            cpass.dispatch_workgroups(
-                                state.screen_data.size.width / WORKGROUP_SIZE[0],
-                                state.screen_data.size.height / WORKGROUP_SIZE[1],
-                                WORKGROUP_SIZE[2],
+                        cpass.dispatch_workgroups(
+                            state.screen_data.size.width / WORKGROUP_SIZE[0],
+                            state.screen_data.size.height / WORKGROUP_SIZE[1],
+                            WORKGROUP_SIZE[2],
+                        );
+                    }
+
+                    // 3. Subsequent bounces: compact 1D indirect dispatch
+                    for bounce in 1..state.renderer.ray_bounces {
+                        // Prepare: swap counts, compute indirect dispatch args
+                        {
+                            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                label: Some("prepare dispatch"),
+                                timestamp_writes: None,
+                            });
+                            cpass.set_pipeline(state.renderer.prepare_dispatch_pipeline.as_ref().unwrap());
+                            cpass.set_bind_group(0, state.renderer.prepare_bind_group.as_ref().unwrap(), &[]);
+                            cpass.dispatch_workgroups(1, 1, 1);
+                        }
+
+                        // Compact bounce: 1D indirect dispatch, only alive rays
+                        // Alternate bind groups: odd bounces read from B (written by prev), even from A
+                        let bg = if bounce % 2 == 1 {
+                            // Bounce 0 wrote to B, so bounce 1 reads from B (bind group B: in=B, out=A)
+                            state.renderer.compute_bind_group_b.as_ref().unwrap()
+                        } else {
+                            // Bounce 1 wrote to A, so bounce 2 reads from A (bind group A: in=A, out=B)
+                            state.renderer.compute_bind_group.as_ref().unwrap()
+                        };
+                        {
+                            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                label: Some("pathtracer compact"),
+                                timestamp_writes: None,
+                            });
+                            cpass.set_pipeline(state.renderer.compute_compact_pipeline.as_ref().unwrap());
+                            cpass.set_bind_group(0, bg, &[]);
+                            cpass.dispatch_workgroups_indirect(
+                                state.renderer.buffers.as_ref().unwrap().get("indirect_dispatch").unwrap(),
+                                0,
                             );
                         }
                     }

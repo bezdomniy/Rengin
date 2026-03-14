@@ -51,20 +51,25 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
 
         let leaf_node: bool = current_node.idx2 > 0u;
 
+        if PROFILE_STATS { p_bvh_node_tests += 1u; }
         if intersectAABB_inv(ray.rayO, inv_d, current_node, ret.closestT) {
             if leaf_node {
                 for (var primIdx: u32 = current_node.skip_ptr_or_prim_idx1 + leaf_offset; primIdx < current_node.idx2 + leaf_offset; primIdx = primIdx + 1u) {
+                    if PROFILE_STATS { p_triangle_tests += 1u; }
                     let next_intersection = intersectTriangle(ray, primIdx, ret, object_id);
 
                     if (next_intersection.closestT < ret.closestT) && (next_intersection.closestT > EPSILON) {
+                        if PROFILE_STATS { p_triangle_hits += 1u; }
                         ret = next_intersection;
                     }
                 }
             }
             idx = idx + 1u;
         } else if leaf_node {
+            if PROFILE_STATS { p_bvh_node_skips += 1u; }
             idx = idx + 1u;
         } else {
+            if PROFILE_STATS { p_bvh_node_skips += 1u; }
             idx = current_node.skip_ptr_or_prim_idx1 + min_inner_node_idx;
         }
     }
@@ -152,7 +157,9 @@ fn intersect(ray: Ray, start: u32, immediate_ret: bool) -> Intersection {
         // Skip objects whose world-space AABB the ray misses
         // (planes have aabb_min == aabb_max == 0, so skip the test for them)
         if ob_params.model_type != 1u {
+            if PROFILE_STATS { p_world_aabb_tests += 1u; }
             if !intersectWorldAABB(ray, ob_params.aabb_min.xyz, ob_params.aabb_max.xyz, ret.closestT) {
+                if PROFILE_STATS { p_world_aabb_skips += 1u; }
                 if immediate_ret {
                     return ret;
                 }
@@ -160,6 +167,7 @@ fn intersect(ray: Ray, start: u32, immediate_ret: bool) -> Intersection {
             }
         }
 
+        if PROFILE_STATS { p_objects_tested += 1u; }
         let transformed_ray = Ray((ob_params.inverse_transform * vec4<f32>(ray.rayO, 1.0)).xyz, ray.refractive_index, (ob_params.inverse_transform * vec4<f32>(ray.rayD, 0.0)).xyz, ray.pos, vec4<f32>(-1f));
 
         if ob_params.model_type == 0u { //Sphere

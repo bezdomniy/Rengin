@@ -24,8 +24,14 @@ pub struct RenginWgpu {
     pub raygen_bind_group_layout: Option<BindGroupLayout>,
     pub raygen_bind_group: Option<BindGroup>,
     pub compute_pipeline: Option<ComputePipeline>,
+    pub compute_compact_pipeline: Option<ComputePipeline>,
+    pub prepare_dispatch_pipeline: Option<ComputePipeline>,
     pub compute_bind_group_layout: Option<BindGroupLayout>,
     pub compute_bind_group: Option<BindGroup>,
+    // Ping-pong bind groups for compaction (swap active_rays_in/out)
+    pub compute_bind_group_b: Option<BindGroup>,
+    pub prepare_bind_group_layout: Option<BindGroupLayout>,
+    pub prepare_bind_group: Option<BindGroup>,
     pub render_pipeline: Option<RenderPipeline>,
     pub render_bind_group_layout: Option<BindGroupLayout>,
     pub render_bind_group: Option<BindGroup>,
@@ -99,6 +105,7 @@ impl RenginWgpu {
             wgpu::Limits {
                 max_storage_buffer_binding_size: 1024 << 20,
                 max_buffer_size: 1024 << 20,
+                max_storage_buffers_per_shader_stage: 12,
                 ..wgpu::Limits::default()
             }
         }
@@ -180,8 +187,13 @@ impl RenginWgpu {
             raygen_bind_group_layout: None,
             raygen_pipeline: None,
             compute_bind_group: None,
+            compute_bind_group_b: None,
             compute_bind_group_layout: None,
             compute_pipeline: None,
+            compute_compact_pipeline: None,
+            prepare_dispatch_pipeline: None,
+            prepare_bind_group_layout: None,
+            prepare_bind_group: None,
             render_bind_group: None,
             render_bind_group_layout: None,
             render_pipeline: None,
@@ -242,6 +254,14 @@ impl<'a> RenginRenderer for RenginWgpu {
         let constants_shader_str = include_str!("../shaders/constants.wgsl");
         let hit_params_str = include_str!("../shaders/hit_params.wgsl");
         let intersects_shader_str = include_str!("../shaders/intersects.wgsl");
+        let stats_shader_str = include_str!("../shaders/stats.wgsl");
+
+        // Inject compile-time PROFILE_STATS constant
+        let profile_const = if self.profile {
+            "const PROFILE_STATS: bool = true;\n"
+        } else {
+            "const PROFILE_STATS: bool = false;\n"
+        };
 
         let raygen_shader_str = [
             ubo_str,
@@ -255,10 +275,12 @@ impl<'a> RenginRenderer for RenginWgpu {
         let frag_shader_str = [ubo_str, include_str!("../shaders/render.frag.wgsl")].join("\n");
 
         let pt_shader_str = [
+            profile_const,
             ubo_str,
             types_str,
             constants_shader_str,
             rand_shader_str,
+            stats_shader_str,
             hit_params_str,
             intersects_shader_str,
             pt_main_str,
@@ -314,6 +336,15 @@ impl<'a> RenginRenderer for RenginWgpu {
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(frag_shader_str.as_str())),
             });
 
+        let prepare_module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("prepare dispatch"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "../shaders/prepare_dispatch.wgsl"
+                ))),
+            });
+
         let mut shaders = HashMap::new();
         shaders.insert(
             "raygen",
@@ -322,6 +353,7 @@ impl<'a> RenginRenderer for RenginWgpu {
         shaders.insert("comp", RenginShaderModule::WgpuShaderModule(cs_module));
         shaders.insert("vert", RenginShaderModule::WgpuShaderModule(vt_module));
         shaders.insert("frag", RenginShaderModule::WgpuShaderModule(fg_module));
+        shaders.insert("prepare", RenginShaderModule::WgpuShaderModule(prepare_module));
 
         self.shaders = Some(shaders);
     }
@@ -401,6 +433,56 @@ impl<'a> RenginRenderer for RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
+        // Active ray compaction buffers (ping-pong A/B)
+        let total_pixels = (screen_data.resolution.width * screen_data.resolution.height) as usize;
+        let active_buf_size = total_pixels * mem::size_of::<u32>();
+        let buf_active_rays_a = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Active Rays A"),
+                contents: &vec![0u8; active_buf_size],
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let buf_active_rays_b = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Active Rays B"),
+                contents: &vec![0u8; active_buf_size],
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        // ray_counts: [input_count, output_count] as atomic u32
+        let buf_ray_counts = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Ray Counts"),
+                contents: bytemuck::cast_slice(&[0u32; 2]),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+        // Indirect dispatch args: [workgroups_x, 1, 1]
+        let buf_indirect_dispatch = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Indirect Dispatch Args"),
+                contents: bytemuck::cast_slice(&[0u32; 3]),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
+            });
+
+        // Stats buffer: 8 atomic u32 counters + read-back buffer for profiling
+        let stats_size = 8 * mem::size_of::<u32>();
+        let buf_stats = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Shader Stats Buffer"),
+                contents: &vec![0u8; stats_size],
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
+        let buf_stats_read = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Shader Stats Read Buffer"),
+            size: stats_size as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         log::info!(
             "Finshed loading buffers in {} millis",
             now.elapsed().as_millis()
@@ -415,6 +497,12 @@ impl<'a> RenginRenderer for RenginWgpu {
             ("ray_origins", buf_ray_origins),
             ("ray_directions", buf_ray_directions),
             ("ray_throughputs", buf_ray_throughputs),
+            ("stats", buf_stats),
+            ("stats_read", buf_stats_read),
+            ("active_rays_a", buf_active_rays_a),
+            ("active_rays_b", buf_active_rays_b),
+            ("ray_counts", buf_ray_counts),
+            ("indirect_dispatch", buf_indirect_dispatch),
         ]));
     }
 
@@ -614,6 +702,52 @@ impl<'a> RenginRenderer for RenginWgpu {
                         },
                         count: None,
                     },
+                    // Stats buffer (binding 9): 8 atomic u32 counters
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 9,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                (8 * mem::size_of::<u32>()) as _,
+                            ),
+                        },
+                        count: None,
+                    },
+                    // Active rays in (binding 10)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 10,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(4),
+                        },
+                        count: None,
+                    },
+                    // Active rays out (binding 11)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 11,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(4),
+                        },
+                        count: None,
+                    },
+                    // Ray counts (binding 12)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 12,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(8),
+                        },
+                        count: None,
+                    },
                 ],
                 label: None,
             },
@@ -715,14 +849,80 @@ impl<'a> RenginRenderer for RenginWgpu {
             },
         ));
 
+        let comp_module = match self.shaders.as_ref().unwrap().get("comp") {
+            Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+            _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
+        };
+
         self.compute_pipeline = Some(self.device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("Compute pipeline"),
+                label: Some("Compute pipeline (2D)"),
                 layout: compute_pipeline_layout.as_ref(),
-                module: match self.shaders.as_ref().unwrap().get("comp") {
-                    Some(RenginShaderModule::WgpuShaderModule(m)) => m,
-                    _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
-                },
+                module: comp_module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            },
+        ));
+
+        self.compute_compact_pipeline = Some(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("Compute pipeline (1D compact)"),
+                layout: compute_pipeline_layout.as_ref(),
+                module: comp_module,
+                entry_point: Some("main_compact"),
+                compilation_options: Default::default(),
+                cache: None,
+            },
+        ));
+
+        // Prepare dispatch pipeline
+        self.prepare_bind_group_layout = Some(self.device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                label: Some("prepare dispatch layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(8),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(12),
+                        },
+                        count: None,
+                    },
+                ],
+            },
+        ));
+
+        let prepare_pipeline_layout = self.device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("prepare dispatch"),
+                bind_group_layouts: &[self.prepare_bind_group_layout.as_ref().unwrap()],
+                immediate_size: 0,
+            },
+        );
+
+        let prepare_module = match self.shaders.as_ref().unwrap().get("prepare") {
+            Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+            _ => panic!("Missing prepare dispatch shader"),
+        };
+
+        self.prepare_dispatch_pipeline = Some(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("Prepare dispatch pipeline"),
+                layout: Some(&prepare_pipeline_layout),
+                module: prepare_module,
                 entry_point: Some("main"),
                 compilation_options: Default::default(),
                 cache: None,
@@ -900,6 +1100,65 @@ impl<'a> RenginRenderer for RenginWgpu {
                             .unwrap()
                             .as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: self
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("stats")
+                            .unwrap()
+                            .as_entire_binding(),
+                    },
+                    // Bind group A: in=A, out=B
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: self.buffers.as_ref().unwrap().get("active_rays_a").unwrap().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: self.buffers.as_ref().unwrap().get("active_rays_b").unwrap().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: self.buffers.as_ref().unwrap().get("ray_counts").unwrap().as_entire_binding(),
+                    },
+                ],
+            }),
+        );
+
+        // Bind group B: in=B, out=A (swapped for ping-pong)
+        self.compute_bind_group_b = Some(
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("compute bind group B"),
+                layout: self.compute_bind_group_layout.as_ref().unwrap(),
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&compute_target_texture_view) },
+                    wgpu::BindGroupEntry { binding: 1, resource: self.buffers.as_ref().unwrap().get("ubo").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: self.buffers.as_ref().unwrap().get("tlas").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: self.buffers.as_ref().unwrap().get("blas").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: self.buffers.as_ref().unwrap().get("normals").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 5, resource: self.buffers.as_ref().unwrap().get("object_params").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 6, resource: self.buffers.as_ref().unwrap().get("ray_origins").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 7, resource: self.buffers.as_ref().unwrap().get("ray_directions").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 8, resource: self.buffers.as_ref().unwrap().get("ray_throughputs").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 9, resource: self.buffers.as_ref().unwrap().get("stats").unwrap().as_entire_binding() },
+                    // Swapped: in=B, out=A
+                    wgpu::BindGroupEntry { binding: 10, resource: self.buffers.as_ref().unwrap().get("active_rays_b").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 11, resource: self.buffers.as_ref().unwrap().get("active_rays_a").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 12, resource: self.buffers.as_ref().unwrap().get("ray_counts").unwrap().as_entire_binding() },
+                ],
+            }),
+        );
+
+        // Prepare dispatch bind group
+        self.prepare_bind_group = Some(
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("prepare dispatch bind group"),
+                layout: self.prepare_bind_group_layout.as_ref().unwrap(),
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: self.buffers.as_ref().unwrap().get("ray_counts").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: self.buffers.as_ref().unwrap().get("indirect_dispatch").unwrap().as_entire_binding() },
                 ],
             }),
         );

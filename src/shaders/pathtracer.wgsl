@@ -17,6 +17,16 @@ var<storage, read_write> ray_origins: array<vec4<f32>>;    // xyz=origin, w=refr
 var<storage, read_write> ray_directions: array<vec4<f32>>; // xyz=direction, w=bitcast(pos)
 @group(0) @binding(8)
 var<storage, read_write> ray_throughputs: array<vec4<f32>>;
+@group(0) @binding(9)
+var<storage, read_write> shader_stats: array<atomic<u32>>;
+// Active ray compaction buffers
+@group(0) @binding(10)
+var<storage, read> active_rays_in: array<u32>;
+@group(0) @binding(11)
+var<storage, read_write> active_rays_out: array<u32>;
+@group(0) @binding(12)
+var<storage, read_write> ray_counts: array<atomic<u32>>;
+// ray_counts[0] = input count, ray_counts[1] = output count
 
 fn load_ray(offset: u32) -> Ray {
     let o = ray_origins[offset];
@@ -334,18 +344,17 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
 }
 
 
-@compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
-    let offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
+fn process_bounce(offset: u32, pixel_pos: vec2<u32>) {
     let ray = load_ray(offset);
 
     if ray.throughput.w < -EPSILON {
+        flush_stats(false);
         return;
     }
 
     var color: vec4<f32> = RAY_MISS_COLOUR;
     if ubo.subpixel_idx > 0u {
-        color = textureLoad(imageData, vec2<i32>(global_invocation_id.xy));
+        color = textureLoad(imageData, vec2<i32>(pixel_pos));
     }
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
@@ -359,12 +368,39 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     let ray_color = renderScene(ray, offset, light_sample);
 
     if ray_color.w > -EPSILON {
-        // Clamp per-sample contribution to prevent fireflies from extreme throughput paths
         let clamped_color = clamp(ray_color, vec4<f32>(0.0), vec4<f32>(3.0));
         color = mix(color, clamped_color, scale);
-        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+        textureStore(imageData, vec2<i32>(pixel_pos), color);
     } else if ubo.subpixel_idx == 0u {
-        // Clear old image data on first sample to prevent smearing on camera move
-        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+        textureStore(imageData, vec2<i32>(pixel_pos), color);
     }
+
+    // If ray is still alive after this bounce, write to compaction output
+    let updated_throughput = ray_throughputs[offset];
+    if updated_throughput.w >= -EPSILON {
+        let out_idx = atomicAdd(&ray_counts[1], 1u);
+        active_rays_out[out_idx] = offset;
+    }
+
+    flush_stats(true);
+}
+
+// Entry point for first bounce: 2D dispatch, all pixels, preserves spatial coherence
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
+    let offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
+    process_bounce(offset, global_invocation_id.xy);
+}
+
+// Entry point for subsequent bounces: 1D compacted dispatch, only alive rays
+@compute @workgroup_size(256)
+fn main_compact(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
+    let compact_idx = global_invocation_id.x;
+    if compact_idx >= atomicLoad(&ray_counts[0]) {
+        return;
+    }
+    let offset = active_rays_in[compact_idx];
+    let px = offset % ubo.resolution.x;
+    let py = offset / ubo.resolution.x;
+    process_bounce(offset, vec2<u32>(px, py));
 }
