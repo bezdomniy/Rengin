@@ -1,11 +1,13 @@
 /// Refraction logic mirroring the WGSL pathtracer shader.
 /// This module exists solely for unit testing the RI tracking decisions.
 
+#[cfg(test)]
 const EPSILON: f32 = 0.001;
 
 /// Result of a refraction decision at a dielectric surface.
+#[cfg(test)]
 #[derive(Debug, PartialEq)]
-pub enum RefractionResult {
+enum RefractionResult {
     /// Ray refracts into the transmitted medium.
     Refract {
         n_ratio: f32,
@@ -21,13 +23,8 @@ pub enum RefractionResult {
 ///
 /// This mirrors the logic in pathtracer.wgsl for the transparency path,
 /// excluding the Fresnel random reflection (only tests the deterministic parts).
-///
-/// # Arguments
-/// * `ray_ri` - Current refractive index of the ray's medium
-/// * `material_ri` - Refractive index of the hit material
-/// * `front_face` - Whether the ray hit the front face (entering) or back face (exiting)
-/// * `cos_i` - Cosine of the incident angle (dot of eye vector and normal)
-pub fn compute_refraction(
+#[cfg(test)]
+fn compute_refraction(
     ray_ri: f32,
     material_ri: f32,
     front_face: bool,
