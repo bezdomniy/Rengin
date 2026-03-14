@@ -86,6 +86,7 @@ fn surface_area(object: ObjectParam) -> f32 {
 }
 
 fn random_light() -> ObjectParam {
+    next_pcg3d();
     let i = u32(rescale(f32_zero_to_one(rand_pcg3d.x), f32(ubo.lights_offset), f32(ubo.n_objects)));
     return object_params.ObjectParams[i];
 }
@@ -108,8 +109,32 @@ fn random_to_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
     } else if light.model_type == 1u {
         return vec3<f32>(0.0);
     } else if light.model_type == 2u {
-        let p = random_in_cube();
-        // let p = random_to_cube_face((light.inverse_transform * vec4<f32>(direction,0f)).xyz);
+        // Area-weighted face sampling for non-uniform cubes
+        let area_yz = scale.y * scale.z;  // x-face area (proportional)
+        let area_xz = scale.x * scale.z;  // y-face area
+        let area_xy = scale.x * scale.y;  // z-face area
+        let total = 2.0 * (area_yz + area_xz + area_xy);
+
+        next_pcg3d();
+        let u = f32_zero_to_one(rand_pcg3d.x);
+        let v = f32_negone_to_one(rand_pcg3d.y);
+        let w = f32_negone_to_one(rand_pcg3d.z);
+        let face_rand = u * total;
+
+        var p: vec3<f32>;
+        if face_rand < area_yz {
+            p = vec3<f32>(-1.0, v, w);
+        } else if face_rand < 2.0 * area_yz {
+            p = vec3<f32>(1.0, v, w);
+        } else if face_rand < 2.0 * area_yz + area_xz {
+            p = vec3<f32>(v, -1.0, w);
+        } else if face_rand < 2.0 * area_yz + 2.0 * area_xz {
+            p = vec3<f32>(v, 1.0, w);
+        } else if face_rand < 2.0 * area_yz + 2.0 * area_xz + area_xy {
+            p = vec3<f32>(v, w, -1.0);
+        } else {
+            p = vec3<f32>(v, w, 1.0);
+        }
         let r = (light.transform * vec4<f32>(p, 1f)).xyz;
         return normalize(r - origin);
     }
@@ -133,11 +158,12 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
         // TODO
         return 1.0;
     } else if light.model_type == 2u {
+        // Use bounding sphere solid angle (numerically stable, no grazing-angle singularity)
         let centre = light.transform[3].xyz;
         let scale = vec3<f32>(length(light.transform[0].xyz), length(light.transform[1].xyz), length(light.transform[2].xyz));
         let radius = max(scale.x, max(scale.y, scale.z));
-        let length = length(centre - ray.rayO);
-        let cos_theta_max = sqrt(1f - radius * radius / (length * length));
+        let len = length(centre - ray.rayO);
+        let cos_theta_max = sqrt(1f - radius * radius / (len * len));
         let solid_angle = 2f * PI * (1f - cos_theta_max);
         return  1f / solid_angle;
     }
@@ -188,6 +214,7 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
             let n_ratio = ray.refractive_index / eta_t;
             let sin_2t = pow(n_ratio, 2.0) * (1.0 - pow(cos_i, 2.0));
 
+            next_pcg3d();
             if sin_2t > 1.0 || reflectance >= f32_zero_to_one(rand_pcg3d.y) {
                 // scattering_target = hitParams.reflectv;
                 // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
@@ -203,10 +230,15 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
             }
         }
 
-        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(direction), ray.pos, ray.throughput * ob_params.material.colour);
+        var specular_weight = ob_params.material.colour;
+        if ob_params.material.reflective > 0.0 && ob_params.material.reflective < 1.0 {
+            specular_weight = specular_weight * ob_params.material.reflective;
+        }
+        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(direction), ray.pos, ray.throughput * specular_weight);
     } else {
         if light_sample {
             let p_scatter = 0.5;
+            next_pcg3d();
             if f32_zero_to_one(rand_pcg3d.y) < p_scatter {
                 let light = random_light();
                 direction = normalize(random_to_light(light, p));
@@ -273,7 +305,9 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     let ray_color = renderScene(ray, offset, light_sample);
 
     if ray_color.w > -EPSILON {
-        color = mix(color, ray_color, scale);
+        // Clamp per-sample contribution to prevent fireflies from extreme throughput paths
+        let clamped_color = clamp(ray_color, vec4<f32>(0.0), vec4<f32>(3.0));
+        color = mix(color, clamped_color, scale);
         textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
     }
 }

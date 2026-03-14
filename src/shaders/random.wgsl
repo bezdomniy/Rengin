@@ -15,6 +15,20 @@ fn init_pcg3d(v: vec3<u32>) {
     rand_pcg3d.z = rand_pcg3d.z + (rand_pcg3d.x * rand_pcg3d.y);
 }
 
+fn next_pcg3d() {
+    rand_pcg3d = rand_pcg3d * 1664525u + 1013904223u;
+
+    rand_pcg3d.x = rand_pcg3d.x + (rand_pcg3d.y * rand_pcg3d.z);
+    rand_pcg3d.y = rand_pcg3d.y + (rand_pcg3d.z * rand_pcg3d.x);
+    rand_pcg3d.z = rand_pcg3d.z + (rand_pcg3d.x * rand_pcg3d.y);
+
+    rand_pcg3d = rand_pcg3d ^ (rand_pcg3d >> vec3<u32>(16u));
+
+    rand_pcg3d.x = rand_pcg3d.x + (rand_pcg3d.y * rand_pcg3d.z);
+    rand_pcg3d.y = rand_pcg3d.y + (rand_pcg3d.z * rand_pcg3d.x);
+    rand_pcg3d.z = rand_pcg3d.z + (rand_pcg3d.x * rand_pcg3d.y);
+}
+
 // var<private> rand_pcg4d: vec4<u32>;
 // fn init_pcg4d(v: vec4<u32>) {
 //     rand_pcg4d = v * 1664525u + 1013904223u;
@@ -47,6 +61,7 @@ fn rescale(value: f32, min: f32, max: f32) -> f32 {
 }
 
 fn random_in_unit_sphere() -> vec3<f32> {
+    next_pcg3d();
     let phi = 2.0 * PI * f32_zero_to_one(rand_pcg3d.x);
     let cos_theta = 2.0 * f32_zero_to_one(rand_pcg3d.y) - 1.0;
     let u = f32_zero_to_one(rand_pcg3d.z);
@@ -61,13 +76,16 @@ fn random_in_unit_sphere() -> vec3<f32> {
 }
 
 fn random_in_cube() -> vec3<f32> {
+    next_pcg3d();
     let x = f32_negone_to_one(rand_pcg3d.x);
     let y = f32_negone_to_one(rand_pcg3d.y);
     let z = f32_negone_to_one(rand_pcg3d.z);
     return vec3<f32>(x, y, z);
 }
 
+
 fn random_in_square() -> vec2<f32> {
+    next_pcg3d();
     let x = f32_zero_to_one(rand_pcg3d.x);
     let y = f32_zero_to_one(rand_pcg3d.y);
     return vec2<f32>(x, y);
@@ -129,6 +147,7 @@ fn random_in_square() -> vec2<f32> {
 // }
 
 fn random_cosine_direction() -> vec3<f32> {
+    next_pcg3d();
     let r1 = f32_zero_to_one(rand_pcg3d.x);
     let r2 = f32_zero_to_one(rand_pcg3d.y);
     let z = sqrt(1.0 - r2);
@@ -141,6 +160,7 @@ fn random_cosine_direction() -> vec3<f32> {
 }
 
 fn random_to_sphere(radius: f32, distance_squared: f32) -> vec3<f32> {
+    next_pcg3d();
     let r1 = f32_zero_to_one(rand_pcg3d.x);
     let r2 = f32_zero_to_one(rand_pcg3d.y);
     let z = 1.0 + r2 * (sqrt(1.0 - radius * radius / distance_squared) - 1.0);
@@ -154,6 +174,7 @@ fn random_to_sphere(radius: f32, distance_squared: f32) -> vec3<f32> {
 }
 
 fn random_uniform_direction() -> vec3<f32> {
+    next_pcg3d();
     let r1 = f32_zero_to_one(rand_pcg3d.x);
     let r2 = f32_zero_to_one(rand_pcg3d.y);
     let x = cos(2.0 * PI * r1) * 2.0 * sqrt(r2 * (1.0 - r2));
@@ -164,6 +185,7 @@ fn random_uniform_direction() -> vec3<f32> {
 }
 
 fn random_uniform_on_hemisphere() -> vec3<f32> {
+    next_pcg3d();
     let azimuthal = 2.0 * PI * f32_zero_to_one(rand_pcg3d.x);
     let z = f32_zero_to_one(rand_pcg3d.y);
 

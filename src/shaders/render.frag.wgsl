@@ -20,8 +20,6 @@ fn main(@location(0) inUV: vec2<f32>) -> @location(0) vec4<f32> {
     let xy = vec2<i32>(inUV*vec2<f32>(ubo.resolution));
 
     var color = textureLoad(imageData,xy);
-    color = sqrt(color);
-
-    color = clamp(color,vec4<f32>(0.0),vec4<f32>(0.999));
-    return to_linear_rgb(color);
+    color = clamp(color, vec4<f32>(0.0), vec4<f32>(1.0));
+    return color;
 }

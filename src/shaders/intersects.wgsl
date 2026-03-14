@@ -67,7 +67,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
     var ret: Intersection = inIntersection;
 
     var idx = min_inner_node_idx;
-    loop  
+    loop
     {
         if idx >= max_inner_node_idx {break;};
 
@@ -113,7 +113,7 @@ fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: u32) -> In
             return Intersection(vec2<f32>(0.0), 0, t1, object_id);
         }
 
-        if t2 > EPSILON {
+        if t2 > EPSILON && t2 < inIntersection.closestT {
             return Intersection(vec2<f32>(0.0), 0, t2, object_id);
         }
     }
@@ -177,7 +177,7 @@ fn intersect(ray: Ray, start: u32, immediate_ret: bool) -> Intersection {
         let ob_params = object_params.ObjectParams[i];
 
         // // TODO: clean this up
-        // if (ob_params.model_type == 9u) //point light from whitted rt 
+        // if (ob_params.model_type == 9u) //point light from whitted rt
         // {
         //     continue;
         // }
