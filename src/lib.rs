@@ -4,7 +4,7 @@ mod renderer;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{
-    DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
+    DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{Key, NamedKey};
@@ -37,7 +37,23 @@ struct State {
     screen_data: ScreenData,
     game_state: GameState,
     left_mouse_down: bool,
+    mouselook: bool,
+    keys_held: KeysHeld,
     last_update_inst: Instant,
+}
+
+#[derive(Default)]
+struct KeysHeld {
+    w: bool,
+    a: bool,
+    s: bool,
+    d: bool,
+    space: bool,
+    shift: bool,
+    arrow_left: bool,
+    arrow_right: bool,
+    arrow_up: bool,
+    arrow_down: bool,
 }
 
 #[derive(Default)]
@@ -116,6 +132,8 @@ impl State {
             screen_data,
             game_state,
             left_mouse_down: false,
+            mouselook: false,
+            keys_held: KeysHeld::default(),
             last_update_inst: Instant::now(),
         }
     }
@@ -123,8 +141,7 @@ impl State {
     fn update_device_event(&mut self, event: DeviceEvent) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
-                // println!("x:{}, y:{}", position.x, position.y);
-                if self.left_mouse_down {
+                if self.mouselook {
                     self.game_state
                         .camera
                         .rotate(-delta.0 as f32, delta.1 as f32);
@@ -132,51 +149,86 @@ impl State {
                     self.screen_data.inverse_camera_transform =
                         self.game_state.camera.get_inverse_transform();
                     self.screen_data.subpixel_idx = 0;
-                    // self.screen_data.update_random_seed();
                 }
             }
-            DeviceEvent::MouseWheel { delta } => match delta {
-                MouseScrollDelta::LineDelta(_, y) => {
-                    // println!("y: {}", y);
-                    self.game_state.camera.move_forward(y as f32);
-
-                    self.screen_data.inverse_camera_transform =
-                        self.game_state.camera.get_inverse_transform();
-                    self.screen_data.subpixel_idx = 0;
-                    // self.screen_data.update_random_seed();
-                }
-                MouseScrollDelta::PixelDelta(xy) => {
-                    // println!("pix xy: {:?}", xy);
-                    self.game_state.camera.move_forward(xy.y as f32);
-
-                    self.screen_data.inverse_camera_transform =
-                        self.game_state.camera.get_inverse_transform();
-                    self.screen_data.subpixel_idx = 0;
-                    // self.screen_data.update_random_seed();
-                } // _ => {}
-            },
             _ => {}
         }
     }
 
     fn update_window_event(&mut self, event: WindowEvent) {
         match event {
+            // Right-click toggles mouselook
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
-                button: MouseButton::Left,
+                button: MouseButton::Right,
                 ..
             } => {
-                self.left_mouse_down = true;
+                self.mouselook = !self.mouselook;
             }
-            WindowEvent::MouseInput {
-                state: ElementState::Released,
-                button: MouseButton::Left,
+            // Track WASD + Space/Shift
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key: Key::Character(ref c),
+                        state: key_state,
+                        ..
+                    },
                 ..
             } => {
-                self.left_mouse_down = false;
+                let pressed = key_state == ElementState::Pressed;
+                match c.as_ref() {
+                    "w" => self.keys_held.w = pressed,
+                    "a" => self.keys_held.a = pressed,
+                    "s" => self.keys_held.s = pressed,
+                    "d" => self.keys_held.d = pressed,
+                    _ => {}
+                }
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key: Key::Named(named),
+                        state: key_state,
+                        ..
+                    },
+                ..
+            } => {
+                let pressed = key_state == ElementState::Pressed;
+                match named {
+                    NamedKey::Space => self.keys_held.space = pressed,
+                    NamedKey::Shift => self.keys_held.shift = pressed,
+                    NamedKey::ArrowLeft => self.keys_held.arrow_left = pressed,
+                    NamedKey::ArrowRight => self.keys_held.arrow_right = pressed,
+                    NamedKey::ArrowUp => self.keys_held.arrow_up = pressed,
+                    NamedKey::ArrowDown => self.keys_held.arrow_down = pressed,
+                    _ => {}
+                }
             }
             _ => {}
         }
+    }
+
+    fn apply_movement(&mut self) -> bool {
+        let k = &self.keys_held;
+        if !k.w && !k.a && !k.s && !k.d && !k.space && !k.shift && !k.arrow_left && !k.arrow_right && !k.arrow_up && !k.arrow_down {
+            return false;
+        }
+
+        if k.w { self.game_state.camera.move_forward(1.0); }
+        if k.s { self.game_state.camera.move_forward(-1.0); }
+        if k.d { self.game_state.camera.move_right(1.0); }
+        if k.a { self.game_state.camera.move_right(-1.0); }
+        if k.space { self.game_state.camera.move_up(1.0); }
+        if k.shift { self.game_state.camera.move_up(-1.0); }
+        if k.arrow_left { self.game_state.camera.rotate(3.0, 0.0); }
+        if k.arrow_right { self.game_state.camera.rotate(-3.0, 0.0); }
+        if k.arrow_up { self.game_state.camera.rotate(0.0, 3.0); }
+        if k.arrow_down { self.game_state.camera.rotate(0.0, -3.0); }
+
+        self.screen_data.inverse_camera_transform =
+            self.game_state.camera.get_inverse_transform();
+        self.screen_data.subpixel_idx = 0;
+        true
     }
 
     pub fn update(&mut self) {
@@ -288,8 +340,10 @@ impl ApplicationHandler for RenderApp {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let state = self.state.as_mut().unwrap();
         let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
-        // let mut last_update_inst = Instant::now();
         let time_since_last_frame = state.last_update_inst.elapsed();
+
+        // Apply WASD movement every frame
+        state.apply_movement();
 
         if (!state.left_mouse_down || state.renderer.continous_motion)
             && ((state.screen_data.subpixel_idx < state.renderer.rays_per_pixel)

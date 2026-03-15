@@ -1,0 +1,434 @@
+# DOOM-style FPS level with mirrors and outdoor lighting
+# Navigate with WASD + mouselook (right-click to toggle)
+
+- add: camera
+  width: 900
+  height: 600
+  field-of-view: 1.2
+  from: [0, 1.5, 0]
+  to: [1, 1.5, 0]
+  up: [0, 1, 0]
+
+# === MATERIALS ===
+
+- define: floor-material
+  value:
+    color: [0.25, 0.22, 0.20]
+
+- define: ceiling-material
+  value:
+    color: [0.15, 0.15, 0.18]
+
+- define: wall-grey
+  value:
+    color: [0.35, 0.33, 0.30]
+
+- define: wall-metal
+  value:
+    color: [0.5, 0.5, 0.55]
+    reflective: 0.3
+
+- define: wall-red
+  value:
+    color: [0.5, 0.08, 0.05]
+
+- define: wall-blue
+  value:
+    color: [0.08, 0.1, 0.4]
+
+- define: mirror
+  value:
+    color: [0.88, 0.9, 0.92]
+    reflective: 0.95
+
+- define: dark-mirror
+  value:
+    color: [0.65, 0.67, 0.72]
+    reflective: 0.9
+
+- define: pillar-material
+  value:
+    color: [0.4, 0.38, 0.35]
+    reflective: 0.15
+
+- define: chrome
+  value:
+    color: [0.8, 0.8, 0.85]
+    reflective: 1.0
+
+- define: armor-material
+  value:
+    color: [0.1, 0.6, 0.1]
+    reflective: 0.8
+
+- define: health-material
+  value:
+    color: [0.8, 0.1, 0.1]
+    reflective: 0.6
+
+- define: soul-material
+  value:
+    color: [0.2, 0.5, 1.0]
+    reflective: 0.9
+    transparency: 0.3
+    refractive-index: 1.3
+
+- define: glass
+  value:
+    color: [0.95, 0.95, 1.0]
+    reflective: 0.05
+    transparency: 0.9
+    refractive-index: 1.5
+
+- define: lava-material
+  value:
+    color: [1, 0.3, 0.05]
+    emissiveness: [3, 0.8, 0.1]
+
+- define: red-light
+  value:
+    color: [1, 0, 0]
+    emissiveness: [6, 0.5, 0.2]
+
+- define: green-light
+  value:
+    color: [0, 1, 0]
+    emissiveness: [0.5, 5, 0.5]
+
+- define: blue-light
+  value:
+    color: [0, 0, 1]
+    emissiveness: [0.5, 0.5, 6]
+
+# === OUTDOOR SUN (big emissive sphere high up, warm daylight) ===
+- add: sphere
+  material:
+    color: [1, 1, 1]
+    emissiveness: [30, 25, 18]
+  transform:
+    - [scale, 3, 3, 3]
+    - [translate, 20, 25, -15]
+
+# Sky fill light (soft blue from above)
+- add: sphere
+  material:
+    color: [0.7, 0.8, 1]
+    emissiveness: [4, 5, 7]
+  transform:
+    - [scale, 5, 5, 5]
+    - [translate, 10, 20, 10]
+
+# === SPAWN CORRIDOR ===
+# Floor
+- add: cube
+  material: floor-material
+  transform:
+    - [scale, 3, 0.1, 2]
+    - [translate, 3, 0, 0]
+
+# Ceiling
+- add: cube
+  material: ceiling-material
+  transform:
+    - [scale, 3, 0.1, 2]
+    - [translate, 3, 4, 0]
+
+# Left wall - MIRROR (you see yourself as you spawn)
+- add: cube
+  material: mirror
+  transform:
+    - [scale, 3, 2, 0.05]
+    - [translate, 3, 2, -2]
+
+# Right wall
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 3, 2, 0.1]
+    - [translate, 3, 2, 2]
+
+# === MAIN HALL ===
+# Floor
+- add: cube
+  material: floor-material
+  transform:
+    - [scale, 6, 0.1, 6]
+    - [translate, 12, 0, 0]
+
+# Ceiling - open skylight gap (no ceiling in center, light streams in)
+# Left ceiling section
+- add: cube
+  material: ceiling-material
+  transform:
+    - [scale, 6, 0.1, 2]
+    - [translate, 12, 5, -4]
+
+# Right ceiling section
+- add: cube
+  material: ceiling-material
+  transform:
+    - [scale, 6, 0.1, 2]
+    - [translate, 12, 5, 4]
+
+# Front ceiling section
+- add: cube
+  material: ceiling-material
+  transform:
+    - [scale, 2, 0.1, 2]
+    - [translate, 8, 5, 0]
+
+# Back ceiling section
+- add: cube
+  material: ceiling-material
+  transform:
+    - [scale, 2, 0.1, 2]
+    - [translate, 16, 5, 0]
+
+# Back wall (with doorway gap to arena — wall sections on each side)
+- add: cube
+  material: wall-red
+  transform:
+    - [scale, 0.1, 2.5, 2]
+    - [translate, 18, 2.5, -4]
+
+- add: cube
+  material: wall-red
+  transform:
+    - [scale, 0.1, 2.5, 2]
+    - [translate, 18, 2.5, 4]
+
+# Lintel above doorway
+- add: cube
+  material: wall-red
+  transform:
+    - [scale, 0.1, 0.5, 2]
+    - [translate, 18, 4.5, 0]
+
+# Left wall (with gap for side room)
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 2, 2.5, 0.1]
+    - [translate, 8, 2.5, -6]
+
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 2, 2.5, 0.1]
+    - [translate, 16, 2.5, -6]
+
+# Right wall - LARGE MIRROR (reflects the whole hall + skylight)
+- add: cube
+  material: mirror
+  transform:
+    - [scale, 6, 2.5, 0.05]
+    - [translate, 12, 2.5, 6]
+
+# Pillars (4 chrome pillars in the main hall — reflect everything)
+- add: cube
+  material: chrome
+  transform:
+    - [scale, 0.25, 2.5, 0.25]
+    - [translate, 9, 2.5, -3]
+
+- add: cube
+  material: chrome
+  transform:
+    - [scale, 0.25, 2.5, 0.25]
+    - [translate, 9, 2.5, 3]
+
+- add: cube
+  material: chrome
+  transform:
+    - [scale, 0.25, 2.5, 0.25]
+    - [translate, 15, 2.5, -3]
+
+- add: cube
+  material: chrome
+  transform:
+    - [scale, 0.25, 2.5, 0.25]
+    - [translate, 15, 2.5, 3]
+
+# === SIDE ROOM (blue, through gap in left wall) ===
+# Floor
+- add: cube
+  material: wall-blue
+  transform:
+    - [scale, 3, 0.1, 4]
+    - [translate, 12, 0, -12]
+
+# Ceiling
+- add: cube
+  material: ceiling-material
+  transform:
+    - [scale, 3, 0.1, 4]
+    - [translate, 12, 4, -12]
+
+# Far wall - DARK MIRROR
+- add: cube
+  material: dark-mirror
+  transform:
+    - [scale, 3, 2, 0.05]
+    - [translate, 12, 2, -16]
+
+# Left wall
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 0.1, 2, 4]
+    - [translate, 9, 2, -12]
+
+# Right wall
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 0.1, 2, 4]
+    - [translate, 15, 2, -12]
+
+# Connecting corridor walls
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 2, 2, 0.1]
+    - [translate, 10, 2, -6]
+
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 2, 2, 0.1]
+    - [translate, 14, 2, -6]
+
+# Connecting corridor ceiling
+- add: cube
+  material: ceiling-material
+  transform:
+    - [scale, 2, 0.1, 1]
+    - [translate, 12, 4, -7]
+
+# Blue room light
+- add: sphere
+  material: blue-light
+  transform:
+    - [scale, 0.3, 0.3, 0.3]
+    - [translate, 12, 3.5, -12]
+
+# Soul sphere pickup
+- add: sphere
+  material: soul-material
+  transform:
+    - [scale, 0.4, 0.4, 0.4]
+    - [translate, 12, 1.2, -14]
+
+# === ARENA (beyond main hall doorway) ===
+
+# Lava pit in arena center
+- add: cube
+  material: lava-material
+  transform:
+    - [scale, 2, 0.15, 2]
+    - [translate, 24, 0.15, 0]
+
+# Arena floor (around lava)
+- add: cube
+  material: floor-material
+  transform:
+    - [scale, 5, 0.1, 2]
+    - [translate, 24, 0, 4]
+
+- add: cube
+  material: floor-material
+  transform:
+    - [scale, 5, 0.1, 2]
+    - [translate, 24, 0, -4]
+
+# Arena back wall - MIRROR (facing mirrors create infinite corridor effect with main hall mirror)
+- add: cube
+  material: mirror
+  transform:
+    - [scale, 0.05, 3, 6]
+    - [translate, 29, 3, 0]
+
+# Arena side walls with window openings (light comes through)
+# Left wall - lower section
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 5, 1.2, 0.1]
+    - [translate, 24, 1.2, -6]
+
+# Left wall - upper section (above window)
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 5, 0.8, 0.1]
+    - [translate, 24, 5.2, -6]
+
+# Left window glass
+- add: cube
+  material: glass
+  transform:
+    - [scale, 3, 1, 0.02]
+    - [translate, 24, 3.2, -6]
+
+# Right wall - lower section
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 5, 1.2, 0.1]
+    - [translate, 24, 1.2, 6]
+
+# Right wall - upper section (above window)
+- add: cube
+  material: wall-grey
+  transform:
+    - [scale, 5, 0.8, 0.1]
+    - [translate, 24, 5.2, 6]
+
+# Right window glass
+- add: cube
+  material: glass
+  transform:
+    - [scale, 3, 1, 0.02]
+    - [translate, 24, 3.2, 6]
+
+# No arena ceiling - open to sky (sun streams in from above)
+
+# Red accent lights on arena walls
+- add: sphere
+  material: red-light
+  transform:
+    - [scale, 0.2, 0.2, 0.2]
+    - [translate, 20, 1, -5.5]
+
+- add: sphere
+  material: red-light
+  transform:
+    - [scale, 0.2, 0.2, 0.2]
+    - [translate, 28, 1, -5.5]
+
+# Armor pickup on chrome pedestal
+- add: cube
+  material: chrome
+  transform:
+    - [scale, 0.4, 0.5, 0.4]
+    - [translate, 27, 0.5, 0]
+
+- add: sphere
+  material: armor-material
+  transform:
+    - [scale, 0.35, 0.35, 0.35]
+    - [translate, 27, 1.4, 0]
+
+# Health pickup near lava
+- add: sphere
+  material: health-material
+  transform:
+    - [scale, 0.3, 0.3, 0.3]
+    - [translate, 21, 0.8, 3]
+
+# Green exit light at far end
+- add: sphere
+  material: green-light
+  transform:
+    - [scale, 0.2, 0.2, 0.2]
+    - [translate, 28.5, 2, 0]

@@ -236,7 +236,16 @@ impl Camera {
     }
 
     pub fn move_forward(&mut self, d: f32) {
-        self.position -= self.forward * d * self.move_speed;
+        self.position += self.forward * d * self.move_speed;
+    }
+
+    pub fn move_right(&mut self, d: f32) {
+        let right = self.forward.cross(-self.up).normalize();
+        self.position += right * d * self.move_speed;
+    }
+
+    pub fn move_up(&mut self, d: f32) {
+        self.position += self.up * d * self.move_speed;
     }
 
     fn get_yaw_pitch(position: Vec3, centre: Vec3) -> (f32, f32) {
