@@ -4,7 +4,7 @@
 #import rengin::ubo::UBO
 
 @group(0) @binding(0)
-var imageData: texture_storage_2d<rgba16float,read_write>;
+var<storage, read_write> imageData: array<vec4<f32>>;
 @group(0) @binding(1)
 var<uniform> ubo: UBO;
 @group(0) @binding(2)
@@ -15,38 +15,51 @@ var<storage, read> leaf_nodes: LeafNodes;
 var<storage, read> normal_nodes: Normals;
 @group(0) @binding(5)
 var<storage, read> object_params: ObjectParams;
-// SOA ray buffers for coalesced GPU memory access
+// Interleaved ray buffer: [origin, direction, throughput] per ray (3 vec4s each)
 @group(0) @binding(6)
-var<storage, read_write> ray_origins: array<vec4<f32>>;    // xyz=origin, w=refractive_index
+var<storage, read_write> ray_data: array<vec4<f32>>;
+#ifdef PROFILE_STATS
 @group(0) @binding(7)
-var<storage, read_write> ray_directions: array<vec4<f32>>; // xyz=direction, w=bitcast(pos)
-@group(0) @binding(8)
-var<storage, read_write> ray_throughputs: array<vec4<f32>>;
-@group(0) @binding(9)
 var<storage, read_write> shader_stats: array<atomic<u32>>;
-// Active ray compaction buffers
-@group(0) @binding(10)
+// With profiling: 8=in, 9=out, 10=counts
+@group(0) @binding(8)
 var<storage, read> active_rays_in: array<u32>;
-@group(0) @binding(11)
+@group(0) @binding(9)
 var<storage, read_write> active_rays_out: array<u32>;
-@group(0) @binding(12)
+@group(0) @binding(10)
 var<storage, read_write> ray_counts: array<atomic<u32>>;
+#else
+// Without profiling: 7=in, 8=out, 9=counts (10 storage buffers total)
+@group(0) @binding(7)
+var<storage, read> active_rays_in: array<u32>;
+@group(0) @binding(8)
+var<storage, read_write> active_rays_out: array<u32>;
+@group(0) @binding(9)
+var<storage, read_write> ray_counts: array<atomic<u32>>;
+#endif
 // ray_counts[0] = input count, ray_counts[1] = output count
 
 fn load_ray(offset: u32) -> Ray {
-    let o = ray_origins[offset];
-    let d = ray_directions[offset];
-    return Ray(o.xyz, o.w, d.xyz, bitcast<u32>(d.w), ray_throughputs[offset]);
+    let base = offset * 3u;
+    let o = ray_data[base];
+    let d = ray_data[base + 1u];
+    return Ray(o.xyz, o.w, d.xyz, bitcast<u32>(d.w), ray_data[base + 2u]);
 }
 
 fn store_ray(offset: u32, r: Ray) {
-    ray_origins[offset] = vec4<f32>(r.rayO, r.refractive_index);
-    ray_directions[offset] = vec4<f32>(r.rayD, bitcast<f32>(r.pos));
-    ray_throughputs[offset] = r.throughput;
+    let base = offset * 3u;
+    ray_data[base] = vec4<f32>(r.rayO, r.refractive_index);
+    ray_data[base + 1u] = vec4<f32>(r.rayD, bitcast<f32>(r.pos));
+    ray_data[base + 2u] = r.throughput;
 }
 
 fn store_dead_ray(offset: u32) {
-    ray_origins[offset] = vec4<f32>(-1f, -1f, -1f, -1f);
-    ray_directions[offset] = vec4<f32>(-1f, -1f, -1f, 0f);
-    ray_throughputs[offset] = vec4<f32>(-1f);
+    let base = offset * 3u;
+    ray_data[base] = vec4<f32>(-1f, -1f, -1f, -1f);
+    ray_data[base + 1u] = vec4<f32>(-1f, -1f, -1f, 0f);
+    ray_data[base + 2u] = vec4<f32>(-1f);
+}
+
+fn load_ray_throughput(offset: u32) -> vec4<f32> {
+    return ray_data[offset * 3u + 2u];
 }

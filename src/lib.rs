@@ -1,18 +1,27 @@
 pub mod engine;
+pub mod platform;
 mod renderer;
+
+#[cfg(target_arch = "wasm32")]
+mod web;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{
     DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, WindowEvent,
 };
-use winit::event_loop::{ActiveEventLoop, ControlFlow};
+#[cfg(not(target_arch = "wasm32"))]
+use winit::event_loop::ControlFlow;
+use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use platform::Instant;
+
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
 use engine::rt_primitives::{Camera, ScreenData};
 use engine::scene_importer::Scene;
@@ -56,16 +65,26 @@ struct KeysHeld {
     arrow_down: bool,
 }
 
-#[derive(Default)]
+use std::cell::RefCell;
+use std::rc::Rc;
+
 pub struct RenderApp {
-    state: Option<State>,
+    state: Rc<RefCell<Option<State>>>,
+}
+
+impl Default for RenderApp {
+    fn default() -> Self {
+        RenderApp {
+            state: Rc::new(RefCell::new(None)),
+        }
+    }
 }
 
 impl State {
     pub async fn new(
         window: Arc<Window>,
-        resolution: &PhysicalSize<u32>,
-        scene: &Scene,
+        resolution: PhysicalSize<u32>,
+        scene: Scene,
         continous_motion: bool,
         rays_per_pixel: u32,
         ray_bounces: u32,
@@ -73,9 +92,12 @@ impl State {
         profile: bool,
     ) -> Self {
         let physical_size = window.inner_size();
+        // On web, inner_size may be 0 before layout; use scene resolution as fallback
+        let initial_size = if physical_size.width > 0 { physical_size } else { resolution };
 
         let mut renderer = RenginWgpu::new(
             window,
+            initial_size,
             continous_motion,
             rays_per_pixel,
             ray_bounces,
@@ -97,8 +119,8 @@ impl State {
             scene.specular_offset as u32,
             scene.lights_offset as u32,
             ray_bounces,
-            physical_size,
-            *resolution,
+            initial_size,
+            resolution,
             scene.camera.as_ref().unwrap().field_of_view,
             (renderer.rays_per_pixel as f32).sqrt() as u32,
         );
@@ -125,7 +147,7 @@ impl State {
         );
 
         // TODO: remove buffers as arg and move into RenginWgpu state
-        renderer.create_bind_groups(&physical_size);
+        renderer.create_bind_groups(&initial_size);
 
         Self {
             renderer,
@@ -240,28 +262,152 @@ impl State {
 
         self.screen_data.subpixel_idx += 1;
     }
+}
 
+impl RenderApp {
+    fn render_default_mode(
+        state: &mut State,
+        command_encoder: wgpu::CommandEncoder,
+        color_attachments: &[Option<wgpu::RenderPassColorAttachment<'_>>],
+        time_since_last_frame: Duration,
+    ) {
+        let mut command_encoder = command_encoder;
+        // === DEFAULT MODE: wavefront path tracing with dead ray elimination ===
+
+        // Initialize ray_counts: [0, 0] (will be populated by first bounce)
+        state.renderer.queue.write_buffer(
+            state.renderer.buffers.as_ref().unwrap().get("ray_counts").unwrap(),
+            0,
+            bytemuck::cast_slice(&[0u32, 0u32]),
+        );
+
+        // 1. Raygen
+        {
+            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("raygen"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(state.renderer.raygen_pipeline.as_ref().unwrap());
+            cpass.set_bind_group(0, state.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
+            cpass.dispatch_workgroups(
+                state.screen_data.size.width / WORKGROUP_SIZE[0],
+                state.screen_data.size.height / WORKGROUP_SIZE[1],
+                WORKGROUP_SIZE[2],
+            );
+        }
+
+        // 2. Bounce 0: 2D dispatch (all pixels, spatially coherent)
+        {
+            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("pathtracer bounce 0"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
+            cpass.set_bind_group(0, state.renderer.compute_bind_group.as_ref().unwrap(), &[]);
+            cpass.dispatch_workgroups(
+                state.screen_data.size.width / WORKGROUP_SIZE[0],
+                state.screen_data.size.height / WORKGROUP_SIZE[1],
+                WORKGROUP_SIZE[2],
+            );
+        }
+
+        // 3. Subsequent bounces: compact 1D indirect dispatch
+        for bounce in 1..state.renderer.ray_bounces {
+            // Prepare: swap counts, compute indirect dispatch args
+            {
+                let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("prepare dispatch"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(state.renderer.prepare_dispatch_pipeline.as_ref().unwrap());
+                cpass.set_bind_group(0, state.renderer.prepare_bind_group.as_ref().unwrap(), &[]);
+                cpass.dispatch_workgroups(1, 1, 1);
+            }
+
+            // Compact bounce: 1D indirect dispatch, only alive rays
+            let bg = if bounce % 2 == 1 {
+                state.renderer.compute_bind_group_b.as_ref().unwrap()
+            } else {
+                state.renderer.compute_bind_group.as_ref().unwrap()
+            };
+            {
+                let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("pathtracer compact"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(state.renderer.compute_compact_pipeline.as_ref().unwrap());
+                cpass.set_bind_group(0, bg, &[]);
+                cpass.dispatch_workgroups_indirect(
+                    state.renderer.buffers.as_ref().unwrap().get("indirect_dispatch").unwrap(),
+                    0,
+                );
+            }
+        }
+
+        // 4. Render pass
+        {
+            let mut rpass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                multiview_mask: None,
+                color_attachments,
+                depth_stencil_attachment: None,
+                occlusion_query_set: Default::default(),
+                timestamp_writes: None,
+            });
+            rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
+            rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
+            rpass.draw(0..3, 0..1);
+        }
+
+        state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
+
+        // On native, wait for GPU completion; on web, browser handles this
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = state.renderer.device.poll(wgpu::PollType::Wait {
+                submission_index: None, timeout: None,
+            });
+        }
+
+        log::info!(
+            "Sample {}/{}, framerate: {} fps",
+            state.screen_data.subpixel_idx,
+            state.renderer.rays_per_pixel,
+            1000u128 / time_since_last_frame.as_millis().max(1),
+        );
+    }
 }
 
 impl ApplicationHandler for RenderApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let monitor = event_loop.available_monitors().next().unwrap();
-        let monitor_scale_factor = monitor.scale_factor();
-        let resolution = monitor.size();
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let config = platform::AppConfig::from_url_params();
+                let monitor_scale_factor = web_sys::window().unwrap().device_pixel_ratio();
+            } else {
+                let monitor = event_loop.available_monitors().next().unwrap();
+                let monitor_scale_factor = monitor.scale_factor();
+                let args = Args::parse();
+                let config = platform::AppConfig::from(&args);
+            }
+        }
 
-        let args = Args::parse();
-        let renderer_type = if args.whitted {
-            panic!("Whitted Ray Tracer has been deprecated and will no longer work.");
-        } else {
-            RendererType::PathTracer
-        };
+        let renderer_type = RendererType::PathTracer;
 
         let now = Instant::now();
-        log::info!("Loading models...{}", args.scene);
+        log::info!("Loading scene: {}", config.scene);
 
-        let scene = Scene::new(&args.scene, &renderer_type);
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let scene = engine::embedded_assets::load_scene(&config.scene, &renderer_type);
+                let resolution = PhysicalSize::new(900, 900);
+            } else {
+                let scene = Scene::new(&config.scene, &renderer_type);
+                let resolution = event_loop.available_monitors().next().unwrap().size();
+            }
+        }
         log::info!(
-            "Finished loading models in {} millis.",
+            "Finished loading scene in {} millis.",
             now.elapsed().as_millis()
         );
 
@@ -272,30 +418,63 @@ impl ApplicationHandler for RenderApp {
         let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
 
         let window_attributes = WindowAttributes::default()
-            .with_title("Fantastic window number one!")
+            .with_title("Rengin Path Tracer")
             .with_resizable(true)
             .with_inner_size(physical_size);
 
         // Create window object
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
-        let state = pollster::block_on(State::new(
-            window.clone(),
-            &resolution,
-            &scene,
-            !args.draw_on_mouseup,
-            args.rays_per_pixel,
-            args.bounces,
-            renderer_type,
-            args.profile,
-        ));
-        self.state = Some(state);
+        // On web, attach the canvas to the DOM and set its size explicitly
+        #[cfg(target_arch = "wasm32")]
+        {
+            use winit::platform::web::WindowExtWebSys;
+            let canvas = window.canvas().expect("Failed to get canvas from winit window");
+            canvas.set_width(physical_size.width);
+            canvas.set_height(physical_size.height);
+            let web_window = web_sys::window().unwrap();
+            let document = web_window.document().unwrap();
+            let container = document
+                .get_element_by_id("rengin-canvas")
+                .expect("No #rengin-canvas element found in DOM");
+            container
+                .append_child(&web_sys::Element::from(canvas))
+                .expect("Failed to append canvas to DOM");
+            // winit may not pick up the canvas size immediately, so request it
+            let _ = window.request_inner_size(physical_size);
+        }
 
-        window.request_redraw();
+        let init_future = State::new(
+            window.clone(),
+            resolution,
+            scene,
+            config.continuous_motion,
+            config.rays_per_pixel,
+            config.bounces,
+            renderer_type,
+            config.profile,
+        );
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                // On web, we cannot block. Use spawn_local with shared state.
+                let state_slot = self.state.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let state = init_future.await;
+                    *state_slot.borrow_mut() = Some(state);
+                    window.request_redraw();
+                });
+            } else {
+                let state = pollster::block_on(init_future);
+                *self.state.borrow_mut() = Some(state);
+                window.request_redraw();
+            }
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let state = self.state.as_mut().unwrap();
+        let mut guard = self.state.borrow_mut();
+        let Some(state) = guard.as_mut() else { return };
 
         match event {
             WindowEvent::Resized(size) => {
@@ -323,6 +502,7 @@ impl ApplicationHandler for RenderApp {
                     },
                 ..
             } if s == "R" => {
+                #[cfg(not(target_arch = "wasm32"))]
                 println!("{:#?}", state.renderer.instance.generate_report());
             }
             WindowEvent::RedrawRequested => {}
@@ -333,12 +513,14 @@ impl ApplicationHandler for RenderApp {
     }
 
     fn device_event(&mut self, _event_loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
-        let state = self.state.as_mut().unwrap();
+        let mut guard = self.state.borrow_mut();
+        let Some(state) = guard.as_mut() else { return };
         state.update_device_event(event);
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let state = self.state.as_mut().unwrap();
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        let mut guard = self.state.borrow_mut();
+        let Some(state) = guard.as_mut() else { return };
         let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
         let time_since_last_frame = state.last_update_inst.elapsed();
 
@@ -382,11 +564,14 @@ impl ApplicationHandler for RenderApp {
                         store: wgpu::StoreOp::Store,
                     },
                 })];
+                #[allow(unused_mut)]
                 let mut command_encoder = state
                     .renderer
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
+                // Profiling mode: native-only (requires timestamp queries + sync readback)
+                #[cfg(not(target_arch = "wasm32"))]
                 if state.renderer.profile {
                     // === PROFILED MODE: separate passes with GPU timestamps ===
                     let mut query_idx: u32 = 0;
@@ -559,117 +744,27 @@ impl ApplicationHandler for RenderApp {
                         0,
                         &[0u8; 32],
                     );
+
+                    frame.present();
                 } else {
-                    // === DEFAULT MODE: wavefront path tracing with dead ray elimination ===
-
-                    // Initialize ray_counts: [0, 0] (will be populated by first bounce)
-                    state.renderer.queue.write_buffer(
-                        state.renderer.buffers.as_ref().unwrap().get("ray_counts").unwrap(),
-                        0,
-                        bytemuck::cast_slice(&[0u32, 0u32]),
-                    );
-
-                    // 1. Raygen
-                    {
-                        let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("raygen"),
-                            timestamp_writes: None,
-                        });
-                        cpass.set_pipeline(state.renderer.raygen_pipeline.as_ref().unwrap());
-                        cpass.set_bind_group(0, state.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
-                        cpass.dispatch_workgroups(
-                            state.screen_data.size.width / WORKGROUP_SIZE[0],
-                            state.screen_data.size.height / WORKGROUP_SIZE[1],
-                            WORKGROUP_SIZE[2],
-                        );
-                    }
-
-                    // 2. Bounce 0: 2D dispatch (all pixels, spatially coherent)
-                    // Uses bind group A: in=A, out=B. Alive rays write to B.
-                    {
-                        let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("pathtracer bounce 0"),
-                            timestamp_writes: None,
-                        });
-                        cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
-                        cpass.set_bind_group(0, state.renderer.compute_bind_group.as_ref().unwrap(), &[]);
-                        cpass.dispatch_workgroups(
-                            state.screen_data.size.width / WORKGROUP_SIZE[0],
-                            state.screen_data.size.height / WORKGROUP_SIZE[1],
-                            WORKGROUP_SIZE[2],
-                        );
-                    }
-
-                    // 3. Subsequent bounces: compact 1D indirect dispatch
-                    for bounce in 1..state.renderer.ray_bounces {
-                        // Prepare: swap counts, compute indirect dispatch args
-                        {
-                            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                label: Some("prepare dispatch"),
-                                timestamp_writes: None,
-                            });
-                            cpass.set_pipeline(state.renderer.prepare_dispatch_pipeline.as_ref().unwrap());
-                            cpass.set_bind_group(0, state.renderer.prepare_bind_group.as_ref().unwrap(), &[]);
-                            cpass.dispatch_workgroups(1, 1, 1);
-                        }
-
-                        // Compact bounce: 1D indirect dispatch, only alive rays
-                        // Alternate bind groups: odd bounces read from B (written by prev), even from A
-                        let bg = if bounce % 2 == 1 {
-                            // Bounce 0 wrote to B, so bounce 1 reads from B (bind group B: in=B, out=A)
-                            state.renderer.compute_bind_group_b.as_ref().unwrap()
-                        } else {
-                            // Bounce 1 wrote to A, so bounce 2 reads from A (bind group A: in=A, out=B)
-                            state.renderer.compute_bind_group.as_ref().unwrap()
-                        };
-                        {
-                            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                label: Some("pathtracer compact"),
-                                timestamp_writes: None,
-                            });
-                            cpass.set_pipeline(state.renderer.compute_compact_pipeline.as_ref().unwrap());
-                            cpass.set_bind_group(0, bg, &[]);
-                            cpass.dispatch_workgroups_indirect(
-                                state.renderer.buffers.as_ref().unwrap().get("indirect_dispatch").unwrap(),
-                                0,
-                            );
-                        }
-                    }
-
-                    // 3. Render pass
-                    {
-                        let mut rpass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: None,
-                            multiview_mask: None,
-                            color_attachments: &color_attachments,
-                            depth_stencil_attachment: None,
-                            occlusion_query_set: Default::default(),
-                            timestamp_writes: None,
-                        });
-                        rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
-                        rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
-                        rpass.draw(0..3, 0..1);
-                    }
-
-                    state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
-                    let _ = state.renderer.device.poll(wgpu::PollType::Wait {
-                        submission_index: None, timeout: None,
-                    });
-
-                    log::info!(
-                        "Sample {}/{}, framerate: {} fps",
-                        state.screen_data.subpixel_idx,
-                        state.renderer.rays_per_pixel,
-                        1000u128 / time_since_last_frame.as_millis().max(1),
-                    );
+                    Self::render_default_mode(state, command_encoder, &color_attachments, time_since_last_frame);
+                    frame.present();
                 }
 
-                frame.present();
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Self::render_default_mode(state, command_encoder, &color_attachments, time_since_last_frame);
+                    frame.present();
+                }
             }
         } else {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + target_frametime - time_since_last_frame,
-            ))
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let _event_loop = _event_loop;
+                _event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + target_frametime - time_since_last_frame,
+                ));
+            }
         }
 
         state.renderer.window.request_redraw();
@@ -677,6 +772,7 @@ impl ApplicationHandler for RenderApp {
 }
 
 /// A wgpu ray tracer
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Parser, Debug, Default)]
 #[clap(about, author)]
 pub struct Args {

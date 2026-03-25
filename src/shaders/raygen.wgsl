@@ -4,13 +4,9 @@
 
 @group(0) @binding(0)
 var<uniform> ubo: UBO;
-// SOA ray buffers
+// Interleaved ray buffer: [origin, direction, throughput] per ray (3 vec4s each)
 @group(0) @binding(1)
-var<storage, read_write> ray_origins: array<vec4<f32>>;
-@group(0) @binding(2)
-var<storage, read_write> ray_directions: array<vec4<f32>>;
-@group(0) @binding(3)
-var<storage, read_write> ray_throughputs: array<vec4<f32>>;
+var<storage, read_write> ray_data: array<vec4<f32>>;
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
@@ -39,7 +35,8 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
     let direction = normalize((pixel - origin)).xyz;
 
     let rays_offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
-    ray_origins[rays_offset] = vec4<f32>(origin.xyz, 1f);
-    ray_directions[rays_offset] = vec4<f32>(direction, 0f);
-    ray_throughputs[rays_offset] = vec4<f32>(1f);
+    let base = rays_offset * 3u;
+    ray_data[base] = vec4<f32>(origin.xyz, 1f);
+    ray_data[base + 1u] = vec4<f32>(direction, 0f);
+    ray_data[base + 2u] = vec4<f32>(1f);
 }

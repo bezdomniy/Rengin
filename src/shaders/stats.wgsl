@@ -1,6 +1,8 @@
 #define_import_path rengin::stats
 
+#ifdef PROFILE_STATS
 #import rengin::pt_bindings::shader_stats
+#endif
 
 // Shader profiling stats - atomic counters for per-frame aggregate statistics
 // Stats buffer layout (8 atomic u32 counters):

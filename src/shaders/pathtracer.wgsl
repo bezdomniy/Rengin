@@ -6,9 +6,9 @@
     random_cosine_direction, random_to_sphere,
 }
 #import rengin::pt_bindings::{
-    imageData, ubo, object_params, ray_throughputs,
+    imageData, ubo, object_params,
     active_rays_in, active_rays_out, ray_counts,
-    load_ray, store_ray, store_dead_ray,
+    load_ray, store_ray, store_dead_ray, load_ray_throughput,
 }
 #import rengin::stats::flush_stats
 #import rengin::hit_params::getHitParams
@@ -207,9 +207,10 @@ fn process_bounce(offset: u32, pixel_pos: vec2<u32>) {
         return;
     }
 
+    let img_idx = pixel_pos.y * ubo.resolution.x + pixel_pos.x;
     var color: vec4<f32> = RAY_MISS_COLOUR;
     if ubo.subpixel_idx > 0u {
-        color = textureLoad(imageData, vec2<i32>(pixel_pos));
+        color = imageData[img_idx];
     }
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
@@ -225,13 +226,13 @@ fn process_bounce(offset: u32, pixel_pos: vec2<u32>) {
     if ray_color.w > -EPSILON {
         let clamped_color = clamp(ray_color, vec4<f32>(0.0), vec4<f32>(3.0));
         color = mix(color, clamped_color, scale);
-        textureStore(imageData, vec2<i32>(pixel_pos), color);
+        imageData[img_idx] = color;
     } else if ubo.subpixel_idx == 0u {
-        textureStore(imageData, vec2<i32>(pixel_pos), color);
+        imageData[img_idx] = color;
     }
 
     // If ray is still alive after this bounce, write to compaction output
-    let updated_throughput = ray_throughputs[offset];
+    let updated_throughput = load_ray_throughput(offset);
     if updated_throughput.w >= -EPSILON {
         let out_idx = atomicAdd(&ray_counts[1], 1u);
         active_rays_out[out_idx] = offset;

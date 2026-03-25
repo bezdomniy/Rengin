@@ -4,30 +4,59 @@ version = "0.1.0"
 authors = ["Ilia <ilia.shibaev@gmail.com>"]
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [features]
 default = ["native"]
-native = ["glam/std"]
-webgl = ["glam/libm"]
+native = ["glam/std", "dep:pollster", "dep:clap", "dep:env_logger"]
+web = ["glam/libm", "getrandom/wasm_js", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys", "dep:console_log", "dep:console_error_panic_hook", "dep:web-time", "dep:js-sys"]
 
 [dependencies]
+# Graphics
 wgpu = { version = "28.0", features = ["vulkan-portability", "naga-ir"] }
 naga_oil = "0.21"
-glam = { version = "0.30", default-features = false, features = ["bytemuck"] }
 winit = "0.30"
-pollster = "0.4"
-tobj = "4.0"
-env_logger = "0.11"
-log = "0.4"
+
+# Math & data
+glam = { version = "0.30", default-features = false, features = ["bytemuck"] }
 bytemuck = { version = "1.23", features = ["derive"] }
-rand = "0.9"
-linked-hash-map = "0.5.6"
+
+# Scene loading
+tobj = "4.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml_ng = "0.10"
 image = "0.25"
+
+# Utilities
+rand = "0.9"
+getrandom = "0.3"
+linked-hash-map = "0.5.6"
 itertools = "0.14"
-clap = { version = "4.5", features = ["derive"] }
 cfg-if = "1"
 futures = { version = "0.3" }
+log = "0.4"
+
+# Native-only (optional)
+pollster = { version = "0.4", optional = true }
+clap = { version = "4.5", features = ["derive"], optional = true }
+env_logger = { version = "0.11", optional = true }
+
+# Web-only (optional)
+wasm-bindgen = { version = "0.2.114", optional = true }
+wasm-bindgen-futures = { version = "0.4.64", optional = true }
+console_log = { version = "1.0", optional = true }
+console_error_panic_hook = { version = "0.1.7", optional = true }
+web-time = { version = "1.1", optional = true }
+js-sys = { version = "0.3.91", optional = true }
+
+[dependencies.web-sys]
+version = "0.3.91"
+optional = true
+features = [
+    "Window", "Document", "HtmlCanvasElement", "Element",
+    "Location", "UrlSearchParams",
+]
 
 [profile.release]
 debug = true

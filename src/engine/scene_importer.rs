@@ -324,16 +324,22 @@ impl Scene {
             Err(why) => panic!("couldn't open {}: {}", display, why),
             Ok(file) => file,
         };
-        // let scene: Vec<serde_yaml::Value> = serde_yaml::from_reader(f).unwrap();
 
         let commands: Vec<Command> =
             serde_yaml_ng::from_reader(f).expect("Failed to load scene description.");
+        Scene::from_commands(commands, renderer_type)
+    }
+
+    /// Load a scene from a YAML string (used for embedded assets on web).
+    pub fn from_yaml_str(yaml: &str, renderer_type: &RendererType) -> Self {
+        let commands: Vec<Command> =
+            serde_yaml_ng::from_str(yaml).expect("Failed to parse scene YAML.");
+        Scene::from_commands(commands, renderer_type)
+    }
+
+    fn from_commands(commands: Vec<Command>, renderer_type: &RendererType) -> Self {
         let (camera, object_params, bvh, specular_offset, lights_offset) =
             Scene::load_assets(&commands, renderer_type);
-
-        // for item in object_params.as_ref().unwrap() {
-        //     println!("{:?}", item.model_type);
-        // }
 
         log::debug!(
             "op: {:?}",
