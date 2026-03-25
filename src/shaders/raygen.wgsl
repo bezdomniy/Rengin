@@ -1,3 +1,7 @@
+#import rengin::ubo::UBO
+#import rengin::constants::RANDOM_SUBPIXEL
+#import rengin::random::{init_pcg3d, random_in_square}
+
 @group(0) @binding(0)
 var<uniform> ubo: UBO;
 // SOA ray buffers

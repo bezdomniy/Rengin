@@ -1,50 +1,18 @@
-@group(0) @binding(0)
-var imageData: texture_storage_2d<rgba16float,read_write>;
-@group(0) @binding(1)
-var<uniform> ubo: UBO;
-@group(0) @binding(2)
-var<storage, read> inner_nodes: InnerNodes;
-@group(0) @binding(3)
-var<storage, read> leaf_nodes: LeafNodes;
-@group(0) @binding(4)
-var<storage, read> normal_nodes: Normals;
-@group(0) @binding(5)
-var<storage, read> object_params: ObjectParams;
-// SOA ray buffers for coalesced GPU memory access
-@group(0) @binding(6)
-var<storage, read_write> ray_origins: array<vec4<f32>>;    // xyz=origin, w=refractive_index
-@group(0) @binding(7)
-var<storage, read_write> ray_directions: array<vec4<f32>>; // xyz=direction, w=bitcast(pos)
-@group(0) @binding(8)
-var<storage, read_write> ray_throughputs: array<vec4<f32>>;
-@group(0) @binding(9)
-var<storage, read_write> shader_stats: array<atomic<u32>>;
-// Active ray compaction buffers
-@group(0) @binding(10)
-var<storage, read> active_rays_in: array<u32>;
-@group(0) @binding(11)
-var<storage, read_write> active_rays_out: array<u32>;
-@group(0) @binding(12)
-var<storage, read_write> ray_counts: array<atomic<u32>>;
-// ray_counts[0] = input count, ray_counts[1] = output count
-
-fn load_ray(offset: u32) -> Ray {
-    let o = ray_origins[offset];
-    let d = ray_directions[offset];
-    return Ray(o.xyz, o.w, d.xyz, bitcast<u32>(d.w), ray_throughputs[offset]);
+#import rengin::types::{ObjectParam, Intersection, HitParams, Ray}
+#import rengin::constants::{EPSILON, MAXLEN, PI, RAY_MISS_COLOUR}
+#import rengin::random::{
+    init_pcg3d, next_pcg3d, rand_pcg3d,
+    f32_zero_to_one, f32_negone_to_one, rescale,
+    random_cosine_direction, random_to_sphere,
 }
-
-fn store_ray(offset: u32, r: Ray) {
-    ray_origins[offset] = vec4<f32>(r.rayO, r.refractive_index);
-    ray_directions[offset] = vec4<f32>(r.rayD, bitcast<f32>(r.pos));
-    ray_throughputs[offset] = r.throughput;
+#import rengin::pt_bindings::{
+    imageData, ubo, object_params, ray_throughputs,
+    active_rays_in, active_rays_out, ray_counts,
+    load_ray, store_ray, store_dead_ray,
 }
-
-fn store_dead_ray(offset: u32) {
-    ray_origins[offset] = vec4<f32>(-1f, -1f, -1f, -1f);
-    ray_directions[offset] = vec4<f32>(-1f, -1f, -1f, 0f);
-    ray_throughputs[offset] = vec4<f32>(-1f);
-}
+#import rengin::stats::flush_stats
+#import rengin::hit_params::{getHitParams, schlick_lazanyi}
+#import rengin::intersects::intersect
 
 
 // // Buggy
@@ -214,7 +182,7 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     if max_component < 1.0 {
         // Cap at 0.5: the MIS one-sample estimator can produce very low throughput
         // for light-sampled paths (scattering_pdf/pdf << 1) which are still valuable.
-        // Unlike pbrt where BSDF*cos/pdf ≤ 1, our MIS weight spans orders of magnitude.
+        // Unlike pbrt where BSDF*cos/pdf <= 1, our MIS weight spans orders of magnitude.
         let rr_q = min(0.5, max(0.0, 1.0 - max_component));
         next_pcg3d();
         if f32_zero_to_one(rand_pcg3d.z) < rr_q {
@@ -269,10 +237,10 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
 
             if !hitParams.front_face {
                 if ray.refractive_index > 1.0 + EPSILON {
-                    // Ray is inside a dense medium (glass) → exiting to air
+                    // Ray is inside a dense medium (glass) -> exiting to air
                     eta_t = 1.0;
                 }
-                // else: ray is in air (RI~1.0) hitting back face → entering this material
+                // else: ray is in air (RI~1.0) hitting back face -> entering this material
                 // eta_t stays as material RI
             }
 

@@ -1,3 +1,6 @@
+#define_import_path rengin::random
+
+#import rengin::constants::PI
 
 var<private> rand_pcg3d: vec3<u32>;
 fn init_pcg3d(v: vec3<u32>) {

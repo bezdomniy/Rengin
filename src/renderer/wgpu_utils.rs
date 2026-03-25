@@ -6,6 +6,9 @@ use crate::{
     engine::rt_primitives::{ObjectParam, ScreenData, Ubo},
 };
 
+use naga_oil::compose::{
+    ComposableModuleDescriptor, Composer, NagaModuleDescriptor, ShaderDefValue,
+};
 use wgpu::{
     Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Instance, Queue,
     RenderPipeline, Surface, Texture, util::DeviceExt,
@@ -247,93 +250,111 @@ impl<'a> RenginRenderer for RenginWgpu {
     }
 
     fn create_shaders(&mut self, renderer_type: RendererType) {
-        let pt_main_str = include_str!("../shaders/pathtracer.wgsl");
-        let ubo_str = include_str!("../shaders/ubo.wgsl");
-        let types_str = include_str!("../shaders/types.wgsl");
-        let rand_shader_str = include_str!("../shaders/random.wgsl");
-        let constants_shader_str = include_str!("../shaders/constants.wgsl");
-        let hit_params_str = include_str!("../shaders/hit_params.wgsl");
-        let intersects_shader_str = include_str!("../shaders/intersects.wgsl");
-        let stats_shader_str = include_str!("../shaders/stats.wgsl");
+        let mut composer = Composer::default();
 
-        // Inject compile-time PROFILE_STATS constant
-        let profile_const = if self.profile {
-            "const PROFILE_STATS: bool = true;\n"
-        } else {
-            "const PROFILE_STATS: bool = false;\n"
+        // Add composable modules in dependency order (leaves first)
+        let mut load_composable = |source: &str, file_path: &str| {
+            match composer.add_composable_module(ComposableModuleDescriptor {
+                source,
+                file_path,
+                ..Default::default()
+            }) {
+                Ok(_) => {}
+                Err(e) => {
+                    let msg = e.emit_to_string(&composer);
+                    panic!("Failed to add shader module {file_path}:\n{msg}");
+                }
+            }
         };
 
-        let raygen_shader_str = [
-            ubo_str,
-            types_str,
-            constants_shader_str,
-            rand_shader_str,
-            include_str!("../shaders/raygen.wgsl"),
-        ]
-        .join("\n");
+        load_composable(include_str!("../shaders/types.wgsl"), "shaders/types.wgsl");
+        load_composable(include_str!("../shaders/ubo.wgsl"), "shaders/ubo.wgsl");
+        load_composable(include_str!("../shaders/constants.wgsl"), "shaders/constants.wgsl");
+        load_composable(include_str!("../shaders/random.wgsl"), "shaders/random.wgsl");
+        load_composable(
+            include_str!("../shaders/pathtracer_bindings.wgsl"),
+            "shaders/pathtracer_bindings.wgsl",
+        );
+        load_composable(include_str!("../shaders/stats.wgsl"), "shaders/stats.wgsl");
+        load_composable(include_str!("../shaders/hit_params.wgsl"), "shaders/hit_params.wgsl");
+        load_composable(include_str!("../shaders/intersects.wgsl"), "shaders/intersects.wgsl");
 
-        let frag_shader_str = [ubo_str, include_str!("../shaders/render.frag.wgsl")].join("\n");
-
-        let pt_shader_str = [
-            profile_const,
-            ubo_str,
-            types_str,
-            constants_shader_str,
-            rand_shader_str,
-            stats_shader_str,
-            hit_params_str,
-            intersects_shader_str,
-            pt_main_str,
-        ]
-        .join("\n");
-
-        let rt_shader_str = [
-            ubo_str,
-            types_str,
-            constants_shader_str,
-            hit_params_str,
-            intersects_shader_str,
-        ]
-        .join("\n");
+        // Shader defs for compile-time profiling toggle
+        let mut shader_defs = HashMap::new();
+        if self.profile {
+            shader_defs.insert("PROFILE_STATS".to_owned(), ShaderDefValue::Bool(true));
+        }
 
         let cs_module = match renderer_type {
             RendererType::PathTracer => {
+                let module = match composer.make_naga_module(NagaModuleDescriptor {
+                    source: include_str!("../shaders/pathtracer.wgsl"),
+                    file_path: "shaders/pathtracer.wgsl",
+                    shader_defs,
+                    ..Default::default()
+                }) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        let msg = e.emit_to_string(&composer);
+                        panic!("Shader composition error for pathtracer:\n{msg}");
+                    }
+                };
                 self.device
                     .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: None,
-                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(pt_shader_str.as_str())),
+                        label: Some("pathtracer"),
+                        source: wgpu::ShaderSource::Naga(Cow::Owned(module)),
                     })
             }
             RendererType::RayTracer => {
-                self.device
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: None,
-                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(rt_shader_str.as_str())),
-                    })
+                // TODO: create a raytracer entry-point shader with naga_oil imports
+                panic!("RayTracer not yet migrated to naga_oil");
             }
         };
 
+        let raygen_naga = match composer.make_naga_module(NagaModuleDescriptor {
+            source: include_str!("../shaders/raygen.wgsl"),
+            file_path: "shaders/raygen.wgsl",
+            ..Default::default()
+        }) {
+            Ok(m) => m,
+            Err(e) => {
+                let msg = e.emit_to_string(&composer);
+                panic!("Shader composition error for raygen:\n{msg}");
+            }
+        };
         let raygen_module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: None,
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(raygen_shader_str.as_str())),
+                label: Some("raygen"),
+                source: wgpu::ShaderSource::Naga(Cow::Owned(raygen_naga)),
             });
 
-        let vt_module = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: None,
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                    "../shaders/render.vert.wgsl"
-                ))),
-            });
-
+        let frag_naga = match composer.make_naga_module(NagaModuleDescriptor {
+            source: include_str!("../shaders/render.frag.wgsl"),
+            file_path: "shaders/render.frag.wgsl",
+            ..Default::default()
+        }) {
+            Ok(m) => m,
+            Err(e) => {
+                let msg = e.emit_to_string(&composer);
+                panic!("Shader composition error for fragment:\n{msg}");
+            }
+        };
         let fg_module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: None,
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(frag_shader_str.as_str())),
+                label: Some("fragment"),
+                source: wgpu::ShaderSource::Naga(Cow::Owned(frag_naga)),
+            });
+
+        // These shaders have no imports, pass through as plain WGSL
+        let vt_module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("vertex"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "../shaders/render.vert.wgsl"
+                ))),
             });
 
         let prepare_module = self
@@ -353,7 +374,10 @@ impl<'a> RenginRenderer for RenginWgpu {
         shaders.insert("comp", RenginShaderModule::WgpuShaderModule(cs_module));
         shaders.insert("vert", RenginShaderModule::WgpuShaderModule(vt_module));
         shaders.insert("frag", RenginShaderModule::WgpuShaderModule(fg_module));
-        shaders.insert("prepare", RenginShaderModule::WgpuShaderModule(prepare_module));
+        shaders.insert(
+            "prepare",
+            RenginShaderModule::WgpuShaderModule(prepare_module),
+        );
 
         self.shaders = Some(shaders);
     }
@@ -474,7 +498,9 @@ impl<'a> RenginRenderer for RenginWgpu {
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Shader Stats Buffer"),
                 contents: &vec![0u8; stats_size],
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
             });
         let buf_stats_read = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Shader Stats Read Buffer"),

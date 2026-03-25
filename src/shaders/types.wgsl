@@ -1,23 +1,25 @@
+#define_import_path rengin::types
+
 struct NodeLeaf {
-    point1: vec3<f32>,
-    pad1: u32,
-    point2: vec3<f32>,
-    pad2: u32,
-    point3: vec3<f32>,
-    pad3: u32,
+    vertex_a: vec3<f32>,
+    pad_a: u32,
+    vertex_b: vec3<f32>,
+    pad_b: u32,
+    vertex_c: vec3<f32>,
+    pad_c: u32,
 };
 
 struct Normal {
-    normal1: vec4<f32>,
-    normal2: vec4<f32>,
-    normal3: vec4<f32>,
+    normal_a: vec4<f32>,
+    normal_b: vec4<f32>,
+    normal_c: vec4<f32>,
 };
 
 struct NodeInner {
     first: vec3<f32>,
-    skip_ptr_or_prim_idx1: u32,
+    skip_ptr_or_prim_idx: u32,
     second: vec3<f32>,
-    idx2: u32,
+    prim_end_idx: u32,
 };
 
 

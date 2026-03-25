@@ -1,3 +1,5 @@
+#define_import_path rengin::ubo
+
 struct UBO {
     inverse_camera_transform: mat4x4<f32>,
     half_width_height: vec2<f32>,

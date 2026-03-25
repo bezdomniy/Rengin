@@ -10,7 +10,8 @@ native = ["glam/std"]
 webgl = ["glam/libm"]
 
 [dependencies]
-wgpu = { version = "28.0", features = ["vulkan-portability"] }
+wgpu = { version = "28.0", features = ["vulkan-portability", "naga-ir"] }
+naga_oil = "0.21"
 glam = { version = "0.30", default-features = false, features = ["bytemuck"] }
 winit = "0.30"
 pollster = "0.4"

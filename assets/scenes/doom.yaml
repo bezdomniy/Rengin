@@ -104,9 +104,9 @@
 - add: sphere
   material:
     color: [1, 1, 1]
-    emissiveness: [30, 25, 18]
+    emissiveness: [180, 150, 72]
   transform:
-    - [scale, 3, 3, 3]
+    - [scale, 1, 1, 1]
     - [translate, 20, 25, -15]
 
 # Sky fill light (soft blue from above)

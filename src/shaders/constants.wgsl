@@ -1,3 +1,5 @@
+#define_import_path rengin::constants
+
 const EPSILON:f32 = 0.001;
 const MAXLEN: f32 = 10000.0;
 const INFINITY: f32 = 340282346638528859811704183484516925440.0;
