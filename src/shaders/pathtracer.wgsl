@@ -183,7 +183,9 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
             }
 
             v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
-            let pdf = mis_pdf(s_pdf, v_light_pdf, p_scatter);
+            // PDF floor prevents fireflies from near-zero denominators at
+            // geometry seams and grazing angles where both PDFs vanish.
+            let pdf = max(mis_pdf(s_pdf, v_light_pdf, p_scatter), 0.001);
 
             next_ray.throughput = ray.throughput * ob_params.material.colour * s_pdf / pdf;
 
@@ -224,8 +226,13 @@ fn process_bounce(offset: u32, pixel_pos: vec2<u32>) {
     let ray_color = renderScene(ray, offset, light_sample);
 
     if ray_color.w > -EPSILON {
-        let clamped_color = clamp(ray_color, vec4<f32>(0.0), vec4<f32>(3.0));
-        color = mix(color, clamped_color, scale);
+        // Soft clamp per-sample contribution to suppress fireflies while
+        // preserving more energy than a hard clamp for moderate values.
+        let rc = max(ray_color.xyz, vec3<f32>(0.0));
+        let threshold = 3.0;
+        let compressed = threshold * rc / (vec3<f32>(threshold) + rc);
+        let sample_color = vec4<f32>(compressed, max(ray_color.w, 0.0));
+        color = mix(color, sample_color, scale);
         imageData[img_idx] = color;
     } else if ubo.subpixel_idx == 0u {
         imageData[img_idx] = color;
