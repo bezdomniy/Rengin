@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn load_scene() {
         let scene = Scene::new(
-            "./assets/scenes/test.yaml",
+            "./assets/scenes/cornellbox.yaml",
             &crate::RendererType::PathTracer,
         );
 
