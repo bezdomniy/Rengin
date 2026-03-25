@@ -271,6 +271,15 @@ impl<'a> RenginRenderer for RenginWgpu {
         load_composable(include_str!("../shaders/ubo.wgsl"), "shaders/ubo.wgsl");
         load_composable(include_str!("../shaders/constants.wgsl"), "shaders/constants.wgsl");
         load_composable(include_str!("../shaders/random.wgsl"), "shaders/random.wgsl");
+        load_composable(include_str!("../shaders/fresnel.wgsl"), "shaders/fresnel.wgsl");
+        load_composable(
+            include_str!("../shaders/intersects_math.wgsl"),
+            "shaders/intersects_math.wgsl",
+        );
+        load_composable(
+            include_str!("../shaders/pathtracer_utils.wgsl"),
+            "shaders/pathtracer_utils.wgsl",
+        );
         load_composable(
             include_str!("../shaders/pathtracer_bindings.wgsl"),
             "shaders/pathtracer_bindings.wgsl",

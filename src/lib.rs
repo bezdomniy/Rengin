@@ -1,4 +1,4 @@
-mod engine;
+pub mod engine;
 mod renderer;
 
 use winit::application::ApplicationHandler;
