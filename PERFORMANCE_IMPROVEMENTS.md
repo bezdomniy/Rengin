@@ -8,13 +8,11 @@ Assessment of Rengin pathtracer against pbrt (4th edition) best practices.
 - **Files**: `wgpu_utils.rs`, `pathtracer.wgsl`, `render.frag.wgsl`
 - **Impact**: Enables HDR accumulation without clipping values above 1.0. Required for unbiased RR compensation and correct averaging of high-emissiveness lights.
 
-### 2. Russian Roulette Path Termination
+### 2. Russian Roulette Path Termination — DISABLED
 - **File**: `pathtracer.wgsl`
-- **Formula**: `q = min(0.5, max(0, 1 - MaxComponent(throughput)))` with `depth > 1` guard (implicit: throughput=1.0 on first bounce)
-- **Cap at 0.5**: Required because the MIS one-sample estimator produces extreme throughput values (light-sampled paths get throughput ~0.0001 when `v_light_pdf >> scattering_pdf`). Without the cap, 99.99% of these valuable paths are terminated.
-- **Terminated paths return**: `throughput * RAY_MISS_COLOUR` (properly recorded in running average)
-- **Surviving paths**: throughput scaled by `1/(1-q)` to maintain unbiased estimator
-- **Note**: pbrt has no cap because their BSDF×cos/pdf is typically ≤1. Our MIS weight bakes into throughput, spanning orders of magnitude.
+- **Status**: Disabled. Throughput-based RR kills caustic paths through glass (e.g. Cornell box glass sphere). The MIS one-sample estimator bakes `scattering_pdf / pdf` into throughput, so a single diffuse bounce after a specular chain can produce very low throughput (<<0.25) even though the path is geometrically critical for the caustic. No throughput threshold can distinguish "deep attenuated path" from "low MIS weight after glass."
+- **To re-enable properly**: Track explicit bounce depth (e.g. encode in `ray.pos` or spare bits) and only apply RR after depth >= 3, matching pbrt behaviour. Alternatively, separate path attenuation (beta) from MIS correction factors so RR operates on true attenuation only.
+- **Path termination**: Currently handled by the bounded bounce dispatch loop.
 
 ### 3. World-Space AABB Culling (4x speedup on multi-object scenes)
 - **Files**: `rt_primitives.rs`, `scene_importer.rs`, `types.wgsl`, `intersects.wgsl`
@@ -78,10 +76,10 @@ Assessment of Rengin pathtracer against pbrt (4th edition) best practices.
 ## Architecture Constraints
 
 ### rgba16float Accumulation
-The switch from `rgba8unorm` to `rgba16float` was essential for Russian roulette. With 8-bit storage, values above 1.0 are clipped on `textureStore`, making it impossible for RR's throughput boost to compensate for terminated paths. The `rgba16float` format supports values up to 65504.
+The switch from `rgba8unorm` to `rgba16float` supports HDR values above 1.0 for correct averaging of high-emissiveness lights. Also required if RR is re-enabled (surviving paths get throughput boost above 1.0).
 
 ### MIS Weight in Throughput
-The one-sample MIS estimator bakes `scattering_pdf / pdf` into the throughput. When `v_light_pdf >> scattering_pdf` (small distant light), this produces throughput ~0.0001. pbrt keeps MIS weights separate from path attenuation (beta), which is why their RR formula works without a cap. To remove our cap, we'd need to track path attenuation separately from MIS correction factors.
+The one-sample MIS estimator bakes `scattering_pdf / pdf` into the throughput. When `v_light_pdf >> scattering_pdf` (small distant light), this produces throughput ~0.0001. pbrt keeps MIS weights separate from path attenuation (beta). This conflation is why throughput-based RR doesn't work correctly — it cannot distinguish low attenuation from low MIS weight. To fix, track path attenuation separately from MIS correction factors.
 
 ### Wavefront Bounce Architecture
 Each bounce is a separate compute dispatch with active ray compaction between bounces. Alive rays write to a compact index buffer, and the next bounce dispatches only those rays via indirect dispatch. The shader can't track state across bounces except through the Ray buffer and compaction buffers.

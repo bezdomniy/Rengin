@@ -54,7 +54,7 @@ The renderer uses a fixed bounce count with no Russian roulette termination. Pat
 
 > **PBR Book reference:** Ch. 2.2.4 and Ch. 13.1 — Russian roulette is the standard technique for unbiased path termination.
 
-**Status: FIXED** — Russian roulette implemented with `q = min(0.5, max(0, 1 - MaxComponent(throughput)))`. Dead rays are eliminated via wavefront compaction — alive rays write to a compact index buffer and subsequent bounces use indirect dispatch to process only alive rays.
+**Status: REVERTED** — Russian roulette was implemented but disabled because throughput-based RR kills caustic-contributing paths through glass. The MIS one-sample estimator bakes `scattering_pdf / pdf` into throughput, so low MIS weights after glass refraction trigger RR termination even on geometrically critical paths. Needs explicit bounce depth tracking or separation of path attenuation from MIS weights to re-enable correctly. Wavefront compaction (alive rays write to compact index buffer, indirect dispatch) remains active for natural path termination.
 
 ---
 
@@ -163,7 +163,7 @@ Originally `emissiveness.x > 0.0` — only checks red. A cyan light `(0, 5, 5)` 
 | 1 | **Critical** | RNG never advances | Fixed |
 | 2 | **Critical** | SAH BVH cost bugs | Not fixed (no perf impact observed) |
 | 3 | **Critical** | Sphere intersection missing distance check | Fixed |
-| 4 | Moderate | No Russian roulette | Fixed (RR + wavefront compaction) |
+| 4 | Moderate | No Russian roulette | Reverted (breaks glass caustics; needs bounce depth tracking) |
 | 5 | Moderate | Cube light: volume sampling + sphere PDF | Fixed (area-weighted surface sampling) |
 | 6 | Moderate | Rough specular missing PDF | Fixed (reflective as energy weight) |
 | 7 | Moderate | Double gamma correction | Fixed (linear output + sRGB surface) |

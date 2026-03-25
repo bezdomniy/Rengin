@@ -94,17 +94,10 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
 fn renderScene(in_ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     var ray = in_ray;
 
-    // Russian roulette (pbrt-style): probabilistically terminate low-throughput paths
+    // Russian roulette disabled: throughput alone can't distinguish deep paths from
+    // caustic paths with low MIS weights. Needs explicit bounce depth tracking (TODO).
+    // Path termination is handled by the bounded bounce dispatch loop.
     let max_component = max(ray.throughput.x, max(ray.throughput.y, ray.throughput.z));
-    let rr_q = russian_roulette_q(ray.throughput.xyz);
-    if rr_q >= 0.0 {
-        next_pcg3d();
-        if f32_zero_to_one(rand_pcg3d.z) < rr_q {
-            store_dead_ray(offset);
-            return ray.throughput * RAY_MISS_COLOUR;
-        }
-        ray.throughput = vec4<f32>(russian_roulette_adjust(ray.throughput.xyz, rr_q), ray.throughput.w);
-    }
 
     // Get intersected object ID
     let intersection = intersect(ray, 0u, false);
