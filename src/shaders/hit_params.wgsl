@@ -3,41 +3,22 @@
 #import rengin::types::{ObjectParam, Intersection, Normal, HitParams, Ray}
 #import rengin::constants::EPSILON
 #import rengin::pt_bindings::{object_params, normal_nodes}
+#import rengin::hit_params_math::{normalToWorld_mat, normalAt_params}
 
 fn normalToWorld(normal: vec3<f32>, ob_param: ObjectParam) -> vec3<f32>
 {
-    return normalize((transpose(ob_param.inverse_transform) * vec4<f32>(normal,0.0)).xyz);
+    return normalToWorld_mat(normal, ob_param.inverse_transform);
 }
 
 fn normalAt(p: vec3<f32>, intersection: Intersection, typeEnum: u32) -> vec3<f32> {
     let ob_param = object_params.ObjectParams[intersection.model_id];
-    if (typeEnum == 0u) { //Sphere
-        let objectPoint = (ob_param.inverse_transform * vec4<f32>(p,1.0)).xyz;
-        return normalToWorld(objectPoint,ob_param);
+    if typeEnum <= 2u {
+        // Sphere, Plane, Cube — use the pure math version
+        return normalAt_params(p, typeEnum, ob_param.transform, ob_param.inverse_transform);
     }
-    else if (typeEnum == 1u) { //Plane
-        return normalToWorld(vec3<f32>(0.0, 1.0, 0.0),ob_param);
-    }
-    else if (typeEnum == 2u) { //Cube
-        let objectPoint = (ob_param.inverse_transform * vec4<f32>(p,1.0)).xyz;
-        let p1 = abs(objectPoint.x);
-        let p2 = abs(objectPoint.y);
-        let p3 = abs(objectPoint.z);
-        var objectNormal = normalize(vec3<f32>(objectPoint.x, 0.0, 0.0));
-
-        if (p2 > p1 && p2 > p3) {
-            objectNormal = normalize(vec3<f32>(0.0, objectPoint.y, 0.0));
-        }
-        else if (p3 > p1 && p3 > p2) {
-            objectNormal = normalize(vec3<f32>(0.0, 0.0,objectPoint.z));
-        }
-
-        return normalToWorld(objectNormal,ob_param);
-    }
-    else { //Model
+    else { //Model — requires buffer access for per-vertex normals
         let normal: Normal = normal_nodes.Normals[intersection.id];
         return normalToWorld((normal.normal_b.xyz * intersection.uv.x + normal.normal_c.xyz * intersection.uv.y + normal.normal_a.xyz * (1.0 - intersection.uv.x - intersection.uv.y)),ob_param);
-        // n.w = 0.0;
     }
     return vec3<f32>(0.0);
 }
@@ -71,4 +52,3 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
 
     return hitParams;
 }
-

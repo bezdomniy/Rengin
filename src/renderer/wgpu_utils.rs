@@ -281,10 +281,18 @@ impl<'a> RenginRenderer for RenginWgpu {
             "shaders/pathtracer_utils.wgsl",
         );
         load_composable(
+            include_str!("../shaders/pathtracer_math.wgsl"),
+            "shaders/pathtracer_math.wgsl",
+        );
+        load_composable(
             include_str!("../shaders/pathtracer_bindings.wgsl"),
             "shaders/pathtracer_bindings.wgsl",
         );
         load_composable(include_str!("../shaders/stats.wgsl"), "shaders/stats.wgsl");
+        load_composable(
+            include_str!("../shaders/hit_params_math.wgsl"),
+            "shaders/hit_params_math.wgsl",
+        );
         load_composable(include_str!("../shaders/hit_params.wgsl"), "shaders/hit_params.wgsl");
         load_composable(include_str!("../shaders/intersects.wgsl"), "shaders/intersects.wgsl");
 

@@ -6,10 +6,14 @@ use naga_oil::compose::{ComposableModuleDescriptor, Composer, NagaModuleDescript
 use wgpu::naga;
 
 mod test_fresnel;
+mod test_hit_params;
 mod test_intersections;
+mod test_light_sampling;
 mod test_pathtracer_utils;
 mod test_prepare_dispatch;
 mod test_random;
+mod test_refraction;
+mod test_render_correctness;
 
 // ---------------------------------------------------------------------------
 // GPU test context -- headless wgpu device
@@ -91,6 +95,8 @@ impl ShaderCompiler {
         load!(composer, include_str!("../../src/shaders/fresnel.wgsl"), "shaders/fresnel.wgsl");
         load!(composer, include_str!("../../src/shaders/intersects_math.wgsl"), "shaders/intersects_math.wgsl");
         load!(composer, include_str!("../../src/shaders/pathtracer_utils.wgsl"), "shaders/pathtracer_utils.wgsl");
+        load!(composer, include_str!("../../src/shaders/pathtracer_math.wgsl"), "shaders/pathtracer_math.wgsl");
+        load!(composer, include_str!("../../src/shaders/hit_params_math.wgsl"), "shaders/hit_params_math.wgsl");
 
         Self { composer }
     }
