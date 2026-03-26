@@ -1,6 +1,6 @@
 use super::{require_gpu, BufferSpec, dispatch_and_readback};
 
-fn run_prepare_dispatch(ctx: &super::GpuTestContext, ray_counts: [u32; 2]) -> ([u32; 3], [u32; 2]) {
+fn run_prepare_dispatch(ctx: &super::GpuTestContext, ray_counts: [u32; 3]) -> ([u32; 3], [u32; 3]) {
     let module = ctx
         .device
         .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -35,46 +35,55 @@ fn run_prepare_dispatch(ctx: &super::GpuTestContext, ray_counts: [u32; 2]) -> ([
 
     (
         [out_indirect_args[0], out_indirect_args[1], out_indirect_args[2]],
-        [out_ray_counts[0], out_ray_counts[1]],
+        [out_ray_counts[0], out_ray_counts[1], out_ray_counts[2]],
     )
 }
 
 #[test]
 fn prepare_dispatch_256_alive() {
     require_gpu!(ctx);
-    let (args, counts) = run_prepare_dispatch(&ctx, [0, 256]);
+    let (args, counts) = run_prepare_dispatch(&ctx, [0, 256, 0]);
     assert_eq!(args, [1, 1, 1]);
-    assert_eq!(counts, [256, 0]);
+    assert_eq!(counts, [256, 0, 1]); // bounce_depth incremented from 0 to 1
 }
 
 #[test]
 fn prepare_dispatch_257_alive() {
     require_gpu!(ctx);
-    let (args, counts) = run_prepare_dispatch(&ctx, [0, 257]);
+    let (args, counts) = run_prepare_dispatch(&ctx, [0, 257, 0]);
     assert_eq!(args, [2, 1, 1]);
-    assert_eq!(counts, [257, 0]);
+    assert_eq!(counts, [257, 0, 1]);
 }
 
 #[test]
 fn prepare_dispatch_0_alive() {
     require_gpu!(ctx);
-    let (args, counts) = run_prepare_dispatch(&ctx, [0, 0]);
+    let (args, counts) = run_prepare_dispatch(&ctx, [0, 0, 0]);
     assert_eq!(args, [0, 1, 1]);
-    assert_eq!(counts, [0, 0]);
+    assert_eq!(counts, [0, 0, 1]);
 }
 
 #[test]
 fn prepare_dispatch_1_alive() {
     require_gpu!(ctx);
-    let (args, counts) = run_prepare_dispatch(&ctx, [0, 1]);
+    let (args, counts) = run_prepare_dispatch(&ctx, [0, 1, 0]);
     assert_eq!(args, [1, 1, 1]);
-    assert_eq!(counts, [1, 0]);
+    assert_eq!(counts, [1, 0, 1]);
 }
 
 #[test]
 fn prepare_dispatch_512_alive() {
     require_gpu!(ctx);
-    let (args, counts) = run_prepare_dispatch(&ctx, [0, 512]);
+    let (args, counts) = run_prepare_dispatch(&ctx, [0, 512, 0]);
     assert_eq!(args, [2, 1, 1]);
-    assert_eq!(counts, [512, 0]);
+    assert_eq!(counts, [512, 0, 1]);
+}
+
+#[test]
+fn prepare_dispatch_bounce_depth_increments() {
+    require_gpu!(ctx);
+    // Simulate bounce 5 (bounce_depth was 4, should become 5)
+    let (args, counts) = run_prepare_dispatch(&ctx, [100, 80, 4]);
+    assert_eq!(args, [1, 1, 1]);
+    assert_eq!(counts, [80, 0, 5]);
 }

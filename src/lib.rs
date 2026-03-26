@@ -274,11 +274,11 @@ impl RenderApp {
         let mut command_encoder = command_encoder;
         // === DEFAULT MODE: wavefront path tracing with dead ray elimination ===
 
-        // Initialize ray_counts: [0, 0] (will be populated by first bounce)
+        // Initialize ray_counts: [0, 0, 0] (will be populated by first bounce)
         state.renderer.queue.write_buffer(
             state.renderer.buffers.as_ref().unwrap().get("ray_counts").unwrap(),
             0,
-            bytemuck::cast_slice(&[0u32, 0u32]),
+            bytemuck::cast_slice(&[0u32, 0u32, 0u32]),
         );
 
         // 1. Raygen

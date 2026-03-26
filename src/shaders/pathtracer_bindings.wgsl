@@ -37,7 +37,7 @@ var<storage, read_write> active_rays_out: array<u32>;
 @group(0) @binding(9)
 var<storage, read_write> ray_counts: array<atomic<u32>>;
 #endif
-// ray_counts[0] = input count, ray_counts[1] = output count
+// ray_counts[0] = input count, ray_counts[1] = output count, ray_counts[2] = bounce depth
 
 fn load_ray(offset: u32) -> Ray {
     let base = offset * 3u;

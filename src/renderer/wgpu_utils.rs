@@ -490,12 +490,12 @@ impl<'a> RenginRenderer for RenginWgpu {
                 contents: &vec![0u8; active_buf_size],
                 usage: wgpu::BufferUsages::STORAGE,
             });
-        // ray_counts: [input_count, output_count] as atomic u32
+        // ray_counts: [input_count, output_count, bounce_depth] as atomic u32
         let buf_ray_counts = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Ray Counts"),
-                contents: bytemuck::cast_slice(&[0u32; 2]),
+                contents: bytemuck::cast_slice(&[0u32; 3]),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
         // Indirect dispatch args: [workgroups_x, 1, 1]

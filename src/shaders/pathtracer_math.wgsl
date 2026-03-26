@@ -18,9 +18,20 @@ fn scattering_pdf(direction: vec3<f32>, normal: vec3<f32>) -> f32 {
     return max(0.0, dot(direction, normal) / PI);
 }
 
-/// One-sample MIS mixture PDF (pbrt 13.10.1, balance heuristic).
-fn mis_pdf(scatter_pdf: f32, light_pdf_val: f32, p_scatter: f32) -> f32 {
+/// One-sample MIS balance heuristic (pbrt 13.10.1).
+fn mis_pdf_balance(scatter_pdf: f32, light_pdf_val: f32, p_scatter: f32) -> f32 {
     return p_scatter * scatter_pdf + (1.0 - p_scatter) * light_pdf_val;
+}
+
+/// One-sample MIS power heuristic β=2 (pbrt 13.10.1).
+fn mis_pdf(scatter_pdf: f32, light_pdf_val: f32, p_scatter: f32) -> f32 {
+    let ps = p_scatter * scatter_pdf;
+    let pl = (1.0 - p_scatter) * light_pdf_val;
+    let sum = ps + pl;
+    if sum < 1e-10 {
+        return 0.0;
+    }
+    return (ps * ps + pl * pl) / sum;
 }
 
 /// Snell's law refraction direction (pbrt 9.3).

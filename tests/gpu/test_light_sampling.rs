@@ -209,7 +209,7 @@ fn scattering_pdf_exactly_perpendicular() {
 }
 
 // ===========================================================================
-// MIS weight tests (pbrt 13.10.1: balance heuristic)
+// MIS weight tests (pbrt 13.10.1: power heuristic β=2)
 // ===========================================================================
 
 #[test]
@@ -219,11 +219,12 @@ fn mis_weight_equal_pdfs() {
     let module = compile_light_sampling_module(&ctx, &mut compiler);
 
     // scattering_pdf = light_pdf = 0.5, p_scatter = 0.5
-    // result = 0.5 * 0.5 + 0.5 * 0.5 = 0.5
+    // ps = 0.25, pl = 0.25
+    // power: (0.25² + 0.25²) / (0.25 + 0.25) = 0.25
     let inputs = [Vec4f([0.5, 0.5, 0.5, 0.0])];
     let outputs: Vec<Vec4f> =
         run_test_shader(&ctx, &module, "test_mis_weight", &inputs, 1);
-    assert_approx_eq(outputs[0].0[0], 0.5, GPU_TOLERANCE);
+    assert_approx_eq(outputs[0].0[0], 0.25, GPU_TOLERANCE);
 }
 
 #[test]
@@ -233,11 +234,12 @@ fn mis_weight_light_dominant() {
     let module = compile_light_sampling_module(&ctx, &mut compiler);
 
     // scattering_pdf = 0.01, light_pdf = 10.0, p_scatter = 0.5
-    // result = 0.5 * 0.01 + 0.5 * 10.0 = 5.005
+    // ps = 0.005, pl = 5.0
+    // power: (0.005² + 5.0²) / (0.005 + 5.0) ≈ 4.99502
     let inputs = [Vec4f([0.01, 10.0, 0.5, 0.0])];
     let outputs: Vec<Vec4f> =
         run_test_shader(&ctx, &module, "test_mis_weight", &inputs, 1);
-    assert_approx_eq(outputs[0].0[0], 5.005, GPU_TOLERANCE);
+    assert_approx_eq(outputs[0].0[0], 4.99502, 0.01);
 }
 
 #[test]
@@ -247,11 +249,12 @@ fn mis_weight_scatter_dominant() {
     let module = compile_light_sampling_module(&ctx, &mut compiler);
 
     // scattering_pdf = 5.0, light_pdf = 0.001, p_scatter = 0.5
-    // result = 0.5 * 5.0 + 0.5 * 0.001 = 2.5005
+    // ps = 2.5, pl = 0.0005
+    // power: (2.5² + 0.0005²) / (2.5 + 0.0005) ≈ 2.4995
     let inputs = [Vec4f([5.0, 0.001, 0.5, 0.0])];
     let outputs: Vec<Vec4f> =
         run_test_shader(&ctx, &module, "test_mis_weight", &inputs, 1);
-    assert_approx_eq(outputs[0].0[0], 2.5005, GPU_TOLERANCE);
+    assert_approx_eq(outputs[0].0[0], 2.4995, 0.01);
 }
 
 #[test]

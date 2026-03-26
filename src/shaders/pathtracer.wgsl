@@ -91,13 +91,25 @@ fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
     return 1.0;
 }
 
-fn renderScene(in_ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
+fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) -> vec4<f32> {
     var ray = in_ray;
 
-    // Russian roulette disabled: throughput alone can't distinguish deep paths from
-    // caustic paths with low MIS weights. Needs explicit bounce depth tracking (TODO).
-    // Path termination is handled by the bounded bounce dispatch loop.
     let max_component = max(ray.throughput.x, max(ray.throughput.y, ray.throughput.z));
+
+    // Russian roulette: after 3 bounces, stochastically terminate low-contribution
+    // paths and boost survivors to maintain unbiased results. Uses explicit bounce
+    // depth (not throughput alone) to avoid killing caustic paths with low MIS weights.
+    if bounce_depth >= 3u {
+        let q = russian_roulette_q(ray.throughput.xyz);
+        if q > 0.0 {
+            next_pcg3d();
+            if f32_zero_to_one(rand_pcg3d.x) < q {
+                store_dead_ray(offset);
+                return ray.throughput * RAY_MISS_COLOUR;
+            }
+            ray.throughput = vec4<f32>(russian_roulette_adjust(ray.throughput.xyz, q), ray.throughput.w);
+        }
+    }
 
     // Get intersected object ID
     let intersection = intersect(ray, 0u, false);
@@ -223,7 +235,8 @@ fn process_bounce(offset: u32, pixel_pos: vec2<u32>) {
 
     init_pcg3d(vec3<u32>(bitcast<u32>(ray.rayD.x), bitcast<u32>(ray.rayD.y), bitcast<u32>(ray.rayD.z)));
 
-    let ray_color = renderScene(ray, offset, light_sample);
+    let bounce_depth = atomicLoad(&ray_counts[2]);
+    let ray_color = renderScene(ray, offset, light_sample, bounce_depth);
 
     if ray_color.w > -EPSILON {
         // Soft clamp per-sample contribution to suppress fireflies while

@@ -20,4 +20,7 @@ fn main() {
     // Swap: next bounce reads what this bounce wrote
     atomicStore(&ray_counts[0], alive);
     atomicStore(&ray_counts[1], 0u);
+
+    // Increment bounce depth counter
+    atomicStore(&ray_counts[2], atomicLoad(&ray_counts[2]) + 1u);
 }
