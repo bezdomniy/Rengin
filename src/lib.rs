@@ -120,7 +120,6 @@ impl State {
             scene.lights_offset as u32,
             ray_bounces,
             initial_size,
-            resolution,
             scene.camera.as_ref().unwrap().field_of_view,
             (renderer.rays_per_pixel as f32).sqrt() as u32,
         );
@@ -290,8 +289,8 @@ impl RenderApp {
             cpass.set_pipeline(state.renderer.raygen_pipeline.as_ref().unwrap());
             cpass.set_bind_group(0, state.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
             cpass.dispatch_workgroups(
-                state.screen_data.size.width / WORKGROUP_SIZE[0],
-                state.screen_data.size.height / WORKGROUP_SIZE[1],
+                state.screen_data.size.width.div_ceil(WORKGROUP_SIZE[0]),
+                state.screen_data.size.height.div_ceil(WORKGROUP_SIZE[1]),
                 WORKGROUP_SIZE[2],
             );
         }
@@ -305,8 +304,8 @@ impl RenderApp {
             cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
             cpass.set_bind_group(0, state.renderer.compute_bind_group.as_ref().unwrap(), &[]);
             cpass.dispatch_workgroups(
-                state.screen_data.size.width / WORKGROUP_SIZE[0],
-                state.screen_data.size.height / WORKGROUP_SIZE[1],
+                state.screen_data.size.width.div_ceil(WORKGROUP_SIZE[0]),
+                state.screen_data.size.height.div_ceil(WORKGROUP_SIZE[1]),
                 WORKGROUP_SIZE[2],
             );
         }
@@ -478,9 +477,11 @@ impl ApplicationHandler for RenderApp {
 
         match event {
             WindowEvent::Resized(size) => {
-                state.screen_data.update_dims(&size);
-                state.screen_data.subpixel_idx = 0;
-                state.renderer.update_window_size(&size);
+                if size.width > 0 && size.height > 0 {
+                    state.screen_data.update_dims(&size);
+                    state.screen_data.subpixel_idx = 0;
+                    state.renderer.update_window_size(&size);
+                }
             }
             WindowEvent::KeyboardInput {
                 event:
@@ -574,6 +575,17 @@ impl ApplicationHandler for RenderApp {
                 #[cfg(not(target_arch = "wasm32"))]
                 if state.renderer.profile {
                     // === PROFILED MODE: separate passes with GPU timestamps ===
+                    state.renderer.queue.write_buffer(
+                        state
+                            .renderer
+                            .buffers
+                            .as_ref()
+                            .unwrap()
+                            .get("ray_counts")
+                            .unwrap(),
+                        0,
+                        bytemuck::cast_slice(&[0u32, 0u32, 0u32]),
+                    );
                     let mut query_idx: u32 = 0;
                     let qs = state.renderer.timestamp_query_set.as_ref().unwrap();
 
@@ -590,15 +602,35 @@ impl ApplicationHandler for RenderApp {
                         cpass.set_pipeline(state.renderer.raygen_pipeline.as_ref().unwrap());
                         cpass.set_bind_group(0, state.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
                         cpass.dispatch_workgroups(
-                            state.screen_data.size.width / WORKGROUP_SIZE[0],
-                            state.screen_data.size.height / WORKGROUP_SIZE[1],
+                            state.screen_data.size.width.div_ceil(WORKGROUP_SIZE[0]),
+                            state.screen_data.size.height.div_ceil(WORKGROUP_SIZE[1]),
                             WORKGROUP_SIZE[2],
                         );
                     }
                     query_idx += 2;
 
-                    // 2. Each bounce in its own pass for per-bounce timing
-                    for _bounce in 0..state.renderer.ray_bounces {
+                    // 2. Bounce 0 covers the full image. Later bounces use the
+                    // same compacted indirect dispatch path as normal rendering,
+                    // including bounce-depth updates for Russian roulette.
+                    for bounce in 0..state.renderer.ray_bounces {
+                        if bounce > 0 {
+                            let mut cpass = command_encoder.begin_compute_pass(
+                                &wgpu::ComputePassDescriptor {
+                                    label: Some("prepare profiled dispatch"),
+                                    timestamp_writes: None,
+                                },
+                            );
+                            cpass.set_pipeline(
+                                state.renderer.prepare_dispatch_pipeline.as_ref().unwrap(),
+                            );
+                            cpass.set_bind_group(
+                                0,
+                                state.renderer.prepare_bind_group.as_ref().unwrap(),
+                                &[],
+                            );
+                            cpass.dispatch_workgroups(1, 1, 1);
+                        }
+
                         let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                             label: Some("pathtracer bounce"),
                             timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
@@ -607,13 +639,35 @@ impl ApplicationHandler for RenderApp {
                                 end_of_pass_write_index: Some(query_idx + 1),
                             }),
                         });
-                        cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
-                        cpass.set_bind_group(0, state.renderer.compute_bind_group.as_ref().unwrap(), &[]);
-                        cpass.dispatch_workgroups(
-                            state.screen_data.size.width / WORKGROUP_SIZE[0],
-                            state.screen_data.size.height / WORKGROUP_SIZE[1],
-                            WORKGROUP_SIZE[2],
-                        );
+                        if bounce == 0 {
+                            cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
+                            cpass.set_bind_group(0, state.renderer.compute_bind_group.as_ref().unwrap(), &[]);
+                            cpass.dispatch_workgroups(
+                                state.screen_data.size.width.div_ceil(WORKGROUP_SIZE[0]),
+                                state.screen_data.size.height.div_ceil(WORKGROUP_SIZE[1]),
+                                WORKGROUP_SIZE[2],
+                            );
+                        } else {
+                            let bg = if bounce % 2 == 1 {
+                                state.renderer.compute_bind_group_b.as_ref().unwrap()
+                            } else {
+                                state.renderer.compute_bind_group.as_ref().unwrap()
+                            };
+                            cpass.set_pipeline(
+                                state.renderer.compute_compact_pipeline.as_ref().unwrap(),
+                            );
+                            cpass.set_bind_group(0, bg, &[]);
+                            cpass.dispatch_workgroups_indirect(
+                                state
+                                    .renderer
+                                    .buffers
+                                    .as_ref()
+                                    .unwrap()
+                                    .get("indirect_dispatch")
+                                    .unwrap(),
+                                0,
+                            );
+                        }
                         query_idx += 2;
                     }
 

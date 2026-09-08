@@ -45,6 +45,13 @@ fn test_schlick_full(@builtin(global_invocation_id) id: vec3<u32>) {
     outputs_4f[id.x] = vec4<f32>(fresnel::schlick(inp.x, inp.y, inp.z), 0.0, 0.0, 0.0);
 }
 
+// Exact dielectric Fresnel: inputs_4f[i] = (cos_i, eta_i, eta_t, _)
+@compute @workgroup_size(1)
+fn test_fresnel_dielectric(@builtin(global_invocation_id) id: vec3<u32>) {
+    let inp = inputs_4f[id.x];
+    outputs_4f[id.x] = vec4<f32>(fresnel::fresnel_dielectric(inp.x, inp.y, inp.z), 0.0, 0.0, 0.0);
+}
+
 // schlick_lazanyi: inputs_4f[i] = (cos_i, eta_t, k, _)
 @compute @workgroup_size(1)
 fn test_schlick_lazanyi(@builtin(global_invocation_id) id: vec3<u32>) {

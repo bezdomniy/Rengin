@@ -1,5 +1,5 @@
 #import rengin::random::{init_pcg3d, next_pcg3d, rand_pcg3d, f32_zero_to_one, random_to_sphere}
-#import rengin::pathtracer_math::{light_pdf_sphere, scattering_pdf, mis_pdf}
+#import rengin::pathtracer_math::{light_pdf_sphere, light_pdf_sphere_direction, scattering_pdf, mis_pdf}
 
 @group(0) @binding(0) var<storage, read> inputs_4f: array<vec4<f32>>;
 @group(0) @binding(1) var<storage, read_write> outputs_4f: array<vec4<f32>>;
@@ -9,6 +9,14 @@
 fn test_light_pdf_sphere(@builtin(global_invocation_id) id: vec3<u32>) {
     let inp = inputs_4f[id.x];
     let pdf = light_pdf_sphere(inp.x, inp.y);
+    outputs_4f[id.x] = vec4<f32>(pdf, 0.0, 0.0, 0.0);
+}
+
+// Directional bounding-sphere PDF: input = (radius, distance, cos_theta, _)
+@compute @workgroup_size(1)
+fn test_light_pdf_sphere_direction(@builtin(global_invocation_id) id: vec3<u32>) {
+    let inp = inputs_4f[id.x];
+    let pdf = light_pdf_sphere_direction(inp.x, inp.y, inp.z);
     outputs_4f[id.x] = vec4<f32>(pdf, 0.0, 0.0, 0.0);
 }
 

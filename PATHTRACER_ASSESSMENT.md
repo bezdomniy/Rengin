@@ -54,7 +54,7 @@ The renderer uses a fixed bounce count with no Russian roulette termination. Pat
 
 > **PBR Book reference:** Ch. 2.2.4 and Ch. 13.1 — Russian roulette is the standard technique for unbiased path termination.
 
-**Status: REVERTED** — Russian roulette was implemented but disabled because throughput-based RR kills caustic-contributing paths through glass. The MIS one-sample estimator bakes `scattering_pdf / pdf` into throughput, so low MIS weights after glass refraction trigger RR termination even on geometrically critical paths. Needs explicit bounce depth tracking or separation of path attenuation from MIS weights to re-enable correctly. Wavefront compaction (alive rays write to compact index buffer, indirect dispatch) remains active for natural path termination.
+**Status: FIXED** — Russian roulette starts after three explicit bounce-depth increments and compensates surviving paths by their survival probability. Wavefront compaction removes terminated paths from subsequent dispatches.
 
 ---
 
@@ -64,7 +64,7 @@ The renderer uses a fixed bounce count with no Russian roulette termination. Pat
 
 Originally cube lights sampled random points in the volume `[-1,1]³` and used a copy-pasted sphere PDF.
 
-**Status: FIXED** — Cube light sampling now uses area-weighted surface sampling (faces selected proportional to their world-space area). PDF uses bounding sphere solid angle approximation for numerical stability. The area-to-solid-angle Jacobian (`dist²/cos θ/area`) was attempted but produces fireflies at grazing angles on thin cubes; PBRT solves this with spherical rectangle sampling (Ureña 2013) which avoids the cos θ singularity entirely.
+**Status: FIXED** — Cube lights now sample their six faces in proportion to world-space area. Their directional PDF applies the area-to-solid-angle Jacobian and sums the entry- and exit-face mappings, since either surface point can generate the same direction. Sphere lights use a matching bounding-sphere cone proposal and evaluate its PDF across the proposal's full support; points inside the sphere use a uniform-sphere proposal.
 
 ---
 
@@ -84,7 +84,7 @@ Rough specular surfaces (0 < reflective < 1) perturb the reflection direction bu
 
 The fragment shader applied `sqrt()` then `to_linear_rgb()` — two gamma corrections that approximately cancelled with precision loss. The surface format is `Bgra8UnormSrgb`, meaning the hardware applies sRGB gamma automatically.
 
-**Status: FIXED** — Removed both `sqrt()` and `to_linear_rgb()`. Fragment shader now outputs linear values with a clamp, and the sRGB surface handles gamma. Added per-sample clamp to 3.0 to suppress fireflies that were previously hidden by the sqrt compression.
+**Status: FIXED** — Removed both `sqrt()` and `to_linear_rgb()`. The path tracer accumulates linear HDR radiance, then the fragment shader applies Reinhard tone mapping. An sRGB surface format is selected when available so the hardware performs the display transfer function. Camera-visible emitters and specular-only paths retain their full HDR range; paths containing a diffuse event use a chromaticity-preserving peak limit of 3 to keep rare specular-diffuse caustics from overwhelming progressive previews. This targeted variance regularization is deliberately biased, but is substantially less destructive than the former nonlinear compression of every sample.
 
 ---
 
@@ -96,7 +96,7 @@ The original code had two bugs:
 - **Wrong n_ratio on back face:** `eta_t = material_RI / ray_RI` gave `n_ratio = ray_RI² / material_RI` instead of `ray_RI / 1.0`
 - **Outgoing ray RI always set to material RI:** When exiting glass, ray should enter air (RI=1.0)
 
-**Status: PARTIALLY FIXED** — Implemented heuristic: if `ray.RI > 1.0` on back face, exit to air (`eta_t = 1.0`); otherwise enter the material. Reflection preserves the current medium RI. Single-layer glass and high-RI materials (diamond) work correctly. Hollow glass spheres (nested dielectrics) have a known limitation at the inner sphere's back face — without a media stack, the renderer can't determine the outer medium.
+**Status: PARTIALLY FIXED** — Implemented heuristic: if `ray.RI > 1.0` on back face, exit to air (`eta_t = 1.0`); otherwise enter the material. Reflection preserves the current medium RI, and exact dielectric Fresnel uses both the tracked incident and transmitted indices. Single-layer glass and high-RI materials (diamond) work correctly. Hollow glass spheres still need a media stack to recover the enclosing medium at every boundary.
 
 Unit tests in `src/engine/refraction.rs` document both working cases and the known limitation.
 
@@ -163,11 +163,11 @@ Originally `emissiveness.x > 0.0` — only checks red. A cyan light `(0, 5, 5)` 
 | 1 | **Critical** | RNG never advances | Fixed |
 | 2 | **Critical** | SAH BVH cost bugs | Not fixed (no perf impact observed) |
 | 3 | **Critical** | Sphere intersection missing distance check | Fixed |
-| 4 | Moderate | No Russian roulette | Reverted (breaks glass caustics; needs bounce depth tracking) |
-| 5 | Moderate | Cube light: volume sampling + sphere PDF | Fixed (area-weighted surface sampling) |
+| 4 | Moderate | No Russian roulette | Fixed (explicit bounce depth + compensated survival) |
+| 5 | Moderate | Cube light: volume sampling + mismatched PDF | Fixed (area-weighted surface sampling + solid-angle PDF) |
 | 6 | Moderate | Rough specular missing PDF | Fixed (reflective as energy weight) |
-| 7 | Moderate | Double gamma correction | Fixed (linear output + sRGB surface) |
-| 8 | Moderate | Nested dielectrics broken | Partially fixed (heuristic, single-layer works) |
+| 7 | Moderate | Double gamma correction | Fixed (linear accumulation + targeted indirect clamp + Reinhard + sRGB) |
+| 8 | Moderate | Nested dielectrics broken | Partially fixed (medium-aware Fresnel; media stack still needed) |
 | — | Moderate | Camera move smearing | Fixed (clear texture on first sample) |
 | 9 | Minor | Degenerate triangle guard | Not an issue (GPU handles via IEEE 754) |
 | 10 | Minor | No TLAS | Partially fixed (world-space AABB culling) |

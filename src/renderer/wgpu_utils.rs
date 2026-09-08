@@ -149,9 +149,15 @@ impl RenginWgpu {
 
         let surface_caps = window_surface.get_capabilities(&adapter);
 
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|format| format.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_caps.formats[0],
+            format: surface_format,
             alpha_mode: surface_caps.alpha_modes[0],
             present_mode: wgpu::PresentMode::Fifo,
             width,
@@ -236,6 +242,9 @@ impl RenginWgpu {
 
 impl<'a> RenginRenderer for RenginWgpu {
     fn update_window_size(&mut self, physical_size: &PhysicalSize<u32>) {
+        if physical_size.width == 0 || physical_size.height == 0 {
+            return;
+        }
         // self.physical_size = winit::dpi::PhysicalSize::new(width, height);
         // self.logical_size = self.physical_size.to_logical(self.scale_factor);
 
@@ -244,13 +253,39 @@ impl<'a> RenginRenderer for RenginWgpu {
 
         self.surface.configure(&self.device, &self.config);
 
+        // All per-pixel buffers must track the current render extent. Rebinding
+        // only the accumulation target leaves ray and compaction buffers stale.
+        let pixel_count = u64::from(physical_size.width) * u64::from(physical_size.height);
+        let ray_data = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Ray Data Buffer"),
+            size: pixel_count * 3 * mem::size_of::<glam::Vec4>() as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let active_a = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Active Rays A"),
+            size: pixel_count * mem::size_of::<u32>() as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let active_b = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Active Rays B"),
+            size: pixel_count * mem::size_of::<u32>() as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let buffers = self.buffers.as_mut().unwrap();
+        buffers.insert("ray_data", ray_data);
+        buffers.insert("active_rays_a", active_a);
+        buffers.insert("active_rays_b", active_b);
+
         self.create_bind_groups(physical_size);
     }
 
     fn create_target_textures(&mut self, physical_size: &PhysicalSize<u32>) {
         // Use a storage buffer instead of a storage texture for image accumulation.
         // Storage buffers support read_write on all platforms including WebGPU.
-        let pixel_count = (physical_size.width * physical_size.height) as u64;
+        let pixel_count = u64::from(physical_size.width) * u64::from(physical_size.height);
         let buffer_size = pixel_count * 16; // vec4<f32> = 16 bytes per pixel
         self.compute_target_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("image accumulation buffer"),
@@ -461,8 +496,8 @@ impl<'a> RenginRenderer for RenginWgpu {
 
         // SOA ray buffers: 3 separate vec4<f32> arrays for coalesced GPU access
         // Interleaved ray buffer: 3 vec4<f32> per ray (origin, direction, throughput)
-        let ray_buf_size = (screen_data.resolution.width * screen_data.resolution.height)
-            as usize
+        let ray_buf_size = screen_data.size.width as usize
+            * screen_data.size.height as usize
             * mem::size_of::<glam::Vec4>()
             * 3;
         let buf_ray_data = self
@@ -474,7 +509,7 @@ impl<'a> RenginRenderer for RenginWgpu {
             });
 
         // Active ray compaction buffers (ping-pong A/B)
-        let total_pixels = (screen_data.resolution.width * screen_data.resolution.height) as usize;
+        let total_pixels = screen_data.size.width as usize * screen_data.size.height as usize;
         let active_buf_size = total_pixels * mem::size_of::<u32>();
         let buf_active_rays_a = self
             .device

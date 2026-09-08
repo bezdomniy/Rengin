@@ -69,10 +69,7 @@ fn white_furnace_no_mis_throughput_is_one() {
 
 /// White furnace with MIS: the average throughput factor over many samples
 /// should be stable for a white surface in uniform lighting.
-/// With the power heuristic (β=2), the single-strategy throughput factor
-/// scattering_pdf / power_mis_pdf is higher than 1.0 because the power
-/// heuristic upweights the dominant strategy. The full two-strategy estimator
-/// remains unbiased, but each strategy's individual contribution shifts.
+/// A one-sample mixture estimator must preserve unit energy on average.
 #[test]
 fn white_furnace_mis_average_throughput() {
     require_gpu!(ctx);
@@ -98,12 +95,11 @@ fn white_furnace_mis_average_throughput() {
     let mean_g: f64 = outputs.iter().map(|v| v.0[1] as f64).sum::<f64>() / n as f64;
     let mean_b: f64 = outputs.iter().map(|v| v.0[2] as f64).sum::<f64>() / n as f64;
 
-    // Power heuristic single-strategy mean is ~2.08 (cosine-weighted samples
-    // get boosted because power heuristic concentrates weight on the dominant
-    // PDF). Check it's stable and channels are consistent.
+    // A white Lambertian surface in a white furnace must neither gain nor lose
+    // energy when the proposal is a cosine/uniform-hemisphere mixture.
     assert!(
-        mean_r > 1.0 && mean_r < 3.0,
-        "White furnace MIS: E[R] = {mean_r}, expected in [1.0, 3.0]"
+        (mean_r - 1.0).abs() < 0.03,
+        "White furnace MIS: E[R] = {mean_r}, expected approximately 1.0"
     );
     assert!(
         (mean_r - mean_g).abs() < 0.05,
@@ -537,11 +533,11 @@ fn progressive_average_matches_arithmetic_mean() {
 }
 
 // ===========================================================================
-// FIREFLY CLAMPING TESTS
+// HDR SAMPLE PRESERVATION TESTS
 // ===========================================================================
 
 #[test]
-fn firefly_clamp_normal_values() {
+fn sample_radiance_preserves_normal_values() {
     require_gpu!(ctx);
     let mut compiler = ShaderCompiler::new();
     let module = compile_render_correctness_module(&ctx, &mut compiler);
@@ -549,29 +545,29 @@ fn firefly_clamp_normal_values() {
     // Values in [0, 3]: unchanged
     let inputs = [Vec4f([0.5, 1.0, 2.5, 0.0])];
     let outputs: Vec<Vec4f> =
-        run_test_shader(&ctx, &module, "test_firefly_clamp", &inputs, 1);
+        run_test_shader(&ctx, &module, "test_sample_radiance", &inputs, 1);
     assert_approx_eq(outputs[0].0[0], 0.5, GPU_TOLERANCE);
     assert_approx_eq(outputs[0].0[1], 1.0, GPU_TOLERANCE);
     assert_approx_eq(outputs[0].0[2], 2.5, GPU_TOLERANCE);
 }
 
 #[test]
-fn firefly_clamp_bright_values() {
+fn sample_radiance_preserves_bright_values() {
     require_gpu!(ctx);
     let mut compiler = ShaderCompiler::new();
     let module = compile_render_correctness_module(&ctx, &mut compiler);
 
-    // Values > 3.0 should be clamped
+    // HDR values must survive accumulation unchanged.
     let inputs = [Vec4f([10.0, 100.0, 3.001, 0.0])];
     let outputs: Vec<Vec4f> =
-        run_test_shader(&ctx, &module, "test_firefly_clamp", &inputs, 1);
-    assert_approx_eq(outputs[0].0[0], 3.0, GPU_TOLERANCE);
-    assert_approx_eq(outputs[0].0[1], 3.0, GPU_TOLERANCE);
-    assert_approx_eq(outputs[0].0[2], 3.0, GPU_TOLERANCE);
+        run_test_shader(&ctx, &module, "test_sample_radiance", &inputs, 1);
+    assert_approx_eq(outputs[0].0[0], 10.0, GPU_TOLERANCE);
+    assert_approx_eq(outputs[0].0[1], 100.0, GPU_TOLERANCE);
+    assert_approx_eq(outputs[0].0[2], 3.001, GPU_TOLERANCE);
 }
 
 #[test]
-fn firefly_clamp_negative_values() {
+fn sample_radiance_removes_negative_values() {
     require_gpu!(ctx);
     let mut compiler = ShaderCompiler::new();
     let module = compile_render_correctness_module(&ctx, &mut compiler);
@@ -579,10 +575,48 @@ fn firefly_clamp_negative_values() {
     // Negative values clamped to 0
     let inputs = [Vec4f([-0.5, -100.0, 0.0, 0.0])];
     let outputs: Vec<Vec4f> =
-        run_test_shader(&ctx, &module, "test_firefly_clamp", &inputs, 1);
+        run_test_shader(&ctx, &module, "test_sample_radiance", &inputs, 1);
     assert_approx_eq(outputs[0].0[0], 0.0, GPU_TOLERANCE);
     assert_approx_eq(outputs[0].0[1], 0.0, GPU_TOLERANCE);
     assert_approx_eq(outputs[0].0[2], 0.0, GPU_TOLERANCE);
+}
+
+#[test]
+fn indirect_radiance_regularizer_preserves_direct_hdr() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_render_correctness_module(&ctx, &mut compiler);
+
+    let inputs = [Vec4f([10.0, 100.0, 5.0, 0.0])];
+    let outputs: Vec<Vec4f> = run_test_shader(
+        &ctx,
+        &module,
+        "test_regularize_indirect_radiance",
+        &inputs,
+        1,
+    );
+    assert_approx_eq(outputs[0].0[0], 10.0, GPU_TOLERANCE);
+    assert_approx_eq(outputs[0].0[1], 100.0, GPU_TOLERANCE);
+    assert_approx_eq(outputs[0].0[2], 5.0, GPU_TOLERANCE);
+}
+
+#[test]
+fn indirect_radiance_regularizer_limits_peak_and_preserves_chromaticity() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_render_correctness_module(&ctx, &mut compiler);
+
+    let inputs = [Vec4f([10.0, 100.0, 5.0, 1.0])];
+    let outputs: Vec<Vec4f> = run_test_shader(
+        &ctx,
+        &module,
+        "test_regularize_indirect_radiance",
+        &inputs,
+        1,
+    );
+    assert_approx_eq(outputs[0].0[0], 0.3, GPU_TOLERANCE);
+    assert_approx_eq(outputs[0].0[1], 3.0, GPU_TOLERANCE);
+    assert_approx_eq(outputs[0].0[2], 0.15, GPU_TOLERANCE);
 }
 
 // ===========================================================================

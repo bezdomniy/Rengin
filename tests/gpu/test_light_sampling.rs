@@ -133,6 +133,42 @@ fn light_pdf_sphere_multiple_distances() {
     }
 }
 
+#[test]
+fn light_pdf_bounding_sphere_inside_is_uniform_and_finite() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_light_sampling_module(&ctx, &mut compiler);
+
+    let inputs = [Vec4f([2.0, 1.0, -0.7, 0.0])];
+    let outputs: Vec<Vec4f> = run_test_shader(
+        &ctx,
+        &module,
+        "test_light_pdf_sphere_direction",
+        &inputs,
+        1,
+    );
+    assert_approx_eq(outputs[0].0[0], 1.0 / (4.0 * std::f32::consts::PI), GPU_TOLERANCE);
+    assert!(outputs[0].0[0].is_finite());
+}
+
+#[test]
+fn light_pdf_bounding_sphere_is_zero_outside_cone() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_light_sampling_module(&ctx, &mut compiler);
+
+    // radius=1, distance=5 gives cos(theta_max) ~= 0.98; cos=0 is outside.
+    let inputs = [Vec4f([1.0, 5.0, 0.0, 0.0])];
+    let outputs: Vec<Vec4f> = run_test_shader(
+        &ctx,
+        &module,
+        "test_light_pdf_sphere_direction",
+        &inputs,
+        1,
+    );
+    assert_approx_eq(outputs[0].0[0], 0.0, GPU_TOLERANCE);
+}
+
 // ===========================================================================
 // scattering_pdf tests (pbrt 13.6.3: cosine-weighted hemisphere PDF)
 // ===========================================================================
@@ -220,11 +256,11 @@ fn mis_weight_equal_pdfs() {
 
     // scattering_pdf = light_pdf = 0.5, p_scatter = 0.5
     // ps = 0.25, pl = 0.25
-    // power: (0.25² + 0.25²) / (0.25 + 0.25) = 0.25
+    // mixture PDF: 0.5 * 0.5 + 0.5 * 0.5 = 0.5
     let inputs = [Vec4f([0.5, 0.5, 0.5, 0.0])];
     let outputs: Vec<Vec4f> =
         run_test_shader(&ctx, &module, "test_mis_weight", &inputs, 1);
-    assert_approx_eq(outputs[0].0[0], 0.25, GPU_TOLERANCE);
+    assert_approx_eq(outputs[0].0[0], 0.5, GPU_TOLERANCE);
 }
 
 #[test]
@@ -235,11 +271,11 @@ fn mis_weight_light_dominant() {
 
     // scattering_pdf = 0.01, light_pdf = 10.0, p_scatter = 0.5
     // ps = 0.005, pl = 5.0
-    // power: (0.005² + 5.0²) / (0.005 + 5.0) ≈ 4.99502
+    // mixture PDF: 0.5 * 0.01 + 0.5 * 10 = 5.005
     let inputs = [Vec4f([0.01, 10.0, 0.5, 0.0])];
     let outputs: Vec<Vec4f> =
         run_test_shader(&ctx, &module, "test_mis_weight", &inputs, 1);
-    assert_approx_eq(outputs[0].0[0], 4.99502, 0.01);
+    assert_approx_eq(outputs[0].0[0], 5.005, 0.01);
 }
 
 #[test]
@@ -250,11 +286,11 @@ fn mis_weight_scatter_dominant() {
 
     // scattering_pdf = 5.0, light_pdf = 0.001, p_scatter = 0.5
     // ps = 2.5, pl = 0.0005
-    // power: (2.5² + 0.0005²) / (2.5 + 0.0005) ≈ 2.4995
+    // mixture PDF: 0.5 * 5 + 0.5 * 0.001 = 2.5005
     let inputs = [Vec4f([5.0, 0.001, 0.5, 0.0])];
     let outputs: Vec<Vec4f> =
         run_test_shader(&ctx, &module, "test_mis_weight", &inputs, 1);
-    assert_approx_eq(outputs[0].0[0], 2.4995, 0.01);
+    assert_approx_eq(outputs[0].0[0], 2.5005, 0.01);
 }
 
 #[test]

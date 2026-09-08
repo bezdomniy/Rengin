@@ -14,6 +14,7 @@ mod test_prepare_dispatch;
 mod test_random;
 mod test_refraction;
 mod test_render_correctness;
+mod test_shader_compilation;
 
 // ---------------------------------------------------------------------------
 // GPU test context -- headless wgpu device
@@ -96,7 +97,11 @@ impl ShaderCompiler {
         load!(composer, include_str!("../../src/shaders/intersects_math.wgsl"), "shaders/intersects_math.wgsl");
         load!(composer, include_str!("../../src/shaders/pathtracer_utils.wgsl"), "shaders/pathtracer_utils.wgsl");
         load!(composer, include_str!("../../src/shaders/pathtracer_math.wgsl"), "shaders/pathtracer_math.wgsl");
+        load!(composer, include_str!("../../src/shaders/pathtracer_bindings.wgsl"), "shaders/pathtracer_bindings.wgsl");
+        load!(composer, include_str!("../../src/shaders/stats.wgsl"), "shaders/stats.wgsl");
         load!(composer, include_str!("../../src/shaders/hit_params_math.wgsl"), "shaders/hit_params_math.wgsl");
+        load!(composer, include_str!("../../src/shaders/hit_params.wgsl"), "shaders/hit_params.wgsl");
+        load!(composer, include_str!("../../src/shaders/intersects.wgsl"), "shaders/intersects.wgsl");
 
         Self { composer }
     }

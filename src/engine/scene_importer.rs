@@ -410,22 +410,24 @@ impl Scene {
                             no_emissive_shapes,
                         );
                     }
-                    Add::Light(add_light) => match renderer_type {
-                        RendererType::RayTracer => {
-                            let light_shape = (*add_light).into();
-
-                            Scene::_get_object_params(
-                                &light_shape,
-                                &mut lambertian_params,
-                                &mut specular_params,
-                                &mut light_params,
-                                &mut model_paths,
-                                commands,
-                                false,
-                            );
+                    Add::Light(add_light) => {
+                        let mut light_shape: ShapeValue = (*add_light).into();
+                        if matches!(renderer_type, RendererType::PathTracer) {
+                            // The path tracer needs finite geometry that rays can hit.
+                            // Preserve legacy point-light scenes as unit sphere emitters.
+                            light_shape.add = "sphere".to_string();
                         }
-                        RendererType::PathTracer => {}
-                    },
+
+                        Scene::_get_object_params(
+                            &light_shape,
+                            &mut lambertian_params,
+                            &mut specular_params,
+                            &mut light_params,
+                            &mut model_paths,
+                            commands,
+                            false,
+                        );
+                    }
                 },
                 _ => continue,
             };
@@ -668,5 +670,21 @@ mod tests {
         println!("{:#?}", scene);
 
         assert_eq!(2 + 2, 4);
+    }
+
+    #[test]
+    fn pathtracer_keeps_legacy_point_lights_as_finite_emitters() {
+        let scene = Scene::new(
+            "./assets/scenes/models.yaml",
+            &crate::RendererType::PathTracer,
+        );
+        let lights = &scene.object_params.as_ref().unwrap()[scene.lights_offset..];
+
+        assert!(lights.iter().any(|light| {
+            light.model_type == 0
+                && light.transform.w_axis.truncate().distance(glam::Vec3::new(-4.0, 2.0, 3.0))
+                    < 1e-5
+                && light.material.emissiveness.truncate() == glam::Vec3::ONE
+        }));
     }
 }

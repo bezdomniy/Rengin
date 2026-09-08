@@ -13,25 +13,29 @@ fn light_pdf_sphere(radius: f32, distance: f32) -> f32 {
     return 1.0 / solid_angle;
 }
 
+/// Directional PDF of the bounding-sphere proposal used for finite lights.
+fn light_pdf_sphere_direction(radius: f32, distance: f32, cos_theta: f32) -> f32 {
+    if distance <= radius {
+        return 1.0 / (4.0 * PI);
+    }
+    let cos_theta_max = sqrt(max(0.0, 1.0 - radius * radius / (distance * distance)));
+    if cos_theta < cos_theta_max {
+        return 0.0;
+    }
+    return light_pdf_sphere(radius, distance);
+}
+
 /// Cosine-weighted hemisphere scattering PDF (pbrt 13.6.3).
 fn scattering_pdf(direction: vec3<f32>, normal: vec3<f32>) -> f32 {
     return max(0.0, dot(direction, normal) / PI);
 }
 
-/// One-sample MIS balance heuristic (pbrt 13.10.1).
-fn mis_pdf_balance(scatter_pdf: f32, light_pdf_val: f32, p_scatter: f32) -> f32 {
-    return p_scatter * scatter_pdf + (1.0 - p_scatter) * light_pdf_val;
-}
-
-/// One-sample MIS power heuristic β=2 (pbrt 13.10.1).
+/// PDF of a one-sample mixture of the scattering and light proposals.
+///
+/// The strategy is selected with probability `p_scatter`, so the density of
+/// the generated direction is the weighted sum of both proposal densities.
 fn mis_pdf(scatter_pdf: f32, light_pdf_val: f32, p_scatter: f32) -> f32 {
-    let ps = p_scatter * scatter_pdf;
-    let pl = (1.0 - p_scatter) * light_pdf_val;
-    let sum = ps + pl;
-    if sum < 1e-10 {
-        return 0.0;
-    }
-    return (ps * ps + pl * pl) / sum;
+    return p_scatter * scatter_pdf + (1.0 - p_scatter) * light_pdf_val;
 }
 
 /// Snell's law refraction direction (pbrt 9.3).
@@ -76,6 +80,23 @@ fn path_regularization_roughness(reflective: f32, max_component: f32) -> f32 {
         roughness = clamp(roughness * 2.0, 0.1, 0.5);
     }
     return roughness;
+}
+
+/// Clamp only samples whose path contains a diffuse interaction.  This is a
+/// deliberate variance regularizer for difficult specular-diffuse-specular
+/// paths; camera-visible emitters and purely specular paths retain full HDR.
+/// Scaling by the peak channel preserves the sample's chromaticity.
+fn regularize_indirect_radiance(radiance: vec3<f32>, limit: f32, has_diffuse: bool) -> vec3<f32> {
+    let non_negative = max(radiance, vec3<f32>(0.0));
+    if !has_diffuse {
+        return non_negative;
+    }
+
+    let peak = max(non_negative.x, max(non_negative.y, non_negative.z));
+    if peak <= limit {
+        return non_negative;
+    }
+    return non_negative * (limit / peak);
 }
 
 /// Determine the transmitted-medium refractive index (RI state machine).

@@ -1,13 +1,14 @@
 #import rengin::constants::PI
 #import rengin::random::{
     init_pcg3d, next_pcg3d, rand_pcg3d,
-    f32_zero_to_one, f32_negone_to_one,
-    random_cosine_direction,
+    f32_zero_to_one,
+    random_cosine_direction, random_uniform_on_hemisphere,
 }
 #import rengin::pathtracer_utils::onb
 #import rengin::pathtracer_math::{
     scattering_pdf, mis_pdf, snell_refract,
     specular_weight, path_regularization_roughness,
+    regularize_indirect_radiance,
     determine_eta_t, cube_face_select,
 }
 
@@ -59,7 +60,7 @@ fn test_white_furnace_mis(@builtin(global_invocation_id) id: vec3<u32>) {
     if f32_zero_to_one(rand_pcg3d.y) < p_scatter {
         direction = normalize(basis * random_cosine_direction());
     } else {
-        direction = normalize(basis * random_cosine_direction());
+        direction = normalize(basis * random_uniform_on_hemisphere());
     }
 
     let s_pdf = scattering_pdf(direction, normal);
@@ -125,12 +126,22 @@ fn test_progressive_average(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 
 // ============================================================================
-// Firefly clamp (trivial clamp, stays inline)
+// Sample sanitization: negative numerical noise is removed, HDR is preserved.
 // ============================================================================
 @compute @workgroup_size(1)
-fn test_firefly_clamp(@builtin(global_invocation_id) id: vec3<u32>) {
+fn test_sample_radiance(@builtin(global_invocation_id) id: vec3<u32>) {
     let color = inputs_4f[id.x];
-    outputs_4f[id.x] = clamp(color, vec4<f32>(0.0), vec4<f32>(3.0));
+    outputs_4f[id.x] = max(color, vec4<f32>(0.0));
+}
+
+// ============================================================================
+// Indirect firefly regularization: rgb=input, w=has_diffuse; fixed limit=3.
+// ============================================================================
+@compute @workgroup_size(1)
+fn test_regularize_indirect_radiance(@builtin(global_invocation_id) id: vec3<u32>) {
+    let color = inputs_4f[id.x];
+    let result = regularize_indirect_radiance(color.xyz, 3.0, color.w > 0.5);
+    outputs_4f[id.x] = vec4<f32>(result, 0.0);
 }
 
 // ============================================================================
@@ -201,7 +212,7 @@ fn test_mis_throughput_update(@builtin(global_invocation_id) id: vec3<u32>) {
     if f32_zero_to_one(rand_pcg3d.y) < p_scatter {
         direction = normalize(basis * random_cosine_direction());
     } else {
-        direction = normalize(basis * random_cosine_direction());
+        direction = normalize(basis * random_uniform_on_hemisphere());
     }
 
     let s_pdf = scattering_pdf(direction, normal);

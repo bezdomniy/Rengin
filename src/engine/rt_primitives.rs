@@ -279,7 +279,6 @@ pub struct Ubo {
 pub struct ScreenData {
     // Compute shader uniform block object
     pub size: PhysicalSize<u32>,
-    pub resolution: PhysicalSize<u32>,
     pub inverse_camera_transform: Mat4,
     pixel_size: f32,
     half_width_height: Vec2,
@@ -300,26 +299,23 @@ impl ScreenData {
         lights_offset: u32,
         ray_bounces: u32,
         size: PhysicalSize<u32>,
-        resolution: PhysicalSize<u32>,
         fov: f32,
         sqrt_rays_per_pixel: u32,
     ) -> ScreenData {
         let half_view = (fov / 2f32).tan();
         let aspect = size.width as f32 / size.height as f32;
 
-        let mut half_width_height = Vec2::new(half_view, half_view / aspect);
-
-        if aspect < 1f32 {
-            half_width_height.x = half_view;
-            half_width_height.y = half_view / aspect;
-        }
+        let half_width_height = if aspect >= 1.0 {
+            Vec2::new(half_view, half_view / aspect)
+        } else {
+            Vec2::new(half_view * aspect, half_view)
+        };
         let pixel_size = (half_width_height.x * 2f32) / size.width as f32;
 
         log::info!("Window size: {:?}", size);
 
         ScreenData {
             size,
-            resolution,
             inverse_camera_transform,
             pixel_size,
             half_width_height,
@@ -339,13 +335,11 @@ impl ScreenData {
 
         self.size = *size;
 
-        self.half_width_height.x = half_view;
-        self.half_width_height.y = half_view / aspect;
-
-        if aspect < 1f32 {
-            self.half_width_height.x = half_view;
-            self.half_width_height.y = half_view / aspect;
-        }
+        self.half_width_height = if aspect >= 1.0 {
+            Vec2::new(half_view, half_view / aspect)
+        } else {
+            Vec2::new(half_view * aspect, half_view)
+        };
 
         self.pixel_size = (self.half_width_height.x * 2f32) / size.width as f32;
     }
@@ -365,5 +359,28 @@ impl ScreenData {
             lights_offset: self.lights_offset,
             specular_offset: self.specular_offset,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn portrait_camera_preserves_vertical_field_of_view() {
+        let fov = std::f32::consts::FRAC_PI_2;
+        let screen = ScreenData::new(
+            Mat4::IDENTITY,
+            0,
+            0,
+            0,
+            8,
+            PhysicalSize::new(600, 1200),
+            fov,
+            1,
+        );
+
+        assert!((screen.half_width_height.x - 0.5).abs() < 1e-6);
+        assert!((screen.half_width_height.y - 1.0).abs() < 1e-6);
     }
 }

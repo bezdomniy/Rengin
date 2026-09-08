@@ -11,6 +11,9 @@ var<storage, read_write> ray_data: array<vec4<f32>>;
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
 {
+    if any(global_invocation_id.xy >= ubo.resolution) {
+        return;
+    }
     var sub_pixel_offset = vec2<f32>(0f);
 
     if RANDOM_SUBPIXEL {

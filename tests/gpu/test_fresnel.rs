@@ -264,6 +264,31 @@ fn schlick_reciprocity() {
     );
 }
 
+#[test]
+fn exact_fresnel_glass_exit_normal_incidence() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_fresnel_module(&ctx, &mut compiler);
+
+    // Production ordering: (cos_i, eta_i, eta_t, _).
+    let inputs = [Vec4f([1.0, 1.5, 1.0, 0.0])];
+    let outputs: Vec<Vec4f> =
+        run_test_shader(&ctx, &module, "test_fresnel_dielectric", &inputs, 1);
+    assert_approx_eq(outputs[0].0[0], 0.04, GPU_TOLERANCE);
+}
+
+#[test]
+fn exact_fresnel_equal_media_has_no_reflection() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_fresnel_module(&ctx, &mut compiler);
+
+    let inputs = [Vec4f([0.5, 1.33, 1.33, 0.0])];
+    let outputs: Vec<Vec4f> =
+        run_test_shader(&ctx, &module, "test_fresnel_dielectric", &inputs, 1);
+    assert_approx_eq(outputs[0].0[0], 0.0, GPU_TOLERANCE);
+}
+
 // --- Schlick at Brewster's angle ---
 // At Brewster's angle, the exact Fresnel r_parallel = 0 (only perpendicular reflects).
 // Average reflectance should be low. Schlick won't be zero but should be small.
