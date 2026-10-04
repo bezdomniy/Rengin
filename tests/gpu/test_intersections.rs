@@ -671,3 +671,138 @@ fn normalize(v: [f32; 3]) -> [f32; 3] {
     let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     [v[0] / length, v[1] / length, v[2] / length]
 }
+
+// --- Triangles ---
+
+fn run_triangle_test(
+    ctx: &super::GpuTestContext,
+    module: &wgpu::ShaderModule,
+    vertices: [[f32; 3]; 3],
+    origin: [f32; 3],
+    direction: [f32; 3],
+) -> (bool, [f32; 2], f32) {
+    let vec4 = |v: [f32; 3]| Vec4f([v[0], v[1], v[2], 0.0]);
+    let input = [vec4(vertices[0]), vec4(vertices[1]), vec4(vertices[2]), vec4(origin), vec4(direction)];
+    let buffers = vec![
+        BufferSpec::storage_readonly(0, bytemuck::cast_slice(&input).to_vec()),
+        BufferSpec::storage_readwrite(1, vec![0u8; std::mem::size_of::<Vec4f>()]),
+    ];
+    let results = dispatch_and_readback(ctx, module, "test_intersect_triangle", [1, 1, 1], &buffers);
+    let out: &[Vec4f] = bytemuck::cast_slice(&results[0]);
+    (out[0].0[0] > 0.5, [out[0].0[1], out[0].0[2]], out[0].0[3])
+}
+
+#[test]
+fn triangle_hit_reports_barycentrics_of_b_and_c() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_intersections_module(&ctx, &mut compiler);
+    let vertices = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+
+    // From both sides of the triangle, and with a non-unit direction.
+    for (origin, direction, expected_t) in [
+        ([0.25, 0.5, -2.0], [0.0, 0.0, 1.0], 2.0),
+        ([0.25, 0.5, 3.0], [0.0, 0.0, -2.0], 1.5),
+    ] {
+        let (hit, uv, t) = run_triangle_test(&ctx, &module, vertices, origin, direction);
+        assert!(hit);
+        assert_approx_eq(uv[0], 0.25, GPU_TOLERANCE);
+        assert_approx_eq(uv[1], 0.5, GPU_TOLERANCE);
+        assert_approx_eq(t, expected_t, GPU_TOLERANCE);
+    }
+}
+
+#[test]
+fn triangle_misses_outside_behind_and_parallel() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_intersections_module(&ctx, &mut compiler);
+    let vertices = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+
+    for (origin, direction) in [
+        ([0.75, 0.75, -2.0], [0.0, 0.0, 1.0]), // outside the hypotenuse
+        ([0.25, 0.25, 2.0], [0.0, 0.0, 1.0]),  // triangle is behind the ray
+        ([0.25, 0.25, 0.0], [1.0, 0.0, 0.0]),  // in the triangle's plane
+    ] {
+        let (hit, _, _) = run_triangle_test(&ctx, &module, vertices, origin, direction);
+        assert!(!hit, "ray from {origin:?} along {direction:?} should miss");
+    }
+}
+
+#[test]
+fn triangles_sharing_an_edge_leave_no_gap() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_intersections_module(&ctx, &mut compiler);
+
+    // A parallelogram abcd split along ac, at awkward non-axis-aligned
+    // coordinates. Every ray is aimed at a point on the shared edge, so it
+    // must hit at least one of the two triangles.
+    let a = [13.37f32, -2.11, 5.03];
+    let b = [17.9, -1.7, 6.2];
+    let c = [16.3, 2.85, 4.1];
+    let d = [a[0] + c[0] - b[0], a[1] + c[1] - b[1], a[2] + c[2] - b[2]];
+    let mut seed = 0x9E37_79B9u32;
+    let mut random = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as f32 / u32::MAX as f32
+    };
+
+    let case_count = 65_536;
+    let mut input = vec![
+        Vec4f([a[0], a[1], a[2], 0.0]),
+        Vec4f([b[0], b[1], b[2], 0.0]),
+        Vec4f([c[0], c[1], c[2], 0.0]),
+        Vec4f([d[0], d[1], d[2], 0.0]),
+    ];
+    for _ in 0..case_count {
+        let s = random();
+        let target = [0, 1, 2].map(|i| a[i] + s * (c[i] - a[i]));
+        let direction = normalize([random() - 0.5, random() - 0.5, random() - 0.5]);
+        let distance = 1.0 + 200.0 * random();
+        let origin = [0, 1, 2].map(|i| target[i] - direction[i] * distance);
+        input.push(Vec4f([origin[0], origin[1], origin[2], 0.0]));
+        input.push(Vec4f([direction[0], direction[1], direction[2], 0.0]));
+    }
+
+    let buffers = vec![
+        BufferSpec::storage_readonly(0, bytemuck::cast_slice(&input).to_vec()),
+        BufferSpec::storage_readwrite(1, vec![0u8; case_count * std::mem::size_of::<Vec4f>()]),
+    ];
+    let results = dispatch_and_readback(
+        &ctx,
+        &module,
+        "test_triangle_pair",
+        [(case_count as u32).div_ceil(64), 1, 1],
+        &buffers,
+    );
+    let out: &[Vec4f] = bytemuck::cast_slice(&results[0]);
+    let gaps = out.iter().filter(|hits| hits.0[0] < 0.5 && hits.0[1] < 0.5).count();
+
+    assert_eq!(gaps, 0, "{gaps} of {case_count} rays through the shared edge missed both triangles");
+}
+
+// --- Sphere: precision for distant origins ---
+
+#[test]
+fn sphere_hit_from_far_away_is_precise() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_intersections_module(&ctx, &mut compiler);
+
+    // b*b - 4ac cancels badly here: the discriminant is 3.64 but the terms
+    // are around 1.6e7.
+    let (t, _) = run_ray_test(&ctx, &module, "test_intersect_sphere", [0.0, 0.3, -2000.0], [0.0, 0.0, 1.0]);
+    let expected = 2000.0 - (1.0f64 - 0.09).sqrt();
+    assert!(is_hit(t));
+    assert!(
+        (t as f64 - expected).abs() < 1e-3,
+        "expected t = {expected}, got {t}"
+    );
+
+    // A ray that passes just outside the sphere must miss.
+    let (t, _) = run_ray_test(&ctx, &module, "test_intersect_sphere", [0.0, 1.001, -2000.0], [0.0, 0.0, 1.0]);
+    assert!(!is_hit(t), "ray at distance 1.001 from the centre hit at t = {t}");
+}

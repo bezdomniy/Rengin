@@ -9,30 +9,13 @@
     p_world_aabb_tests, p_world_aabb_skips,
     p_objects_tested,
 }
-#import rengin::intersects_math::{intersectAABB_inv, intersectSphere, intersectPlane, intersectCube, intersectWorldAABB}
+#import rengin::intersects_math::{intersectAABB_inv, intersectSphere, intersectPlane, intersectCube, intersectWorldAABB, intersectTriangleVertices}
 
 fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, object_id: u32) -> Intersection {
     let tri = leaf_nodes.LeafNodes[triangleIdx];
-    var uv: vec2<f32> = vec2<f32>(0.0);
-    let e1: vec3<f32> = tri.vertex_b - tri.vertex_a;
-    let e2: vec3<f32> = tri.vertex_c - tri.vertex_a;
-
-    let dirCrossE2: vec3<f32> = cross(ray.rayD, e2);
-    let det: f32 = dot(e1, dirCrossE2);
-
-    let f: f32 = 1.0 / det;
-    let p1ToOrigin: vec3<f32> = (ray.rayO - tri.vertex_a);
-    uv.x = f * dot(p1ToOrigin, dirCrossE2);
-
-    let originCrossE1: vec3<f32> = cross(p1ToOrigin, e1);
-    uv.y = f * dot(ray.rayD, originCrossE1);
-
-    let t = f * dot(e2, originCrossE1);
-
-    let isHit: bool = (uv.x >= 0.0) && (uv.y >= 0.0) && (uv.x + uv.y <= 1.0) && (t < inIntersection.closestT) && (t > 0.0);
-
-    if isHit {
-        return Intersection(uv, i32(triangleIdx), t, object_id);
+    let hit = intersectTriangleVertices(ray.rayO, ray.rayD, tri.vertex_a, tri.vertex_b, tri.vertex_c, inIntersection.closestT);
+    if hit.hit {
+        return Intersection(hit.uv, i32(triangleIdx), hit.t, object_id);
     }
     return inIntersection;
 }

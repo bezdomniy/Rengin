@@ -1,6 +1,6 @@
 #import rengin::types::{Ray, Intersection, NodeInner}
 #import rengin::constants::{EPSILON, MAXLEN}
-#import rengin::intersects_math::{intersectSphere, intersectPlane, intersectCube, intersectAABB_inv, intersectWorldAABB}
+#import rengin::intersects_math::{intersectSphere, intersectPlane, intersectCube, intersectAABB_inv, intersectWorldAABB, intersectTriangleVertices}
 
 // All entry points share bindings 0 (input) and 1 (output).
 // Input/output interpretation differs per entry point but layout is the same.
@@ -80,4 +80,33 @@ fn test_intersect_world_aabb(@builtin(global_invocation_id) id: vec3<u32>) {
     let ray = Ray(a.xyz, 1.0, b.xyz, 0u, vec4<f32>(1.0));
     let result = intersectWorldAABB(ray, c.xyz, d.xyz, b.w);
     outputs[id.x] = vec4<f32>(select(0.0, 1.0, result), 0.0, 0.0, 0.0);
+}
+
+// --- intersectTriangleVertices on two triangles sharing an edge ---
+// Input: quad corners a, b, c, d (triangles abc and acd share edge ac), then
+// ray_o.xyz, ray_d.xyz per case (2 vec4s).
+// Output per case: (hit abc, hit acd, t abc, t acd)
+@compute @workgroup_size(64)
+fn test_triangle_pair(@builtin(global_invocation_id) id: vec3<u32>) {
+    let case_count = (arrayLength(&inputs) - 4u) / 2u;
+    if id.x >= case_count {
+        return;
+    }
+    let a = inputs[0].xyz;
+    let b = inputs[1].xyz;
+    let c = inputs[2].xyz;
+    let d = inputs[3].xyz;
+    let ray_o = inputs[4u + 2u * id.x].xyz;
+    let ray_d = inputs[5u + 2u * id.x].xyz;
+    let first = intersectTriangleVertices(ray_o, ray_d, a, b, c, MAXLEN);
+    let second = intersectTriangleVertices(ray_o, ray_d, a, c, d, MAXLEN);
+    outputs[id.x] = vec4<f32>(select(0.0, 1.0, first.hit), select(0.0, 1.0, second.hit), first.t, second.t);
+}
+
+// --- intersectTriangleVertices: single triangle, returns (hit, u, v, t) ---
+// Input: a, b, c, ray_o, ray_d (5 vec4s)
+@compute @workgroup_size(1)
+fn test_intersect_triangle(@builtin(global_invocation_id) id: vec3<u32>) {
+    let hit = intersectTriangleVertices(inputs[3].xyz, inputs[4].xyz, inputs[0].xyz, inputs[1].xyz, inputs[2].xyz, MAXLEN);
+    outputs[0] = vec4<f32>(select(0.0, 1.0, hit.hit), hit.uv, hit.t);
 }
