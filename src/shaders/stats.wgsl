@@ -2,6 +2,7 @@
 
 #ifdef PROFILE_STATS
 #import rengin::pt_bindings::shader_stats
+var<workgroup> workgroup_stats: array<atomic<u32>, 8>;
 #endif
 
 // Shader profiling stats - atomic counters for per-frame aggregate statistics
@@ -23,17 +24,30 @@ var<private> p_triangle_tests: u32 = 0u;
 var<private> p_triangle_hits: u32 = 0u;
 var<private> p_objects_tested: u32 = 0u;
 
-fn flush_stats(alive: bool) {
+fn flush_stats(processed: bool, local_invocation_index: u32) {
 #ifdef PROFILE_STATS
-    if alive {
-        atomicAdd(&shader_stats[0], 1u);
+    if local_invocation_index < 8u {
+        atomicStore(&workgroup_stats[local_invocation_index], 0u);
     }
-    atomicAdd(&shader_stats[1], p_world_aabb_tests);
-    atomicAdd(&shader_stats[2], p_world_aabb_skips);
-    atomicAdd(&shader_stats[3], p_bvh_node_tests);
-    atomicAdd(&shader_stats[4], p_bvh_node_skips);
-    atomicAdd(&shader_stats[5], p_triangle_tests);
-    atomicAdd(&shader_stats[6], p_triangle_hits);
-    atomicAdd(&shader_stats[7], p_objects_tested);
+    workgroupBarrier();
+
+    if processed {
+        atomicAdd(&workgroup_stats[0], 1u);
+        atomicAdd(&workgroup_stats[1], p_world_aabb_tests);
+        atomicAdd(&workgroup_stats[2], p_world_aabb_skips);
+        atomicAdd(&workgroup_stats[3], p_bvh_node_tests);
+        atomicAdd(&workgroup_stats[4], p_bvh_node_skips);
+        atomicAdd(&workgroup_stats[5], p_triangle_tests);
+        atomicAdd(&workgroup_stats[6], p_triangle_hits);
+        atomicAdd(&workgroup_stats[7], p_objects_tested);
+    }
+    workgroupBarrier();
+
+    if local_invocation_index < 8u {
+        let value = atomicLoad(&workgroup_stats[local_invocation_index]);
+        if value > 0u {
+            atomicAdd(&shader_stats[local_invocation_index], value);
+        }
+    }
 #endif
 }

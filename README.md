@@ -23,14 +23,18 @@ Key flags:
 - `-s <path>` — Scene YAML file
 - `-r <N>` — Rays (samples) per pixel (default: 8)
 - `-b <N>` — Bounces per ray (default: 8)
-- `-p` — Enable GPU profiling (per-bounce timestamps + shader stats)
+- `--render-scale <N>` — Scale the scene camera's render resolution without changing window size (default: 1)
+- `-p`, `--profile` — Enable low-overhead per-bounce GPU timestamps
+- `--profile-stats` — Also collect instrumented shader counters (implies `--profile`)
 
 ### Profiling:
-Run with `--profile` (`-p`) for detailed GPU performance data:
+Run with `--profile` (`-p`) for per-bounce GPU timestamps:
 ```
 cargo run --release -- -s assets/scenes/models.yaml -r 8 -b 16 -p
 ```
-This outputs per-bounce GPU timestamps (nanosecond precision via `TIMESTAMP_QUERY`) and shader-level statistics including AABB tests, BVH node visits, triangle tests, and alive ray counts.
+Timestamp readback is asynchronous, and the normal rendering path does not wait for each GPU submission to finish. To diagnose traversal work as well, use `--profile-stats`; it adds shader-level counters for AABB tests, BVH node visits, triangle tests, and active rays, but its instrumentation affects timings.
+
+The camera width and height in the scene YAML define the internal render resolution. Window resizing only changes presentation, preserving the camera aspect ratio. On the web, `render_scale` can also be supplied as a URL parameter.
 
 ### Bugs:
 This is early days for my renderer and there are many bugs. Please let me know if you find some.

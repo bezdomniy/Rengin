@@ -153,6 +153,12 @@ enum SplitMethod {
 }
 
 impl Bvh {
+    fn sah_bucket_index(centroid_bounds: &NodeInner, point: &Vec3, dimension: usize) -> usize {
+        const N_BUCKETS: usize = 12;
+        let normalized = centroid_bounds.offset(point)[dimension].clamp(0.0, 1.0);
+        ((normalized * N_BUCKETS as f32) as usize).min(N_BUCKETS - 1)
+    }
+
     pub fn empty() -> Self {
         Bvh {
             inner_nodes: vec![NodeInner::default()],
@@ -374,18 +380,16 @@ impl Bvh {
                 } else {
                     let n_buckets: usize = 12;
                     let mut buckets = vec![NodeInner::empty(); n_buckets];
+                    let mut bucket_counts = vec![0u32; n_buckets];
 
                     for triangle in triangle_params_unsorted.iter().take(end).skip(start) {
-                        let mut b: usize = n_buckets
-                            * centroid_bounds.offset(&triangle.bounds_centroid())[split_dimension]
-                                .round() as usize;
-
-                        if b == n_buckets {
-                            b = n_buckets - 1;
-                        };
-
-                        buckets[b].skip_ptr_or_prim_idx1 += 1; // Using this for the count variable
-                        buckets[b].merge(&triangle.bounds());
+                        let b = Self::sah_bucket_index(
+                            &centroid_bounds,
+                            &triangle.bounds_centroid(),
+                            split_dimension,
+                        );
+                        bucket_counts[b] += 1;
+                        buckets[b] = buckets[b].merge(&triangle.bounds());
                     }
 
                     let mut cost = vec![0f32; n_buckets - 1];
@@ -396,20 +400,36 @@ impl Bvh {
                         let mut count0: u32 = 0;
                         let mut count1: u32 = 0;
 
-                        for node in buckets.iter().take(i + 1) {
-                            b0 = b1.merge(node);
-                            count0 += node.skip_ptr_or_prim_idx1;
+                        for (node, count) in buckets
+                            .iter()
+                            .zip(bucket_counts.iter())
+                            .take(i + 1)
+                        {
+                            b0 = b0.merge(node);
+                            count0 += count;
                         }
 
-                        for node in buckets.iter().take(n_buckets).skip(i + 1) {
+                        for (node, count) in buckets
+                            .iter()
+                            .zip(bucket_counts.iter())
+                            .take(n_buckets)
+                            .skip(i + 1)
+                        {
                             b1 = b1.merge(node);
-                            count1 += node.skip_ptr_or_prim_idx1;
+                            count1 += count;
                         }
 
-                        *c = 1f32
-                            + (count0 as f32 * b0.surface_area()
-                                + count1 as f32 * b1.surface_area())
-                                / bounds.surface_area();
+                        let cost0 = if count0 > 0 {
+                            count0 as f32 * b0.surface_area()
+                        } else {
+                            0.0
+                        };
+                        let cost1 = if count1 > 0 {
+                            count1 as f32 * b1.surface_area()
+                        } else {
+                            0.0
+                        };
+                        *c = 1f32 + (cost0 + cost1) / bounds.surface_area();
                     }
 
                     let mut min_cost = cost[0];
@@ -425,14 +445,28 @@ impl Bvh {
                     let leaf_cost = n_shapes as f32;
                     if n_shapes > MAX_SHAPES_IN_NODE || min_cost < leaf_cost {
                         mid = partition(triangle_params_unsorted[start..end].iter_mut(), |n| {
-                            let mut b: usize = n_buckets
-                                * centroid_bounds.offset(&n.bounds_centroid())[split_dimension]
-                                    .round() as usize;
-                            if b == n_buckets {
-                                b = n_buckets - 1;
-                            };
+                            let b = Self::sah_bucket_index(
+                                &centroid_bounds,
+                                &n.bounds_centroid(),
+                                split_dimension,
+                            );
                             b <= min_cost_split_bucket
                         }) + start;
+
+                        // A bucket boundary can still be empty for clustered
+                        // centroids. Fall back to an equal-count split rather
+                        // than creating an empty recursive range.
+                        if mid == start || mid == end {
+                            mid = (start + end) / 2;
+                            triangle_params_unsorted[start..end].select_nth_unstable_by(
+                                mid - start,
+                                |a, b| {
+                                    a.bounds_centroid()[split_dimension]
+                                        .partial_cmp(&b.bounds_centroid()[split_dimension])
+                                        .unwrap()
+                                },
+                            );
+                        }
                     } else {
                         // println!("leaf");
                         bounds.skip_ptr_or_prim_idx1 = start as u32;
@@ -480,6 +514,58 @@ impl Bvh {
             self.len_inner_nodes[index],
             self.offset_leaf_nodes[index],
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn triangle_at(x: f32) -> Box<dyn Bounded> {
+        Box::new(TrianglePrimitive {
+            points: Mat3::from_cols(
+                Vec3::new(x, 0.0, 0.0),
+                Vec3::new(x + 0.1, 1.0, 0.0),
+                Vec3::new(x + 0.1, 0.0, 1.0),
+            ),
+            normals: Mat3::ZERO,
+        })
+    }
+
+    #[test]
+    fn sah_root_split_is_not_pathologically_unbalanced() {
+        let mut primitives: Vec<Box<dyn Bounded>> =
+            (0..96).map(|index| triangle_at(index as f32)).collect();
+        let nodes = Bvh::build(&mut primitives);
+        let right_subtree_start = nodes[1].skip_ptr_or_prim_idx1 as usize;
+        let left_primitive_count: usize = nodes[1..right_subtree_start]
+            .iter()
+            .filter(|node| node.prim_idx2 > 0)
+            .map(|node| (node.prim_idx2 - node.skip_ptr_or_prim_idx1) as usize)
+            .sum();
+
+        assert!(
+            (24..=72).contains(&left_primitive_count),
+            "SAH root split placed {left_primitive_count}/96 primitives on the left"
+        );
+    }
+
+    #[test]
+    fn sah_leaf_ranges_cover_every_primitive_once() {
+        let primitive_count = 97usize;
+        let mut primitives: Vec<Box<dyn Bounded>> = (0..primitive_count)
+            .map(|index| triangle_at((index * 17 % primitive_count) as f32))
+            .collect();
+        let nodes = Bvh::build(&mut primitives);
+        let mut coverage = vec![0u8; primitive_count];
+
+        for node in nodes.iter().filter(|node| node.prim_idx2 > 0) {
+            for primitive_index in node.skip_ptr_or_prim_idx1..node.prim_idx2 {
+                coverage[primitive_index as usize] += 1;
+            }
+        }
+
+        assert!(coverage.iter().all(|count| *count == 1));
     }
 }
 

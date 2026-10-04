@@ -83,25 +83,31 @@ impl Default for RenderApp {
 impl State {
     pub async fn new(
         window: Arc<Window>,
-        resolution: PhysicalSize<u32>,
+        render_size: PhysicalSize<u32>,
         scene: Scene,
         continous_motion: bool,
         rays_per_pixel: u32,
         ray_bounces: u32,
         renderer_type: RendererType,
         profile: bool,
+        profile_stats: bool,
     ) -> Self {
         let physical_size = window.inner_size();
-        // On web, inner_size may be 0 before layout; use scene resolution as fallback
-        let initial_size = if physical_size.width > 0 { physical_size } else { resolution };
+        // On web, inner_size may be 0 before layout; use render size as fallback.
+        let surface_size = if physical_size.width > 0 {
+            physical_size
+        } else {
+            render_size
+        };
 
         let mut renderer = RenginWgpu::new(
             window,
-            initial_size,
+            surface_size,
             continous_motion,
             rays_per_pixel,
             ray_bounces,
             profile,
+            profile_stats,
         )
         .await;
 
@@ -119,7 +125,7 @@ impl State {
             scene.specular_offset as u32,
             scene.lights_offset as u32,
             ray_bounces,
-            initial_size,
+            render_size,
             scene.camera.as_ref().unwrap().field_of_view,
             (renderer.rays_per_pixel as f32).sqrt() as u32,
         );
@@ -146,7 +152,7 @@ impl State {
         );
 
         // TODO: remove buffers as arg and move into RenginWgpu state
-        renderer.create_bind_groups(&initial_size);
+        renderer.create_bind_groups(&render_size);
 
         Self {
             renderer,
@@ -264,6 +270,29 @@ impl State {
 }
 
 impl RenderApp {
+    fn set_aspect_preserving_viewport(
+        rpass: &mut wgpu::RenderPass<'_>,
+        surface_size: PhysicalSize<u32>,
+        render_size: PhysicalSize<u32>,
+    ) {
+        let surface_aspect = surface_size.width as f32 / surface_size.height as f32;
+        let render_aspect = render_size.width as f32 / render_size.height as f32;
+        let (width, height) = if surface_aspect > render_aspect {
+            (
+                surface_size.height as f32 * render_aspect,
+                surface_size.height as f32,
+            )
+        } else {
+            (
+                surface_size.width as f32,
+                surface_size.width as f32 / render_aspect,
+            )
+        };
+        let x = (surface_size.width as f32 - width) * 0.5;
+        let y = (surface_size.height as f32 - height) * 0.5;
+        rpass.set_viewport(x, y, width, height, 0.0, 1.0);
+    }
+
     fn render_default_mode(
         state: &mut State,
         command_encoder: wgpu::CommandEncoder,
@@ -355,18 +384,15 @@ impl RenderApp {
             });
             rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
             rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
+            Self::set_aspect_preserving_viewport(
+                &mut rpass,
+                PhysicalSize::new(state.renderer.config.width, state.renderer.config.height),
+                state.screen_data.size,
+            );
             rpass.draw(0..3, 0..1);
         }
 
         state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
-
-        // On native, wait for GPU completion; on web, browser handles this
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = state.renderer.device.poll(wgpu::PollType::Wait {
-                submission_index: None, timeout: None,
-            });
-        }
 
         log::info!(
             "Sample {}/{}, framerate: {} fps",
@@ -399,10 +425,8 @@ impl ApplicationHandler for RenderApp {
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
                 let scene = engine::embedded_assets::load_scene(&config.scene, &renderer_type);
-                let resolution = PhysicalSize::new(900, 900);
             } else {
                 let scene = Scene::new(&config.scene, &renderer_type);
-                let resolution = event_loop.available_monitors().next().unwrap().size();
             }
         }
         log::info!(
@@ -415,6 +439,10 @@ impl ApplicationHandler for RenderApp {
             scene.camera.as_ref().unwrap().height,
         );
         let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
+        let render_size = PhysicalSize::new(
+            ((logical_size.width as f32 * config.render_scale).round() as u32).max(1),
+            ((logical_size.height as f32 * config.render_scale).round() as u32).max(1),
+        );
 
         let window_attributes = WindowAttributes::default()
             .with_title("Rengin Path Tracer")
@@ -445,13 +473,14 @@ impl ApplicationHandler for RenderApp {
 
         let init_future = State::new(
             window.clone(),
-            resolution,
+            render_size,
             scene,
             config.continuous_motion,
             config.rays_per_pixel,
             config.bounces,
             renderer_type,
             config.profile,
+            config.profile_stats,
         );
 
         cfg_if::cfg_if! {
@@ -478,8 +507,6 @@ impl ApplicationHandler for RenderApp {
         match event {
             WindowEvent::Resized(size) => {
                 if size.width > 0 && size.height > 0 {
-                    state.screen_data.update_dims(&size);
-                    state.screen_data.subpixel_idx = 0;
                     state.renderer.update_window_size(&size);
                 }
             }
@@ -522,6 +549,23 @@ impl ApplicationHandler for RenderApp {
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         let mut guard = self.state.borrow_mut();
         let Some(state) = guard.as_mut() else { return };
+        #[cfg(not(target_arch = "wasm32"))]
+        state.renderer.poll_profile_readbacks();
+
+        // Profiling readback is double-buffered. If both slots are still owned
+        // by the GPU, briefly yield instead of dropping the next sample's data
+        // or blocking the CPU on device.poll(Wait).
+        #[cfg(not(target_arch = "wasm32"))]
+        if state.renderer.profile
+            && state.screen_data.subpixel_idx < state.renderer.rays_per_pixel
+            && !state.renderer.has_available_profile_readback_slot()
+        {
+            _event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(1),
+            ));
+            state.renderer.window.request_redraw();
+            return;
+        }
         let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
         let time_since_last_frame = state.last_update_inst.elapsed();
 
@@ -571,7 +615,7 @@ impl ApplicationHandler for RenderApp {
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                // Profiling mode: native-only (requires timestamp queries + sync readback)
+                // Profiling mode: native-only (timestamp queries + asynchronous readback)
                 #[cfg(not(target_arch = "wasm32"))]
                 if state.renderer.profile {
                     // === PROFILED MODE: separate passes with GPU timestamps ===
@@ -587,6 +631,7 @@ impl ApplicationHandler for RenderApp {
                         bytemuck::cast_slice(&[0u32, 0u32, 0u32]),
                     );
                     let mut query_idx: u32 = 0;
+                    let readback_slot = state.renderer.acquire_profile_readback_slot();
                     let qs = state.renderer.timestamp_query_set.as_ref().unwrap();
 
                     // 1. Raygen pass
@@ -687,117 +732,57 @@ impl ApplicationHandler for RenderApp {
                         });
                         rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
                         rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
+                        Self::set_aspect_preserving_viewport(
+                            &mut rpass,
+                            PhysicalSize::new(
+                                state.renderer.config.width,
+                                state.renderer.config.height,
+                            ),
+                            state.screen_data.size,
+                        );
                         rpass.draw(0..3, 0..1);
                     }
                     query_idx += 2;
 
-                    // Copy shader stats to read buffer
+                    // Copy profiling data into an available readback slot. The
+                    // buffers are mapped asynchronously after submission and
+                    // consumed on a later event-loop iteration.
                     let stats_buf = state.renderer.buffers.as_ref().unwrap().get("stats").unwrap();
-                    let stats_read_buf = state.renderer.buffers.as_ref().unwrap().get("stats_read").unwrap();
-                    command_encoder.copy_buffer_to_buffer(stats_buf, 0, stats_read_buf, 0, 8 * 4);
-
-                    // Resolve + copy timestamps
-                    command_encoder.resolve_query_set(
-                        qs, 0..query_idx,
-                        state.renderer.timestamp_resolve_buffer.as_ref().unwrap(), 0,
-                    );
-                    command_encoder.copy_buffer_to_buffer(
-                        state.renderer.timestamp_resolve_buffer.as_ref().unwrap(), 0,
-                        state.renderer.timestamp_read_buffer.as_ref().unwrap(), 0,
-                        (query_idx as u64) * 8,
-                    );
+                    if let Some(slot_index) = readback_slot {
+                        let slot = &state.renderer.profile_readbacks[slot_index];
+                        command_encoder.copy_buffer_to_buffer(
+                            stats_buf,
+                            0,
+                            &slot.stats_buffer,
+                            0,
+                            8 * 4,
+                        );
+                        command_encoder.resolve_query_set(
+                            qs,
+                            0..query_idx,
+                            state.renderer.timestamp_resolve_buffer.as_ref().unwrap(),
+                            0,
+                        );
+                        command_encoder.copy_buffer_to_buffer(
+                            state.renderer.timestamp_resolve_buffer.as_ref().unwrap(),
+                            0,
+                            &slot.timestamp_buffer,
+                            0,
+                            (query_idx as u64) * 8,
+                        );
+                    }
+                    command_encoder.clear_buffer(stats_buf, 0, None);
 
                     state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
-                    let _ = state.renderer.device.poll(wgpu::PollType::Wait {
-                        submission_index: None, timeout: None,
-                    });
-
-                    // Read back GPU timestamps
-                    let read_buf = state.renderer.timestamp_read_buffer.as_ref().unwrap();
-                    let buf_slice = read_buf.slice(..((query_idx as u64) * 8));
-                    let (tx, rx) = std::sync::mpsc::channel();
-                    buf_slice.map_async(wgpu::MapMode::Read, move |result| {
-                        tx.send(result).unwrap();
-                    });
-                    let _ = state.renderer.device.poll(wgpu::PollType::Wait {
-                        submission_index: None, timeout: None,
-                    });
-                    if let Ok(Ok(())) = rx.recv() {
-                        let data = buf_slice.get_mapped_range();
-                        let timestamps: &[u64] = bytemuck::cast_slice(&data);
-                        let period = state.renderer.timestamp_period as f64;
-
-                        let raygen_ns = (timestamps[1] - timestamps[0]) as f64 * period;
-                        let mut bounce_strs = Vec::new();
-                        let mut total_bounce_ns = 0.0;
-                        for b in 0..state.renderer.ray_bounces {
-                            let idx = (2 + b * 2) as usize;
-                            let bounce_ns = (timestamps[idx + 1] - timestamps[idx]) as f64 * period;
-                            total_bounce_ns += bounce_ns;
-                            bounce_strs.push(format!("b{}={:.2}ms", b, bounce_ns / 1_000_000.0));
-                        }
-                        let render_base = (2 + state.renderer.ray_bounces * 2) as usize;
-                        let render_ns = timestamps[render_base + 1].wrapping_sub(timestamps[render_base]) as f64 * period;
-                        let render_ns = if render_ns > 1e12 { 0.0 } else { render_ns };
-
-                        log::info!(
-                            "GPU Sample {}/{} | raygen={:.2}ms | pathtracer={:.2}ms [{}] | render={:.2}ms | total={:.2}ms",
+                    if let Some(slot_index) = readback_slot {
+                        let total_pixels = u64::from(state.screen_data.size.width)
+                            * u64::from(state.screen_data.size.height);
+                        state.renderer.begin_profile_readback(
+                            slot_index,
                             state.screen_data.subpixel_idx,
-                            state.renderer.rays_per_pixel,
-                            raygen_ns / 1_000_000.0,
-                            total_bounce_ns / 1_000_000.0,
-                            bounce_strs.join(", "),
-                            render_ns / 1_000_000.0,
-                            (raygen_ns + total_bounce_ns + render_ns) / 1_000_000.0,
+                            total_pixels,
                         );
-
-                        drop(data);
-                        read_buf.unmap();
                     }
-
-                    // Read shader stats
-                    let stats_read = state.renderer.buffers.as_ref().unwrap().get("stats_read").unwrap();
-                    let stats_slice = stats_read.slice(..32);
-                    let (stx, srx) = std::sync::mpsc::channel();
-                    stats_slice.map_async(wgpu::MapMode::Read, move |result| {
-                        stx.send(result).unwrap();
-                    });
-                    let _ = state.renderer.device.poll(wgpu::PollType::Wait {
-                        submission_index: None, timeout: None,
-                    });
-                    if let Ok(Ok(())) = srx.recv() {
-                        let sdata = stats_slice.get_mapped_range();
-                        let stats: &[u32] = bytemuck::cast_slice(&sdata);
-                        let total_pixels = (state.screen_data.size.width * state.screen_data.size.height) as f64;
-                        let alive = stats[0] as f64;
-                        log::info!(
-                            "  Shader stats (all bounces) | rays_alive={} ({:.1}%/dispatch) | world_aabb: tests={}, skips={} ({:.0}%) | bvh_nodes: tests={}, skips={} ({:.0}%) | triangles: tests={}, hits={} | objects_tested={}",
-                            stats[0],
-                            alive / (total_pixels * state.renderer.ray_bounces as f64) * 100.0,
-                            stats[1], stats[2],
-                            if stats[1] > 0 { stats[2] as f64 / stats[1] as f64 * 100.0 } else { 0.0 },
-                            stats[3], stats[4],
-                            if stats[3] > 0 { stats[4] as f64 / stats[3] as f64 * 100.0 } else { 0.0 },
-                            stats[5], stats[6],
-                            stats[7],
-                        );
-                        log::info!(
-                            "  Per-ray averages | world_aabb={:.1} | bvh_nodes={:.1} | triangles={:.1} | objects={:.1}",
-                            if alive > 0.0 { stats[1] as f64 / alive } else { 0.0 },
-                            if alive > 0.0 { stats[3] as f64 / alive } else { 0.0 },
-                            if alive > 0.0 { stats[5] as f64 / alive } else { 0.0 },
-                            if alive > 0.0 { stats[7] as f64 / alive } else { 0.0 },
-                        );
-                        drop(sdata);
-                        stats_read.unmap();
-                    }
-
-                    // Clear stats buffer for next sample
-                    state.renderer.queue.write_buffer(
-                        state.renderer.buffers.as_ref().unwrap().get("stats").unwrap(),
-                        0,
-                        &[0u8; 32],
-                    );
 
                     frame.present();
                 } else {
@@ -844,9 +829,15 @@ pub struct Args {
     /// Number of rays per pixel
     #[clap(short, long, default_value_t = 8)]
     rays_per_pixel: u32,
+    /// Internal render-resolution multiplier (independent of window DPI)
+    #[clap(long, default_value_t = 1.0)]
+    render_scale: f32,
     /// Enable detailed GPU profiling (per-bounce timestamps)
     #[clap(short = 'p', long)]
     profile: bool,
+    /// Enable instrumented shader counters (implies --profile and adds overhead)
+    #[clap(long)]
+    profile_stats: bool,
     /// Number of bounces per ray
     #[clap(short, long, default_value_t = 8)]
     bounces: u32,

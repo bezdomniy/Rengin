@@ -8,7 +8,7 @@
 #import rengin::pt_bindings::{
     imageData, ubo, object_params,
     active_rays_in, active_rays_out, ray_counts,
-    load_ray, store_ray, store_dead_ray, load_ray_throughput,
+    load_ray, store_ray,
 }
 #import rengin::stats::flush_stats
 #import rengin::hit_params::getHitParams
@@ -27,6 +27,9 @@
 
 const PATH_FLAG_DIFFUSE: u32 = 1u;
 const INDIRECT_RADIANCE_LIMIT: f32 = 3.0;
+
+var<workgroup> workgroup_alive_count: atomic<u32>;
+var<workgroup> workgroup_output_base: u32;
 
 fn random_light() -> ObjectParam {
     next_pcg3d();
@@ -162,7 +165,6 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) 
         if q > 0.0 {
             next_pcg3d();
             if f32_zero_to_one(rand_pcg3d.x) < q {
-                store_dead_ray(offset);
                 return ray.throughput * RAY_MISS_COLOUR;
             }
             ray.throughput = vec4<f32>(russian_roulette_adjust(ray.throughput.xyz, q), ray.throughput.w);
@@ -173,7 +175,6 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) 
     let intersection = intersect(ray, 0u, false);
 
     if intersection.id == -1 || intersection.closestT >= MAXLEN {
-        store_dead_ray(offset);
         return ray.throughput * RAY_MISS_COLOUR;
     }
 
@@ -181,7 +182,6 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) 
     let ob_params = object_params.ObjectParams[intersection.model_id];
 
     if any(ob_params.material.emissiveness.xyz > vec3<f32>(0.0)) {
-        store_dead_ray(offset);
         return ray.throughput * ob_params.material.emissiveness;
     }
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
@@ -259,7 +259,7 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) 
             if pdf > 1e-10 {
                 next_ray.throughput = ray.throughput * ob_params.material.colour * s_pdf / pdf;
             } else {
-                next_ray.throughput = vec4<f32>(0.0);
+                return RAY_MISS_COLOUR;
             }
 
             store_ray(offset, next_ray);
@@ -280,13 +280,8 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) 
 }
 
 
-fn process_bounce(offset: u32, pixel_pos: vec2<u32>) {
+fn process_bounce(offset: u32, pixel_pos: vec2<u32>) -> bool {
     let ray = load_ray(offset);
-
-    if ray.throughput.w < -EPSILON {
-        flush_stats(false);
-        return;
-    }
 
     let img_idx = pixel_pos.y * ubo.resolution.x + pixel_pos.x;
     var color: vec4<f32> = RAY_MISS_COLOUR;
@@ -321,35 +316,70 @@ fn process_bounce(offset: u32, pixel_pos: vec2<u32>) {
         imageData[img_idx] = color;
     }
 
-    // If ray is still alive after this bounce, write to compaction output
-    let updated_throughput = load_ray_throughput(offset);
-    if updated_throughput.w >= -EPSILON {
-        let out_idx = atomicAdd(&ray_counts[1], 1u);
-        active_rays_out[out_idx] = offset;
-    }
+    return ray_color.w <= -EPSILON;
+}
 
-    flush_stats(true);
+// Compact survivors with one global atomic reservation per workgroup rather
+// than one contended global atomic per ray.
+fn compact_surviving_ray(alive: bool, offset: u32, local_invocation_index: u32) {
+    if local_invocation_index == 0u {
+        atomicStore(&workgroup_alive_count, 0u);
+    }
+    workgroupBarrier();
+
+    var local_output_index = 0u;
+    if alive {
+        local_output_index = atomicAdd(&workgroup_alive_count, 1u);
+    }
+    workgroupBarrier();
+
+    if local_invocation_index == 0u {
+        let count = atomicLoad(&workgroup_alive_count);
+        workgroup_output_base = 0u;
+        if count > 0u {
+            workgroup_output_base = atomicAdd(&ray_counts[1], count);
+        }
+    }
+    workgroupBarrier();
+
+    if alive {
+        active_rays_out[workgroup_output_base + local_output_index] = offset;
+    }
 }
 
 // Entry point for first bounce: 2D dispatch, all pixels, preserves spatial coherence
 @compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
-    if any(global_invocation_id.xy >= ubo.resolution) {
-        return;
+fn main(
+    @builtin(global_invocation_id) global_invocation_id: vec3<u32>,
+    @builtin(local_invocation_index) local_invocation_index: u32,
+) {
+    let in_bounds = all(global_invocation_id.xy < ubo.resolution);
+    var offset = 0u;
+    var alive = false;
+    if in_bounds {
+        offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
+        alive = process_bounce(offset, global_invocation_id.xy);
     }
-    let offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
-    process_bounce(offset, global_invocation_id.xy);
+    flush_stats(in_bounds, local_invocation_index);
+    compact_surviving_ray(alive, offset, local_invocation_index);
 }
 
 // Entry point for subsequent bounces: 1D compacted dispatch, only alive rays
 @compute @workgroup_size(256)
-fn main_compact(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
+fn main_compact(
+    @builtin(global_invocation_id) global_invocation_id: vec3<u32>,
+    @builtin(local_invocation_index) local_invocation_index: u32,
+) {
     let compact_idx = global_invocation_id.x;
-    if compact_idx >= atomicLoad(&ray_counts[0]) {
-        return;
+    let in_bounds = compact_idx < atomicLoad(&ray_counts[0]);
+    var offset = 0u;
+    var alive = false;
+    if in_bounds {
+        offset = active_rays_in[compact_idx];
+        let px = offset % ubo.resolution.x;
+        let py = offset / ubo.resolution.x;
+        alive = process_bounce(offset, vec2<u32>(px, py));
     }
-    let offset = active_rays_in[compact_idx];
-    let px = offset % ubo.resolution.x;
-    let py = offset / ubo.resolution.x;
-    process_bounce(offset, vec2<u32>(px, py));
+    flush_stats(in_bounds, local_invocation_index);
+    compact_surviving_ray(alive, offset, local_invocation_index);
 }

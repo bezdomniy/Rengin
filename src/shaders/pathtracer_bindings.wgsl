@@ -52,14 +52,3 @@ fn store_ray(offset: u32, r: Ray) {
     ray_data[base + 1u] = vec4<f32>(r.rayD, bitcast<f32>(r.pos));
     ray_data[base + 2u] = r.throughput;
 }
-
-fn store_dead_ray(offset: u32) {
-    let base = offset * 3u;
-    ray_data[base] = vec4<f32>(-1f, -1f, -1f, -1f);
-    ray_data[base + 1u] = vec4<f32>(-1f, -1f, -1f, 0f);
-    ray_data[base + 2u] = vec4<f32>(-1f);
-}
-
-fn load_ray_throughput(offset: u32) -> vec4<f32> {
-    return ray_data[offset * 3u + 2u];
-}

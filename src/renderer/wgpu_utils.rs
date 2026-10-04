@@ -1,4 +1,12 @@
-use std::{borrow::Cow, collections::HashMap, mem, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    mem,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
+};
 
 use crate::platform::Instant;
 
@@ -18,6 +26,18 @@ use wgpu::{
 use winit::{dpi::PhysicalSize, window::Window};
 
 use super::{RenginRenderer, RenginShaderModule};
+
+const PROFILE_READBACK_SLOTS: usize = 2;
+
+pub struct ProfileReadbackSlot {
+    pub timestamp_buffer: Buffer,
+    pub stats_buffer: Buffer,
+    timestamp_ready: Arc<AtomicU8>,
+    stats_ready: Arc<AtomicU8>,
+    pending: bool,
+    sample_index: u32,
+    total_pixels: u64,
+}
 
 #[allow(dead_code)]
 pub struct RenginWgpu {
@@ -50,10 +70,11 @@ pub struct RenginWgpu {
     pub rays_per_pixel: u32,
     pub ray_bounces: u32,
     pub profile: bool,
+    pub profile_stats: bool,
     // GPU timestamp query support
     pub timestamp_query_set: Option<wgpu::QuerySet>,
     pub timestamp_resolve_buffer: Option<Buffer>,
-    pub timestamp_read_buffer: Option<Buffer>,
+    pub profile_readbacks: Vec<ProfileReadbackSlot>,
     pub timestamp_period: f32,
 }
 
@@ -65,6 +86,7 @@ impl RenginWgpu {
         rays_per_pixel: u32,
         ray_bounces: u32,
         profile: bool,
+        profile_stats: bool,
     ) -> Self {
         // On web, window.inner_size() returns 0x0 before layout; use the passed-in size
         let size = window.inner_size();
@@ -176,7 +198,7 @@ impl RenginWgpu {
         };
 
         // Create timestamp query set: 2 per bounce + 2 for raygen + 2 for render
-        let (timestamp_query_set, timestamp_resolve_buffer, timestamp_read_buffer) = if has_timestamps {
+        let (timestamp_query_set, timestamp_resolve_buffer, profile_readbacks) = if has_timestamps {
             let query_count = 2 + ray_bounces * 2 + 2;
             let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
                 label: Some("timestamp query set"),
@@ -189,15 +211,30 @@ impl RenginWgpu {
                 usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
-            let read_buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("timestamp read buffer"),
-                size: (query_count as u64) * 8,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            (Some(query_set), Some(resolve_buf), Some(read_buf))
+            let readbacks = (0..PROFILE_READBACK_SLOTS)
+                .map(|slot| ProfileReadbackSlot {
+                    timestamp_buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some(&format!("timestamp read buffer {slot}")),
+                        size: (query_count as u64) * 8,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                    stats_buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some(&format!("stats read buffer {slot}")),
+                        size: 8 * mem::size_of::<u32>() as u64,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                    timestamp_ready: Arc::new(AtomicU8::new(0)),
+                    stats_ready: Arc::new(AtomicU8::new(0)),
+                    pending: false,
+                    sample_index: 0,
+                    total_pixels: 0,
+                })
+                .collect();
+            (Some(query_set), Some(resolve_buf), readbacks)
         } else {
-            (None, None, None)
+            (None, None, Vec::new())
         };
 
         log::info!("GPU timestamp queries: {}, period: {}ns", has_timestamps, timestamp_period);
@@ -230,14 +267,148 @@ impl RenginWgpu {
             continous_motion,
             rays_per_pixel,
             ray_bounces,
-            profile,
+            profile: has_timestamps,
+            profile_stats: profile_stats && has_timestamps,
             timestamp_query_set,
             timestamp_resolve_buffer,
-            timestamp_read_buffer,
+            profile_readbacks,
             timestamp_period,
         }
     }
 
+    pub fn acquire_profile_readback_slot(&mut self) -> Option<usize> {
+        self.poll_profile_readbacks();
+        self.profile_readbacks.iter().position(|slot| !slot.pending)
+    }
+
+    pub fn has_available_profile_readback_slot(&self) -> bool {
+        self.profile_readbacks.iter().any(|slot| !slot.pending)
+    }
+
+    pub fn begin_profile_readback(
+        &mut self,
+        slot_index: usize,
+        sample_index: u32,
+        total_pixels: u64,
+    ) {
+        let slot = &mut self.profile_readbacks[slot_index];
+        slot.pending = true;
+        slot.sample_index = sample_index;
+        slot.total_pixels = total_pixels;
+        slot.timestamp_ready.store(0, Ordering::Release);
+        slot.stats_ready.store(0, Ordering::Release);
+
+        let timestamp_ready = slot.timestamp_ready.clone();
+        slot.timestamp_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                timestamp_ready.store(if result.is_ok() { 1 } else { 2 }, Ordering::Release);
+            });
+
+        let stats_ready = slot.stats_ready.clone();
+        slot.stats_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                stats_ready.store(if result.is_ok() { 1 } else { 2 }, Ordering::Release);
+            });
+    }
+
+    pub fn poll_profile_readbacks(&mut self) {
+        if self.profile_readbacks.is_empty() {
+            return;
+        }
+
+        let _ = self.device.poll(wgpu::PollType::Poll);
+        let ray_bounces = self.ray_bounces;
+        let rays_per_pixel = self.rays_per_pixel;
+        let profile_stats = self.profile_stats;
+        let timestamp_period = self.timestamp_period as f64;
+
+        for slot in self
+            .profile_readbacks
+            .iter_mut()
+            .filter(|slot| slot.pending)
+        {
+            let timestamp_status = slot.timestamp_ready.load(Ordering::Acquire);
+            let stats_status = slot.stats_ready.load(Ordering::Acquire);
+            if timestamp_status == 0 || stats_status == 0 {
+                continue;
+            }
+
+            if timestamp_status == 1 && stats_status == 1 {
+                let timestamp_data = slot.timestamp_buffer.slice(..).get_mapped_range();
+                let timestamps: &[u64] = bytemuck::cast_slice(&timestamp_data);
+                let raygen_ns =
+                    timestamps[1].wrapping_sub(timestamps[0]) as f64 * timestamp_period;
+                let mut bounce_strs = Vec::with_capacity(ray_bounces as usize);
+                let mut total_bounce_ns = 0.0;
+                for bounce in 0..ray_bounces {
+                    let index = (2 + bounce * 2) as usize;
+                    let bounce_ns = timestamps[index + 1].wrapping_sub(timestamps[index]) as f64
+                        * timestamp_period;
+                    total_bounce_ns += bounce_ns;
+                    bounce_strs.push(format!("b{bounce}={:.2}ms", bounce_ns / 1_000_000.0));
+                }
+                let render_base = (2 + ray_bounces * 2) as usize;
+                let measured_render_ns = timestamps[render_base + 1]
+                    .wrapping_sub(timestamps[render_base])
+                    as f64
+                    * timestamp_period;
+                let render_ns = if measured_render_ns > 1e12 {
+                    0.0
+                } else {
+                    measured_render_ns
+                };
+
+                log::info!(
+                    "GPU Sample {}/{} | raygen={:.2}ms | pathtracer={:.2}ms [{}] | render={:.2}ms | total={:.2}ms",
+                    slot.sample_index,
+                    rays_per_pixel,
+                    raygen_ns / 1_000_000.0,
+                    total_bounce_ns / 1_000_000.0,
+                    bounce_strs.join(", "),
+                    render_ns / 1_000_000.0,
+                    (raygen_ns + total_bounce_ns + render_ns) / 1_000_000.0,
+                );
+                drop(timestamp_data);
+
+                if profile_stats {
+                    let stats_data = slot.stats_buffer.slice(..).get_mapped_range();
+                    let stats: &[u32] = bytemuck::cast_slice(&stats_data);
+                    let alive = stats[0] as f64;
+                    log::info!(
+                        "  Shader stats | rays={} | world_aabb: tests={}, skips={} ({:.0}%) | bvh_nodes: tests={}, skips={} ({:.0}%) | triangles: tests={}, hits={} | objects_tested={}",
+                        stats[0],
+                        stats[1], stats[2],
+                        if stats[1] > 0 { stats[2] as f64 / stats[1] as f64 * 100.0 } else { 0.0 },
+                        stats[3], stats[4],
+                        if stats[3] > 0 { stats[4] as f64 / stats[3] as f64 * 100.0 } else { 0.0 },
+                        stats[5], stats[6], stats[7],
+                    );
+                    log::info!(
+                        "  Per-ray averages | active={:.1}% | world_aabb={:.1} | bvh_nodes={:.1} | triangles={:.1} | objects={:.1}",
+                        if slot.total_pixels > 0 {
+                            alive / (slot.total_pixels * ray_bounces as u64) as f64 * 100.0
+                        } else { 0.0 },
+                        if alive > 0.0 { stats[1] as f64 / alive } else { 0.0 },
+                        if alive > 0.0 { stats[3] as f64 / alive } else { 0.0 },
+                        if alive > 0.0 { stats[5] as f64 / alive } else { 0.0 },
+                        if alive > 0.0 { stats[7] as f64 / alive } else { 0.0 },
+                    );
+                    drop(stats_data);
+                }
+            } else {
+                log::warn!(
+                    "GPU profiling readback failed for sample {}",
+                    slot.sample_index
+                );
+            }
+
+            slot.timestamp_buffer.unmap();
+            slot.stats_buffer.unmap();
+            slot.pending = false;
+        }
+    }
 }
 
 impl<'a> RenginRenderer for RenginWgpu {
@@ -252,34 +423,6 @@ impl<'a> RenginRenderer for RenginWgpu {
         self.config.height = physical_size.height;
 
         self.surface.configure(&self.device, &self.config);
-
-        // All per-pixel buffers must track the current render extent. Rebinding
-        // only the accumulation target leaves ray and compaction buffers stale.
-        let pixel_count = u64::from(physical_size.width) * u64::from(physical_size.height);
-        let ray_data = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Ray Data Buffer"),
-            size: pixel_count * 3 * mem::size_of::<glam::Vec4>() as u64,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
-        let active_a = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Active Rays A"),
-            size: pixel_count * mem::size_of::<u32>() as u64,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
-        let active_b = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Active Rays B"),
-            size: pixel_count * mem::size_of::<u32>() as u64,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
-        let buffers = self.buffers.as_mut().unwrap();
-        buffers.insert("ray_data", ray_data);
-        buffers.insert("active_rays_a", active_a);
-        buffers.insert("active_rays_b", active_b);
-
-        self.create_bind_groups(physical_size);
     }
 
     fn create_target_textures(&mut self, physical_size: &PhysicalSize<u32>) {
@@ -344,7 +487,7 @@ impl<'a> RenginRenderer for RenginWgpu {
 
         // Shader defs for compile-time profiling toggle
         let mut shader_defs = HashMap::new();
-        if self.profile {
+        if self.profile_stats {
             shader_defs.insert("PROFILE_STATS".to_owned(), ShaderDefValue::Bool(true));
         }
 
@@ -542,7 +685,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
             });
 
-        // Stats buffer: 8 atomic u32 counters + read-back buffer for profiling
+        // Stats buffer: workgroups aggregate into these 8 atomic u32 counters.
         let stats_size = 8 * mem::size_of::<u32>();
         let buf_stats = self
             .device
@@ -553,13 +696,6 @@ impl<'a> RenginRenderer for RenginWgpu {
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
             });
-        let buf_stats_read = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Shader Stats Read Buffer"),
-            size: stats_size as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
         log::info!(
             "Finshed loading buffers in {} millis",
             now.elapsed().as_millis()
@@ -573,7 +709,6 @@ impl<'a> RenginRenderer for RenginWgpu {
             ("object_params", buf_op),
             ("ray_data", buf_ray_data),
             ("stats", buf_stats),
-            ("stats_read", buf_stats_read),
             ("active_rays_a", buf_active_rays_a),
             ("active_rays_b", buf_active_rays_b),
             ("ray_counts", buf_ray_counts),
@@ -668,7 +803,7 @@ impl<'a> RenginRenderer for RenginWgpu {
             ];
 
             // Binding numbers for compaction buffers depend on whether stats is included
-            if self.profile {
+            if self.profile_stats {
                 entries.push(storage_rw(7));  // shader_stats
                 entries.push(storage_ro(8));  // active_rays_in
                 entries.push(storage_rw(9));  // active_rays_out
@@ -933,7 +1068,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                 wgpu::BindGroupEntry { binding: 6, resource: bufs.get("ray_data").unwrap().as_entire_binding() },
             ];
             // Bind group A: in=A, out=B
-            if self.profile {
+            if self.profile_stats {
                 entries_a.push(wgpu::BindGroupEntry { binding: 7, resource: bufs.get("stats").unwrap().as_entire_binding() });
                 entries_a.push(wgpu::BindGroupEntry { binding: 8, resource: bufs.get("active_rays_a").unwrap().as_entire_binding() });
                 entries_a.push(wgpu::BindGroupEntry { binding: 9, resource: bufs.get("active_rays_b").unwrap().as_entire_binding() });
@@ -970,7 +1105,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                         wgpu::BindGroupEntry { binding: 6, resource: bufs.get("ray_data").unwrap().as_entire_binding() },
                     ];
                     // Swapped: in=B, out=A
-                    if self.profile {
+                    if self.profile_stats {
                         entries.push(wgpu::BindGroupEntry { binding: 7, resource: bufs.get("stats").unwrap().as_entire_binding() });
                         entries.push(wgpu::BindGroupEntry { binding: 8, resource: bufs.get("active_rays_b").unwrap().as_entire_binding() });
                         entries.push(wgpu::BindGroupEntry { binding: 9, resource: bufs.get("active_rays_a").unwrap().as_entire_binding() });
