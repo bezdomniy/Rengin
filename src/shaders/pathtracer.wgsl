@@ -152,6 +152,14 @@ fn light_pdf(light: ObjectParam, ray: Ray) -> f32 {
     return 1.0 / (4.0 * PI);
 }
 
+// Shading normals can tilt a sampled direction to the wrong side of the
+// actual surface. Such a ray would start inside the object, so it carries no
+// light.
+fn leaves_surface(direction: vec3<f32>, geometric_normal: vec3<f32>, transmitted: bool) -> bool {
+    let cos_geometric = dot(direction, geometric_normal);
+    return select(cos_geometric > 0.0, cos_geometric < 0.0, transmitted);
+}
+
 fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) -> vec4<f32> {
     var ray = in_ray;
 
@@ -195,6 +203,7 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) 
     if is_specular {
         // Track the medium the ray will be in after this interaction
         var next_ri = ray.refractive_index;
+        var transmitted = false;
 
         // Path regularization (pbrt 13.1.4): after non-specular interactions,
         // increase roughness to reduce variance from indirect caustics.
@@ -218,9 +227,14 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) 
             } else {
                 direction = refraction.xyz;
                 p = hitParams.underPoint;
+                transmitted = true;
                 // Refraction enters the transmitted medium
                 next_ri = eta_t;
             }
+        }
+
+        if !leaves_surface(direction, hitParams.geometric_normalv, transmitted) {
+            return RAY_MISS_COLOUR;
         }
 
         let spec_weight = compute_specular_weight(ob_params.material.colour.xyz, ob_params.material.reflective);
@@ -236,6 +250,9 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) 
             // scattering_target = random_cosine_direction();
                 let scattering_target = onb * random_cosine_direction();
                 direction = normalize(scattering_target);
+            }
+            if !leaves_surface(direction, hitParams.geometric_normalv, false) {
+                return RAY_MISS_COLOUR;
             }
 
             var next_ray = Ray(
@@ -266,6 +283,9 @@ fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) 
         } else {
             let scattering_target = onb * random_cosine_direction();
             direction = normalize(scattering_target);
+            if !leaves_surface(direction, hitParams.geometric_normalv, false) {
+                return RAY_MISS_COLOUR;
+            }
             store_ray(offset, Ray(
                 p,
                 ob_params.material.refractive_index,

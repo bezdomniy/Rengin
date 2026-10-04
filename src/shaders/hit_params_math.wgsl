@@ -1,7 +1,5 @@
 #define_import_path rengin::hit_params_math
 
-#import rengin::constants::EPSILON
-
 // Pure math functions for surface normal and hit parameter computation.
 // No bind group dependencies — suitable for both production and testing.
 
@@ -34,9 +32,41 @@ fn normalAt_params(p: vec3<f32>, typeEnum: u32, transform: mat4x4<f32>, inverse_
     return vec3<f32>(0.0);
 }
 
+// A hit point computed as o + t * d carries rounding error proportional to
+// |o| and t. (Error in t mostly moves the point along the ray; only its
+// component along the normal matters, and that stays proportional to t even at
+// grazing angles.) New rays start this far off the surface: a generous
+// multiple of that bound, so it holds at any scene scale while staying far
+// smaller than a fixed epsilon in small scenes.
+const SELF_INTERSECTION_SCALE: f32 = 64.0 * 1.1920929e-7;
+
+fn selfIntersectionOffset(ray_o: vec3<f32>, t: f32) -> f32 {
+    let o = abs(ray_o);
+    return SELF_INTERSECTION_SCALE * (max(o.x, max(o.y, o.z)) + abs(t));
+}
+
+struct OrientedNormals {
+    geometric: vec3<f32>,
+    shading: vec3<f32>,
+    front_face: bool,
+}
+
+/// Flips both normals to the side the ray came from. The side is decided by
+/// the geometric normal: an interpolated shading normal can point away from
+/// the ray at grazing angles even though the ray hit the front of the
+/// surface. Mesh winding need not match the vertex normals, so which side is
+/// "outward" (for entering and leaving media) comes from the shading normal.
+fn orientNormals(ray_d: vec3<f32>, geometric_n: vec3<f32>, shading_n: vec3<f32>) -> OrientedNormals {
+    let outward = select(-geometric_n, geometric_n, dot(geometric_n, shading_n) >= 0.0);
+    let front_face = dot(ray_d, outward) < 0.0;
+    let side = select(-1.0, 1.0, front_face);
+    return OrientedNormals(outward * side, shading_n * side, front_face);
+}
+
 struct HitResult {
     p: vec3<f32>,
     normalv: vec3<f32>,
+    geometric_normalv: vec3<f32>,
     eyev: vec3<f32>,
     reflectv: vec3<f32>,
     overPoint: vec3<f32>,
@@ -57,14 +87,16 @@ fn getHitParams_params(
     var result: HitResult;
     let normal_ray_d = normalize(ray_d);
     result.p = ray_o + normal_ray_d * closestT;
-    result.normalv = normalAt_params(result.p, typeEnum, transform, inverse_transform);
+    // Analytic primitives have no separate shading normal.
+    let normal = normalAt_params(result.p, typeEnum, transform, inverse_transform);
+    let oriented = orientNormals(normal_ray_d, normal, normal);
+    result.normalv = oriented.shading;
+    result.geometric_normalv = oriented.geometric;
+    result.front_face = oriented.front_face;
     result.eyev = -normal_ray_d;
-    result.front_face = dot(ray_d, result.normalv) < 0.0;
-    if !result.front_face {
-        result.normalv = -result.normalv;
-    }
     result.reflectv = reflect(normal_ray_d, result.normalv);
-    result.overPoint = result.p + result.normalv * EPSILON;
-    result.underPoint = result.p - result.normalv * EPSILON;
+    let offset = selfIntersectionOffset(ray_o, closestT);
+    result.overPoint = result.p + result.geometric_normalv * offset;
+    result.underPoint = result.p - result.geometric_normalv * offset;
     return result;
 }

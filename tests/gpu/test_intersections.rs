@@ -549,10 +549,8 @@ fn aabb_ray_along_face() {
         [-1.0, -1.0, -1.0],
         [1.0, 1.0, 1.0],
     );
-    // At y=1.0 exactly, t_min and t_max for y-slabs are equal -> the ray is degenerate.
-    // The implementation uses t_max > max(t_min, 0) which means = fails -> miss.
-    // This is correct behavior (avoiding false positives on tangent rays).
-    // Just verify it doesn't crash.
+    // At y=1.0 exactly, 0 * inf makes the y slab NaN, so the result is
+    // implementation-defined. Just verify it doesn't crash.
     let _ = result;
 }
 
@@ -585,4 +583,91 @@ fn world_aabb_miss() {
         [5.0, 5.0, -5.0], [0.0, 0.0, 1.0], MAXLEN,
         [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0],
     ));
+}
+
+// --- AABB: zero-thickness boxes ---
+// BVH nodes holding only axis-aligned coplanar triangles (e.g. Sponza's column
+// faces) have zero extent on one axis. Rays through them must still hit.
+
+#[test]
+fn aabb_flat_box_perpendicular_hit() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_intersections_module(&ctx, &mut compiler);
+    assert!(run_aabb_test(
+        &ctx,
+        &module,
+        [0.25, -0.5, -5.0],
+        [1e4, 1e4, 1.0],
+        MAXLEN,
+        [-1.0, -1.0, 0.0],
+        [1.0, 1.0, 0.0],
+    ));
+}
+
+#[test]
+fn aabb_flat_box_oblique_hits() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_intersections_module(&ctx, &mut compiler);
+    // Rays from several directions through points inside a flat box at x = 3.7.
+    for (origin, target) in [
+        ([-20.0, 1.3, 2.9], [3.7, 0.4, -0.6]),
+        ([40.0, -7.0, 11.0], [3.7, -0.2, 0.9]),
+        ([-3.0, 25.0, -18.0], [3.7, 0.8, 0.1]),
+    ] {
+        let direction = normalize(sub(target, origin));
+        assert!(
+            run_aabb_test(
+                &ctx,
+                &module,
+                origin,
+                direction.map(|component| 1.0 / component),
+                MAXLEN,
+                [3.7, -1.0, -1.0],
+                [3.7, 1.0, 1.0],
+            ),
+            "ray from {origin:?} towards {target:?} missed"
+        );
+    }
+}
+
+#[test]
+fn world_aabb_flat_box_hit() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_intersections_module(&ctx, &mut compiler);
+    assert!(run_world_aabb_test(
+        &ctx, &module,
+        [0.0, 5.0, 0.3], [0.0, -1.0, 0.0], MAXLEN,
+        [-1.0, 0.0, -1.0], [1.0, 0.0, 1.0],
+    ));
+}
+
+#[test]
+fn flat_box_still_respects_closest_t_and_direction() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_intersections_module(&ctx, &mut compiler);
+    // Box at t = 5 is beyond closest_t = 4.
+    assert!(!run_aabb_test(
+        &ctx, &module,
+        [0.0, 0.0, -5.0], [1e4, 1e4, 1.0], 4.0,
+        [-1.0, -1.0, 0.0], [1.0, 1.0, 0.0],
+    ));
+    // Box is behind the ray.
+    assert!(!run_aabb_test(
+        &ctx, &module,
+        [0.0, 0.0, 5.0], [1e4, 1e4, 1.0], MAXLEN,
+        [-1.0, -1.0, 0.0], [1.0, 1.0, 0.0],
+    ));
+}
+
+fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn normalize(v: [f32; 3]) -> [f32; 3] {
+    let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    [v[0] / length, v[1] / length, v[2] / length]
 }

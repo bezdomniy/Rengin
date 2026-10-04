@@ -5,7 +5,13 @@ use super::{
     BufferSpec, ShaderCompiler, GPU_TOLERANCE,
 };
 
-const EPSILON: f32 = 0.001;
+/// Mirrors SELF_INTERSECTION_SCALE in hit_params_math.wgsl.
+const SELF_INTERSECTION_SCALE: f32 = 64.0 * f32::EPSILON;
+
+fn expected_offset(ray_o: [f32; 3], t: f32) -> f32 {
+    let max_abs = ray_o.iter().fold(0.0f32, |acc, c| acc.max(c.abs()));
+    SELF_INTERSECTION_SCALE * (max_abs + t.abs())
+}
 
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -326,9 +332,10 @@ fn hit_params_plane_from_above() {
     assert_vec3_approx_eq(eyev, [0.0, 1.0, 0.0], GPU_TOLERANCE, "eye");
     assert!(front_face, "should be front face");
 
-    // overPoint offset along +y
-    assert_approx_eq(over_point[1], EPSILON, GPU_TOLERANCE);
-    assert_approx_eq(under_point[1], -EPSILON, GPU_TOLERANCE);
+    // overPoint/underPoint are offset along +y/-y by the scale-aware offset
+    let offset = expected_offset([0.0, 5.0, 0.0], 5.0);
+    assert!((over_point[1] - offset).abs() <= offset * 1e-3, "overPoint.y = {}", over_point[1]);
+    assert!((under_point[1] + offset).abs() <= offset * 1e-3, "underPoint.y = {}", under_point[1]);
 }
 
 #[test]
@@ -337,25 +344,24 @@ fn hit_params_over_under_point_offset_magnitude() {
     let mut compiler = ShaderCompiler::new();
     let module = compile_hit_params_module(&ctx, &mut compiler);
 
-    // Verify the offset is exactly EPSILON
+    // The offset scales with |ray origin| + t
+    let offset = expected_offset([0.0, 0.0, -5.0], 4.0);
     let (p, normalv, _, _, over_point, under_point, _) =
         run_hit_params_test(&ctx, &module, [0.0, 0.0, -5.0], [0.0, 0.0, 1.0], 4.0, 0);
 
-    // Distance from p to overPoint should be EPSILON
     let over_dist = vec3_len([
         over_point[0] - p[0],
         over_point[1] - p[1],
         over_point[2] - p[2],
     ]);
-    assert_approx_eq(over_dist, EPSILON, GPU_TOLERANCE);
+    assert!((over_dist - offset).abs() <= offset * 1e-2, "overPoint offset {over_dist}, expected {offset}");
 
-    // Distance from p to underPoint should be EPSILON
     let under_dist = vec3_len([
         under_point[0] - p[0],
         under_point[1] - p[1],
         under_point[2] - p[2],
     ]);
-    assert_approx_eq(under_dist, EPSILON, GPU_TOLERANCE);
+    assert!((under_dist - offset).abs() <= offset * 1e-2, "underPoint offset {under_dist}, expected {offset}");
 
     // overPoint - p should be in the direction of normalv
     let over_dir = [
@@ -452,4 +458,109 @@ fn reflect_preserves_length() {
     let out: &[Vec4f] = bytemuck::cast_slice(&results[0]);
     let r_len = vec3_len([out[0].0[0], out[0].0[1], out[0].0[2]]);
     assert_approx_eq(r_len, d_len, GPU_TOLERANCE);
+}
+
+// ===========================================================================
+// Self-intersection robustness
+// ===========================================================================
+
+#[test]
+fn hit_params_offset_clears_plane_at_large_and_small_scales() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_hit_params_module(&ctx, &mut compiler);
+
+    // Rays from far-away origins and at grazing angles, plus a tiny scene
+    // where a fixed 0.001 offset would be larger than the geometry.
+    for (origin, target) in [
+        ([4000.0, 300.0, -2500.0], [4100.0, 0.0, -2400.0]),
+        ([-9000.0, 0.7, 8000.0], [-1.5, 0.0, 2.25]),
+        ([0.0, 2.0, -5000.0], [3.0, 0.0, 9.0]),
+        ([0.0, 0.0005, 0.0], [0.0001, 0.0, 0.0]),
+    ] {
+        let to_target = [
+            (target[0] - origin[0]) as f64,
+            (target[1] - origin[1]) as f64,
+            (target[2] - origin[2]) as f64,
+        ];
+        let t = (to_target[0] * to_target[0] + to_target[1] * to_target[1] + to_target[2] * to_target[2]).sqrt();
+        let direction = to_target.map(|c| (c / t) as f32);
+        let (p, normalv, _, _, over_point, under_point, front_face) =
+            run_hit_params_test(&ctx, &module, origin, direction, t as f32, 1);
+
+        assert!(front_face, "ray from {origin:?} should hit the top of the plane");
+        assert_vec3_approx_eq(normalv, [0.0, 1.0, 0.0], GPU_TOLERANCE, "plane normal");
+        assert!(over_point[1] > 0.0, "overPoint {over_point:?} not above the plane (p = {p:?})");
+        assert!(under_point[1] < 0.0, "underPoint {under_point:?} not below the plane (p = {p:?})");
+        assert!(
+            over_point[1] < 1e-3 * (1.0 + t as f32),
+            "offset {} is too large for a ray of length {t}",
+            over_point[1]
+        );
+    }
+}
+
+fn run_orient_normals_test(
+    ctx: &super::GpuTestContext,
+    module: &wgpu::ShaderModule,
+    ray_d: [f32; 3],
+    geometric_n: [f32; 3],
+    shading_n: [f32; 3],
+) -> ([f32; 3], [f32; 3], bool) {
+    let inputs = vec![
+        Vec4f([ray_d[0], ray_d[1], ray_d[2], 0.0]),
+        Vec4f([geometric_n[0], geometric_n[1], geometric_n[2], 0.0]),
+        Vec4f([shading_n[0], shading_n[1], shading_n[2], 0.0]),
+    ];
+    let buffers = vec![
+        BufferSpec::storage_readonly(0, bytemuck::cast_slice(&inputs).to_vec()),
+        BufferSpec::storage_readwrite(1, vec![0u8; 3 * std::mem::size_of::<Vec4f>()]),
+    ];
+    let results = dispatch_and_readback(ctx, module, "test_orient_normals", [1, 1, 1], &buffers);
+    let out: &[Vec4f] = bytemuck::cast_slice(&results[0]);
+    (
+        [out[0].0[0], out[0].0[1], out[0].0[2]],
+        [out[1].0[0], out[1].0[1], out[1].0[2]],
+        out[2].0[0] > 0.5,
+    )
+}
+
+#[test]
+fn orient_normals_uses_geometric_side_at_grazing_angles() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_hit_params_module(&ctx, &mut compiler);
+
+    // A grazing ray hits the top of a surface whose interpolated shading
+    // normal is tilted towards the ray direction, so dot(ray, shading) > 0.
+    let ray_d = [0.995, -0.0995, 0.0];
+    let shading = [0.7, 0.714, 0.0];
+    let (geometric, oriented_shading, front_face) =
+        run_orient_normals_test(&ctx, &module, ray_d, [0.0, 1.0, 0.0], shading);
+
+    assert!(front_face, "the ray hit the front of the surface");
+    assert_vec3_approx_eq(geometric, [0.0, 1.0, 0.0], GPU_TOLERANCE, "geometric normal");
+    assert_vec3_approx_eq(oriented_shading, shading, GPU_TOLERANCE, "shading normal");
+}
+
+#[test]
+fn orient_normals_takes_outward_side_from_shading_normal() {
+    require_gpu!(ctx);
+    let mut compiler = ShaderCompiler::new();
+    let module = compile_hit_params_module(&ctx, &mut compiler);
+
+    // Triangle winding gives a downward geometric normal, but the vertex
+    // normals point up: a ray from above hits the front.
+    let (geometric, shading, front_face) =
+        run_orient_normals_test(&ctx, &module, [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, 1.0, 0.0]);
+    assert!(front_face);
+    assert_vec3_approx_eq(geometric, [0.0, 1.0, 0.0], GPU_TOLERANCE, "geometric normal");
+    assert_vec3_approx_eq(shading, [0.0, 1.0, 0.0], GPU_TOLERANCE, "shading normal");
+
+    // A ray from inside hits the back; both normals face the ray.
+    let (geometric, shading, front_face) =
+        run_orient_normals_test(&ctx, &module, [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]);
+    assert!(!front_face);
+    assert_vec3_approx_eq(geometric, [0.0, -1.0, 0.0], GPU_TOLERANCE, "geometric normal");
+    assert_vec3_approx_eq(shading, [0.0, -1.0, 0.0], GPU_TOLERANCE, "shading normal");
 }

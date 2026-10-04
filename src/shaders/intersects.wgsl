@@ -1,7 +1,7 @@
 #define_import_path rengin::intersects
 
 #import rengin::types::{NodeInner, NodeLeaf, Ray, Intersection, ObjectParam}
-#import rengin::constants::{EPSILON, MAXLEN}
+#import rengin::constants::MAXLEN
 #import rengin::pt_bindings::{inner_nodes, leaf_nodes, object_params, ubo}
 #import rengin::stats::{
     p_bvh_node_tests, p_bvh_node_skips,
@@ -29,7 +29,7 @@ fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, o
 
     let t = f * dot(e2, originCrossE1);
 
-    let isHit: bool = (uv.x >= 0.0) && (uv.y >= 0.0) && (uv.x + uv.y <= 1.0) && (t < inIntersection.closestT) && (t > EPSILON);
+    let isHit: bool = (uv.x >= 0.0) && (uv.y >= 0.0) && (uv.x + uv.y <= 1.0) && (t < inIntersection.closestT) && (t > 0.0);
 
     if isHit {
         return Intersection(uv, i32(triangleIdx), t, object_id);
@@ -63,7 +63,7 @@ fn intersectInnerNodes(ray: Ray, inIntersection: Intersection, min_inner_node_id
 #endif
                     let next_intersection = intersectTriangle(ray, primIdx, ret, object_id);
 
-                    if (next_intersection.closestT < ret.closestT) && (next_intersection.closestT > EPSILON) {
+                    if next_intersection.closestT < ret.closestT {
 #ifdef PROFILE_STATS
                         p_triangle_hits += 1u;
 #endif

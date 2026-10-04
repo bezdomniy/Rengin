@@ -26,6 +26,7 @@ struct NodeInner {
 struct HitParams {
     p: vec3<f32>,
     normalv: vec3<f32>,
+    geometric_normalv: vec3<f32>,
     eyev: vec3<f32>,
     reflectv: vec3<f32>,
     overPoint: vec3<f32>,

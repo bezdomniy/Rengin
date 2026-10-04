@@ -1,7 +1,22 @@
 #define_import_path rengin::intersects_math
 
 #import rengin::types::{NodeInner, Ray, Intersection}
-#import rengin::constants::{EPSILON, MAXLEN}
+#import rengin::constants::MAXLEN
+
+// Hits only need t > 0: rays leaving a surface start offset from it by
+// selfIntersectionOffset, which scales with the scene instead of being a fixed
+// distance.
+
+// Slab tests must be inclusive and slightly conservative. BVH nodes around
+// axis-aligned coplanar triangles have zero thickness, so rays that hit them
+// get t_min == t_max, and nearly flat nodes can round to t_max < t_min. Scaling
+// t_max (pbrt's 1 + 2 * gamma(3), widened for WGSL's 2.5 ULP division) keeps
+// those hits; a false positive only costs an extra node test.
+const AABB_T_MAX_SCALE: f32 = 1.0 + 1e-5;
+
+fn slabsOverlap(t_min: f32, t_max: f32, closest_t: f32) -> bool {
+    return t_max * AABB_T_MAX_SCALE >= max(t_min, 0.0) && t_min < closest_t;
+}
 
 fn intersectAABB_inv(ray_o: vec3<f32>, inv_d: vec3<f32>, inner_node: NodeInner, closest_t: f32) -> bool {
     let t0s = (inner_node.first - ray_o) * inv_d;
@@ -10,7 +25,7 @@ fn intersectAABB_inv(ray_o: vec3<f32>, inv_d: vec3<f32>, inner_node: NodeInner, 
     let tbigger = max(t0s, t1s);
     let t_min = max(tsmaller.x, max(tsmaller.y, tsmaller.z));
     let t_max = min(tbigger.x, min(tbigger.y, tbigger.z));
-    return t_max > max(t_min, 0.0) && t_min < closest_t;
+    return slabsOverlap(t_min, t_max, closest_t);
 }
 
 fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
@@ -27,11 +42,11 @@ fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: u32) -> In
     let t2 = (-b + sqrt(discriminant)) / (2.0 * a);
 
     if t1 < inIntersection.closestT || t2 < inIntersection.closestT {
-        if t1 < t2 && t1 > EPSILON {
+        if t1 < t2 && t1 > 0.0 {
             return Intersection(vec2<f32>(0.0), 0, t1, object_id);
         }
 
-        if t2 > EPSILON && t2 < inIntersection.closestT {
+        if t2 > 0.0 && t2 < inIntersection.closestT {
             return Intersection(vec2<f32>(0.0), 0, t2, object_id);
         }
     }
@@ -39,13 +54,12 @@ fn intersectSphere(ray: Ray, inIntersection: Intersection, object_id: u32) -> In
 }
 
 fn intersectPlane(ray: Ray, inIntersection: Intersection, object_id: u32) -> Intersection {
-    if abs(ray.rayD.y) < EPSILON {
-        return inIntersection;
-    }
-
+    // No parallel check: rayD is in object space and not normalized, so a
+    // threshold on it would depend on the plane's scale. A ray parallel to
+    // the plane gives an infinite or NaN t, which the comparisons reject.
     let t: f32 = -ray.rayO.y / ray.rayD.y;
 
-    if t < inIntersection.closestT && t > EPSILON {
+    if t < inIntersection.closestT && t > 0.0 {
         return Intersection(vec2<f32>(0.0), 0, t, object_id);
     }
     return inIntersection;
@@ -64,9 +78,9 @@ fn intersectCube(ray: Ray, inIntersection: Intersection, object_id: u32) -> Inte
         return inIntersection;
     }
 
-    if t_min < inIntersection.closestT && t_min > EPSILON {
+    if t_min < inIntersection.closestT && t_min > 0.0 {
         return Intersection(vec2<f32>(0.0), 0, t_min, object_id);
-    } else if t_max < inIntersection.closestT && t_max > EPSILON {
+    } else if t_max < inIntersection.closestT && t_max > 0.0 {
         return Intersection(vec2<f32>(0.0), 0, t_max, object_id);
     }
     return inIntersection;
@@ -82,5 +96,5 @@ fn intersectWorldAABB(ray: Ray, aabb_min: vec3<f32>, aabb_max: vec3<f32>, closes
     let tbigger = max(t0s, t1s);
     let t_min = max(tsmaller.x, max(tsmaller.y, tsmaller.z));
     let t_max = min(tbigger.x, min(tbigger.y, tbigger.z));
-    return t_max > max(t_min, 0.0) && t_min < closest_t;
+    return slabsOverlap(t_min, t_max, closest_t);
 }

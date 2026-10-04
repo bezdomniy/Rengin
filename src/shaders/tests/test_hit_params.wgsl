@@ -1,4 +1,4 @@
-#import rengin::hit_params_math::{normalAt_params, getHitParams_params, HitResult}
+#import rengin::hit_params_math::{normalAt_params, getHitParams_params, HitResult, orientNormals}
 
 @group(0) @binding(0) var<storage, read> inputs_4f: array<vec4<f32>>;
 @group(0) @binding(1) var<storage, read_write> outputs_4f: array<vec4<f32>>;
@@ -83,4 +83,15 @@ fn test_reflect(@builtin(global_invocation_id) id: vec3<u32>) {
     let n = inputs_4f[base + 1u].xyz;
     let r = reflect(d, n);
     outputs_4f[id.x] = vec4<f32>(r, 0.0);
+}
+
+// ---- orientNormals: input = ray_d, geometric_n, shading_n (3 vec4s) ----
+// Output: geometric, shading, front_face (3 vec4s)
+@compute @workgroup_size(1)
+fn test_orient_normals(@builtin(global_invocation_id) id: vec3<u32>) {
+    let base = id.x * 3u;
+    let oriented = orientNormals(inputs_4f[base].xyz, inputs_4f[base + 1u].xyz, inputs_4f[base + 2u].xyz);
+    outputs_4f[base] = vec4<f32>(oriented.geometric, 0.0);
+    outputs_4f[base + 1u] = vec4<f32>(oriented.shading, 0.0);
+    outputs_4f[base + 2u] = vec4<f32>(select(0.0, 1.0, oriented.front_face), 0.0, 0.0, 0.0);
 }
