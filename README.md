@@ -16,6 +16,8 @@ You can find more scenes under `assets/scenes`
 
 The scene yaml files are built according to the format created by Jamis Buck for the Ray Tracer Challenge book (with some modifications).
 
+Unknown keys, shape, material and transform names are reported as errors when a scene loads. Meshes are added with `add: obj` and a `file:` path relative to the scene file. Patterns, `args` and `shadow` are accepted but not rendered yet.
+
 ### Options:
 Type `cargo run --release -- -h` for a full list of options.
 

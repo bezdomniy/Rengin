@@ -22,7 +22,7 @@
 - define: sponza
   value:
     add: obj
-    file: assets/models/sponza.obj
+    file: ../models/sponza.obj
 
 - add: sponza
   material: sand-material

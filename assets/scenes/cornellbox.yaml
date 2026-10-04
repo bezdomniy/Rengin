@@ -55,7 +55,7 @@
 - define: lucy
   value:
     add: obj
-    file: assets/models/lucy.obj
+    file: ../models/lucy.obj
     transform:
       - [scale, 0.36, 0.36, 0.36]
 

@@ -26,12 +26,9 @@ bytemuck = { version = "1.23", features = ["derive"] }
 tobj = "4.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml_ng = "0.10"
-image = "0.25"
 
 # Utilities
-rand = "0.9"
 getrandom = "0.3"
-linked-hash-map = "0.5.6"
 itertools = "0.14"
 cfg-if = "1"
 futures = { version = "0.3" }

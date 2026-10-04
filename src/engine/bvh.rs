@@ -1,10 +1,10 @@
 use itertools::partition;
-use std::any::Any;
 static MAX_SHAPES_IN_NODE: usize = 4;
 
 use glam::{Mat3, Vec3, Vec4};
+use std::path::Path;
 
-use super::rt_primitives::ObjectParam;
+use super::obj_loader::{ModelError, load_obj_triangles};
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -36,100 +36,6 @@ pub struct NodeInner {
 pub struct TrianglePrimitive {
     pub points: Mat3,
     pub normals: Mat3,
-}
-
-#[derive(Debug, Default, Copy, Clone)]
-pub struct UnitPrimitive {} // Sphere or cube
-
-#[derive(Debug, Default, Copy, Clone)]
-pub struct PlanePrimitive {}
-
-pub struct Primitives(Vec<Vec<Box<dyn Bounded>>>);
-
-impl Primitives {
-    pub fn new() -> Self {
-        Primitives(vec![])
-    }
-
-    #[allow(dead_code)]
-    pub fn extend_from_object_params(&mut self, _object_params: &[ObjectParam]) {
-        // let primitives = vec![Primitive::default()];
-        // self.0.push(primitives);
-        todo!()
-    }
-
-    pub fn extend_from_models(&mut self, paths: &[String]) {
-        let (models, _materials): (Vec<_>, Vec<_>) = paths
-            .iter()
-            .map(|path| {
-                log::info!("Loading {:?}", path);
-                tobj::load_obj(
-                    path,
-                    &tobj::LoadOptions {
-                        triangulate: true,
-                        single_index: true,
-                        ..Default::default()
-                    },
-                )
-                .expect("Failed to OBJ load file")
-            })
-            .unzip();
-
-        // TODO: take Vec<Primitives> out to have it's own constructor which is then
-        //       fed in as the constructor for bvh. That way can can add other shapes to it.
-        for model in models.iter() {
-            self.0.push(vec![]);
-
-            for part in model.iter() {
-                // println!("{:?}",model.mesh.indices);
-                let primitives_iter =
-                    part.mesh
-                        .indices
-                        .chunks_exact(3)
-                        .into_iter()
-                        .map(|triangle_indices| {
-                            // println!("{:?}", triangle_indices);
-                            Box::new(TrianglePrimitive {
-                                points: Mat3::from_cols_array_2d(&[
-                                    [
-                                        part.mesh.positions[3 * triangle_indices[0] as usize],
-                                        part.mesh.positions[(3 * triangle_indices[0] + 1) as usize],
-                                        part.mesh.positions[(3 * triangle_indices[0] + 2) as usize],
-                                    ],
-                                    [
-                                        part.mesh.positions[3 * triangle_indices[1] as usize],
-                                        part.mesh.positions[(3 * triangle_indices[1] + 1) as usize],
-                                        part.mesh.positions[(3 * triangle_indices[1] + 2) as usize],
-                                    ],
-                                    [
-                                        part.mesh.positions[3 * triangle_indices[2] as usize],
-                                        part.mesh.positions[(3 * triangle_indices[2] + 1) as usize],
-                                        part.mesh.positions[(3 * triangle_indices[2] + 2) as usize],
-                                    ],
-                                ]),
-                                normals: Mat3::from_cols_array_2d(&[
-                                    [
-                                        part.mesh.normals[3 * triangle_indices[0] as usize],
-                                        part.mesh.normals[(3 * triangle_indices[0] + 1) as usize],
-                                        part.mesh.normals[(3 * triangle_indices[0] + 2) as usize],
-                                    ],
-                                    [
-                                        part.mesh.normals[3 * triangle_indices[1] as usize],
-                                        part.mesh.normals[(3 * triangle_indices[1] + 1) as usize],
-                                        part.mesh.normals[(3 * triangle_indices[1] + 2) as usize],
-                                    ],
-                                    [
-                                        part.mesh.normals[3 * triangle_indices[2] as usize],
-                                        part.mesh.normals[(3 * triangle_indices[2] + 1) as usize],
-                                        part.mesh.normals[(3 * triangle_indices[2] + 2) as usize],
-                                    ],
-                                ]),
-                            }) as Box<dyn Bounded>
-                        });
-                self.0.last_mut().unwrap().extend(primitives_iter);
-            }
-        }
-    }
 }
 
 #[derive(Debug, Default)]
@@ -171,50 +77,33 @@ impl Bvh {
         }
     }
 
-    pub fn new(paths: &[String]) -> Self {
+    /// Loads each OBJ file in `paths` and builds one BVH per model, in order.
+    pub fn new(paths: &[String]) -> Result<Self, ModelError> {
         let mut object_inner_nodes: Vec<Vec<NodeInner>> = vec![];
         let mut object_leaf_nodes: Vec<Vec<NodeLeaf>> = vec![];
         let mut object_normal_nodes: Vec<Vec<NodeNormal>> = vec![];
 
-        let mut primitives = Primitives::new();
-        primitives.extend_from_models(paths);
-
-        // TODO: take Vec<Primitives> out to have it's own constructor which is then
-        //       fed in as the constructor for bvh. That way can can add other shapes to it.
-        for next_primitives in primitives.0.iter_mut() {
-            let bounding_boxes = Bvh::build(next_primitives);
-
-            let (triangles, normals): (Vec<NodeLeaf>, Vec<NodeNormal>) = next_primitives
-                .iter()
-                .map(|primitive| {
-                    let (points, normals) = if let Some(triangle) =
-                        primitive.as_any().downcast_ref::<TrianglePrimitive>()
-                    {
-                        (triangle.points, triangle.normals)
-                    } else if primitive.as_any().downcast_ref::<UnitPrimitive>().is_some()
-                        || primitive
-                            .as_any()
-                            .downcast_ref::<PlanePrimitive>()
-                            .is_some()
-                    {
-                        (Mat3::default(), Mat3::default())
-                    } else {
-                        panic!("Unknown primitive type.")
-                    };
-                    (
-                        NodeLeaf::new(points.to_cols_array()),
-                        NodeNormal::new(normals.to_cols_array()),
-                    )
-                })
-                .unzip();
+        for path in paths {
+            let mut triangles = load_obj_triangles(Path::new(path))?;
+            let bounding_boxes = Bvh::build(&mut triangles);
 
             object_inner_nodes.push(bounding_boxes);
-            object_leaf_nodes.push(triangles);
-            object_normal_nodes.push(normals);
+            object_leaf_nodes.push(
+                triangles
+                    .iter()
+                    .map(|triangle| NodeLeaf::new(triangle.points.to_cols_array()))
+                    .collect(),
+            );
+            object_normal_nodes.push(
+                triangles
+                    .iter()
+                    .map(|triangle| NodeNormal::new(triangle.normals.to_cols_array()))
+                    .collect(),
+            );
         }
 
         if object_inner_nodes.is_empty() {
-            return Bvh::empty();
+            return Ok(Bvh::empty());
         }
 
         let len_inner_nodes: Vec<u32> = object_inner_nodes
@@ -246,7 +135,7 @@ impl Bvh {
 
         // let n_objects = object_inner_nodes.len() as u32;
 
-        Bvh {
+        Ok(Bvh {
             inner_nodes: object_inner_nodes.into_iter().flatten().collect::<Vec<_>>(),
             leaf_nodes: object_leaf_nodes.into_iter().flatten().collect::<Vec<_>>(),
             normal_nodes: object_normal_nodes
@@ -257,10 +146,10 @@ impl Bvh {
             len_inner_nodes,
             offset_leaf_nodes,
             model_tags: paths.to_vec(),
-        }
+        })
     }
 
-    fn build(triangles: &mut [Box<dyn Bounded>]) -> Vec<NodeInner> {
+    fn build(triangles: &mut [TrianglePrimitive]) -> Vec<NodeInner> {
         let mut bounding_boxes: Vec<NodeInner> =
             Vec::with_capacity(triangles.len().next_power_of_two());
 
@@ -280,7 +169,7 @@ impl Bvh {
     // TODO: make this return the skip pointer so it can bubble up
     fn recursive_build(
         bounding_boxes: &mut Vec<NodeInner>,
-        triangle_params_unsorted: &mut [Box<dyn Bounded>],
+        triangle_params_unsorted: &mut [TrianglePrimitive],
         start: usize,
         end: usize,
         split_method: SplitMethod,
@@ -505,10 +394,9 @@ impl Bvh {
         bounding_boxes.len() as u32
     }
 
-    pub fn find_model_locations(&self, tag: &String) -> (u32, u32, u32) {
-        // println!("### TAG {:?}", tag);
-        let index = self.model_tags.iter().position(|r| r == tag).unwrap();
-
+    /// Returns the inner-node offset, inner-node count and leaf offset of the
+    /// model at `index` in the `paths` passed to [`Bvh::new`].
+    pub fn model_location(&self, index: usize) -> (u32, u32, u32) {
         (
             self.offset_inner_nodes[index],
             self.len_inner_nodes[index],
@@ -521,20 +409,20 @@ impl Bvh {
 mod tests {
     use super::*;
 
-    fn triangle_at(x: f32) -> Box<dyn Bounded> {
-        Box::new(TrianglePrimitive {
+    fn triangle_at(x: f32) -> TrianglePrimitive {
+        TrianglePrimitive {
             points: Mat3::from_cols(
                 Vec3::new(x, 0.0, 0.0),
                 Vec3::new(x + 0.1, 1.0, 0.0),
                 Vec3::new(x + 0.1, 0.0, 1.0),
             ),
             normals: Mat3::ZERO,
-        })
+        }
     }
 
     #[test]
     fn sah_root_split_is_not_pathologically_unbalanced() {
-        let mut primitives: Vec<Box<dyn Bounded>> =
+        let mut primitives: Vec<TrianglePrimitive> =
             (0..96).map(|index| triangle_at(index as f32)).collect();
         let nodes = Bvh::build(&mut primitives);
         let right_subtree_start = nodes[1].skip_ptr_or_prim_idx1 as usize;
@@ -553,7 +441,7 @@ mod tests {
     #[test]
     fn sah_leaf_ranges_cover_every_primitive_once() {
         let primitive_count = 97usize;
-        let mut primitives: Vec<Box<dyn Bounded>> = (0..primitive_count)
+        let mut primitives: Vec<TrianglePrimitive> = (0..primitive_count)
             .map(|index| triangle_at((index * 17 % primitive_count) as f32))
             .collect();
         let nodes = Bvh::build(&mut primitives);
@@ -600,7 +488,6 @@ trait Bounded {
         let bounds = self.bounds();
         0.5 * bounds.first + 0.5 * bounds.second
     }
-    fn as_any(&self) -> &dyn Any;
 }
 
 impl Bounded for TrianglePrimitive {
@@ -611,38 +498,6 @@ impl Bounded for TrianglePrimitive {
             .fold(NodeInner::empty(), |aabb, p| {
                 aabb.add_point(&Vec3::from_array(*p))
             })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl Bounded for UnitPrimitive {
-    fn bounds(&self) -> NodeInner {
-        NodeInner {
-            first: Vec3::new(-1f32, -1f32, -1f32),
-            second: Vec3::new(1f32, 1f32, 1f32),
-            ..Default::default()
-        }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl Bounded for PlanePrimitive {
-    fn bounds(&self) -> NodeInner {
-        NodeInner {
-            first: Vec3::new(-f32::INFINITY, 0f32, -f32::INFINITY),
-            second: Vec3::new(f32::INFINITY, 0f32, f32::INFINITY),
-            ..Default::default()
-        }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 

@@ -113,20 +113,20 @@ impl State {
 
         let game_state = GameState {
             camera: Camera::new(
-                scene.camera.as_ref().unwrap().from,
-                scene.camera.as_ref().unwrap().to,
-                scene.camera.as_ref().unwrap().up,
+                scene.camera.from,
+                scene.camera.to,
+                scene.camera.up,
             ),
         };
 
         let screen_data = ScreenData::new(
             game_state.camera.get_inverse_transform(),
-            scene.object_params.as_ref().unwrap().len() as u32,
+            scene.object_params.len() as u32,
             scene.specular_offset as u32,
             scene.lights_offset as u32,
             ray_bounces,
             render_size,
-            scene.camera.as_ref().unwrap().field_of_view,
+            scene.camera.field_of_view,
             (renderer.rays_per_pixel as f32).sqrt() as u32,
         );
 
@@ -141,14 +141,14 @@ impl State {
         );
 
         renderer.create_buffers(
-            scene.bvh.as_ref().unwrap(),
+            &scene.bvh,
             &screen_data,
-            scene.object_params.as_ref().unwrap(),
+            &scene.object_params,
         );
         renderer.create_pipelines(
-            scene.bvh.as_ref().unwrap(),
+            &scene.bvh,
             &screen_data,
-            scene.object_params.as_ref().unwrap(),
+            &scene.object_params,
         );
 
         // TODO: remove buffers as arg and move into RenginWgpu state
@@ -426,17 +426,25 @@ impl ApplicationHandler for RenderApp {
             if #[cfg(target_arch = "wasm32")] {
                 let scene = engine::embedded_assets::load_scene(&config.scene, &renderer_type);
             } else {
-                let scene = Scene::new(&config.scene, &renderer_type);
+                let scene = Scene::from_file(&config.scene, &renderer_type);
             }
         }
+        let scene = match scene {
+            Ok(scene) => scene,
+            Err(error) => {
+                log::error!("Failed to load scene {}: {error}", config.scene);
+                event_loop.exit();
+                return;
+            }
+        };
         log::info!(
             "Finished loading scene in {} millis.",
             now.elapsed().as_millis()
         );
 
         let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(
-            scene.camera.as_ref().unwrap().width,
-            scene.camera.as_ref().unwrap().height,
+            scene.camera.width,
+            scene.camera.height,
         );
         let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
         let render_size = PhysicalSize::new(
