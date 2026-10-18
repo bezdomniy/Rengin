@@ -1,91 +1,38 @@
-@group(0) @binding(0)
-var imageData: texture_storage_2d<rgba8unorm,read_write>;
-@group(0) @binding(1)
-var<uniform> ubo: UBO;
-@group(0) @binding(2)
-var<storage, read> inner_nodes: InnerNodes;
-@group(0) @binding(3)
-var<storage, read> leaf_nodes: LeafNodes;
-@group(0) @binding(4)
-var<storage, read> normal_nodes: Normals;
-@group(0) @binding(5)
-var<storage, read> object_params: ObjectParams;
-@group(0) @binding(6)
-var<storage, read_write> rays: array<Ray>;
-
-
-// // Buggy
-// fn onb(n: vec3<f32>) -> mat3x3<f32> {
-//     var out: mat3x3<f32>;
-//     out[2] = n;
-
-//     let sign = select(-1.0, 1.0, n.z >= 0.0);
-//     let a = -1.0 / (sign / n.z);
-//     let b = n.x * n.y * a;
-//     out[0] = vec3<f32>(1.0 + sign * n.x * n.x * a, sign * b, -sign * n.x);
-//     out[1] = vec3<f32>(b, sign + n.y * n.y * a, -n.y);
-
-//     return out;
-// }
-
-fn onb(n: vec3<f32>) -> mat3x3<f32> {
-    var out: mat3x3<f32>;
-    out[2] = n;
-
-    var a = vec3<f32>(1.0, 0.0, 0.0);
-    if abs(out[2].x) > 0.9 {
-        a = vec3<f32>(0.0, 1.0, 0.0);
-    }
-    out[1] = normalize(cross(out[2], a));
-    out[0] = cross(out[2], out[1]);
-
-    return out;
+#import rengin::types::{ObjectParam, Ray}
+#import rengin::constants::{EPSILON, MAXLEN, PI, RAY_MISS_COLOUR}
+#import rengin::random::{
+    init_pcg3d, next_pcg3d, rand_pcg3d,
+    f32_zero_to_one, f32_negone_to_one, rescale,
+    random_cosine_direction, random_to_sphere, random_uniform_direction,
+}
+#import rengin::pt_bindings::{
+    imageData, ubo, object_params,
+    active_rays_in, active_rays_out, ray_counts,
+    load_ray, store_ray,
+}
+#import rengin::stats::flush_stats
+#import rengin::hit_params::getHitParams
+#import rengin::fresnel::fresnel_dielectric
+#import rengin::intersects::intersect
+#import rengin::pathtracer_utils::onb
+#import rengin::pathtracer_math::{
+    light_pdf_sphere_direction, scattering_pdf as compute_scattering_pdf,
+    mis_pdf, snell_refract,
+    russian_roulette_q, russian_roulette_adjust,
+    specular_weight as compute_specular_weight,
+    path_regularization_roughness,
+    regularize_indirect_radiance,
+    determine_eta_t, cube_face_select,
 }
 
-fn _onb(n: vec3<f32>) -> mat3x3<f32> {
-    var out: mat3x3<f32>;
+const PATH_FLAG_DIFFUSE: u32 = 1u;
+const INDIRECT_RADIANCE_LIMIT: f32 = 3.0;
 
-    out[2] = n;
-    if n.z < -0.99995 {
-        out[0] = vec3<f32>(0.0, -1.0, 0.0);
-        out[1] = vec3<f32>(-1.0, 0.0, 0.0);
-    } else {
-        let a = 1.0 / (1.0 + n.z);
-        let b = -n.x * n.y * a;
-        out[0] = vec3<f32>(1.0 - n.x * n.x * a, b, -n.x);
-        out[1] = vec3<f32>(b, 1.0 - n.y * n.y * a, -n.y);
-    }
-
-    return out;
-}
-
-
-fn onb_local(v: vec3<f32>, onb: mat3x3<f32>) -> vec3<f32> {
-    // return v.x*onb[0] + v.y*onb[1] + v.z*onb[2];
-    return onb * v;
-}
-
-
-// TODO: check the initial size cube and sphere and centroid coordinates and adjust accordingly
-fn surface_area(object: ObjectParam) -> f32 {
-    let scale = vec3<f32>(length(object.transform[0].xyz), length(object.transform[1].xyz), length(object.transform[2].xyz));
-    if object.model_type == 0u {
-        return 4.0 * PI * pow((pow(scale.x * scale.z, 1.6075) + pow(scale.z * scale.y, 1.6075) + pow(scale.x * scale.y, 1.6075)) / 3.0, 1.0 / 1.6075);
-    } else if object.model_type == 1u {
-        // TODO
-        return 1.0;
-    } else if object.model_type == 2u {
-        // return (343.0 - 213.0) * (332.0 - 227.0);
-        return 2.0 * ((2.0 * scale.x * scale.z) + (2.0 * scale.z * scale.y) + (2.0 * scale.x * scale.y));
-    } else if object.model_type == 9u {
-        return 1.0;
-    }
-
-    // TODO
-    return 1.0;
-}
+var<workgroup> workgroup_alive_count: atomic<u32>;
+var<workgroup> workgroup_output_base: u32;
 
 fn random_light() -> ObjectParam {
+    next_pcg3d();
     let i = u32(rescale(f32_zero_to_one(rand_pcg3d.x), f32(ubo.lights_offset), f32(ubo.n_objects)));
     return object_params.ObjectParams[i];
 }
@@ -93,73 +40,156 @@ fn random_light() -> ObjectParam {
 fn random_to_light(light: ObjectParam, origin: vec3<f32>) -> vec3<f32> {
     let center = light.transform[3].xyz;
     let direction = center - origin;
-    let distance_squared = pow(length(direction), 2.0);
-
-    let onb = onb(normalize(direction));
+    let distance_squared = dot(direction, direction);
 
     let scale = vec3<f32>(length(light.transform[0].xyz), length(light.transform[1].xyz), length(light.transform[2].xyz));
 
 
     if light.model_type == 0u {
         let radius = max(max(scale.x, scale.y), scale.z);
-        // let radius = 1.0;
-        let r = onb * random_to_sphere(radius, distance_squared);
-        return r;
-    } else if light.model_type == 1u {
-        return vec3<f32>(0.0);
-    } else if light.model_type == 2u {
-        let p = random_in_cube();
-        // let p = random_to_cube_face((light.inverse_transform * vec4<f32>(direction,0f)).xyz);
-        let r = (light.transform * vec4<f32>(p, 1f)).xyz;
-        return normalize(r - origin);
+        if distance_squared > radius * radius {
+            return onb(normalize(direction)) * random_to_sphere(radius, distance_squared);
+        }
+        // Inside the proposal sphere every direction is in its support.
+        return random_uniform_direction();
     }
 
-    // TODO: for model mesh, choose random triangle, then random point on it
-    return vec3<f32>(1.0);
+    if light.model_type == 2u {
+        // Uniform world-area sampling over all six faces. cube_face_select
+        // weights each face by its transformed area.
+        next_pcg3d();
+        let face = cube_face_select(scale, f32_zero_to_one(rand_pcg3d.x));
+        let u = f32_negone_to_one(rand_pcg3d.y);
+        let v = f32_negone_to_one(rand_pcg3d.z);
+        var p: vec3<f32>;
+        switch face {
+            case 0u { p = vec3<f32>(-1.0, u, v); }
+            case 1u { p = vec3<f32>(1.0, u, v); }
+            case 2u { p = vec3<f32>(u, -1.0, v); }
+            case 3u { p = vec3<f32>(u, 1.0, v); }
+            case 4u { p = vec3<f32>(u, v, -1.0); }
+            default { p = vec3<f32>(u, v, 1.0); }
+        }
+        let world_p = (light.transform * vec4<f32>(p, 1.0)).xyz;
+        return normalize(world_p - origin);
+    }
+
+    // A uniform-sphere fallback keeps unsupported light geometry unbiased,
+    // although it is less efficient than geometry-specific importance sampling.
+    return random_uniform_direction();
 }
 
-fn light_pdf(ray: Ray, intersection: Intersection) -> f32 {
-    let light = object_params.ObjectParams[intersection.model_id];
+fn cube_pdf_at_t(light: ObjectParam, ray: Ray, local_o: vec3<f32>, local_d: vec3<f32>, t: f32, area: f32) -> f32 {
+    if t <= EPSILON {
+        return 0.0;
+    }
 
+    let p = local_o + t * local_d;
+    let a = abs(p);
+    var object_n: vec3<f32>;
+    if a.x >= a.y && a.x >= a.z {
+        object_n = vec3<f32>(select(-1.0, 1.0, p.x >= 0.0), 0.0, 0.0);
+    } else if a.y >= a.z {
+        object_n = vec3<f32>(0.0, select(-1.0, 1.0, p.y >= 0.0), 0.0);
+    } else {
+        object_n = vec3<f32>(0.0, 0.0, select(-1.0, 1.0, p.z >= 0.0));
+    }
+
+    let world_n = normalize((transpose(light.inverse_transform) * vec4<f32>(object_n, 0.0)).xyz);
+    let cos_theta = abs(dot(world_n, normalize(ray.rayD)));
+    if cos_theta <= 1e-7 {
+        return 0.0;
+    }
+    return t * t / (area * cos_theta);
+}
+
+fn light_pdf_cube(light: ObjectParam, ray: Ray) -> f32 {
+    let local_o = (light.inverse_transform * vec4<f32>(ray.rayO, 1.0)).xyz;
+    let local_d = (light.inverse_transform * vec4<f32>(normalize(ray.rayD), 0.0)).xyz;
+    let inv_d = 1.0 / local_d;
+    let t0 = (-vec3<f32>(1.0) - local_o) * inv_d;
+    let t1 = (vec3<f32>(1.0) - local_o) * inv_d;
+    let t_near = min(t0, t1);
+    let t_far = max(t0, t1);
+    let t_min = max(t_near.x, max(t_near.y, t_near.z));
+    let t_max = min(t_far.x, min(t_far.y, t_far.z));
+    if t_max < max(t_min, 0.0) {
+        return 0.0;
+    }
+
+    let scale = vec3<f32>(length(light.transform[0].xyz), length(light.transform[1].xyz), length(light.transform[2].xyz));
+    let area = 8.0 * (scale.x * scale.y + scale.x * scale.z + scale.y * scale.z);
+    var pdf = cube_pdf_at_t(light, ray, local_o, local_d, t_min, area);
+    if t_max > t_min + EPSILON {
+        // A direction can be generated by sampling either the entry or exit
+        // face, so the directional density is the sum of both mappings.
+        pdf = pdf + cube_pdf_at_t(light, ray, local_o, local_d, t_max, area);
+    }
+    return pdf;
+}
+
+fn light_pdf(light: ObjectParam, ray: Ray) -> f32 {
     if light.model_type == 0u {
+        // This exactly matches random_to_light's bounding-sphere proposal. It is
+        // evaluated over the entire proposal cone, including directions that miss
+        // the enclosed geometry.
         let centre = light.transform[3].xyz;
         let scale = vec3<f32>(length(light.transform[0].xyz), length(light.transform[1].xyz), length(light.transform[2].xyz));
         let radius = max(scale.x, max(scale.y, scale.z));
-        let length = length(centre - ray.rayO);
-        let cos_theta_max = sqrt(1f - radius * radius / (length * length));
-        let solid_angle = 2f * PI * (1f - cos_theta_max);
-        return  1f / solid_angle;
-    } else if light.model_type == 1u {
-        // TODO
-        return 1.0;
-    } else if light.model_type == 2u {
-        let centre = light.transform[3].xyz;
-        let scale = vec3<f32>(length(light.transform[0].xyz), length(light.transform[1].xyz), length(light.transform[2].xyz));
-        let radius = max(scale.x, max(scale.y, scale.z));
-        let length = length(centre - ray.rayO);
-        let cos_theta_max = sqrt(1f - radius * radius / (length * length));
-        let solid_angle = 2f * PI * (1f - cos_theta_max);
-        return  1f / solid_angle;
+        let to_centre = centre - ray.rayO;
+        let distance = length(to_centre);
+        var cos_theta = 1.0;
+        if distance > 0.0 {
+            cos_theta = dot(to_centre / distance, normalize(ray.rayD));
+        }
+        return light_pdf_sphere_direction(radius, distance, cos_theta);
     }
 
-    // TODO
-    return 1.0;
+    if light.model_type == 2u {
+        return light_pdf_cube(light, ray);
+    }
+
+    return 1.0 / (4.0 * PI);
 }
 
-fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
+// Shading normals can tilt a sampled direction to the wrong side of the
+// actual surface. Such a ray would start inside the object, so it carries no
+// light.
+fn leaves_surface(direction: vec3<f32>, geometric_normal: vec3<f32>, transmitted: bool) -> bool {
+    let cos_geometric = dot(direction, geometric_normal);
+    return select(cos_geometric > 0.0, cos_geometric < 0.0, transmitted);
+}
+
+fn renderScene(in_ray: Ray, offset: u32, light_sample: bool, bounce_depth: u32) -> vec4<f32> {
+    var ray = in_ray;
+
+    let max_component = max(ray.throughput.x, max(ray.throughput.y, ray.throughput.z));
+
+    // Russian roulette: after 3 bounces, stochastically terminate low-contribution
+    // paths and boost survivors to maintain unbiased results. Uses explicit bounce
+    // depth (not throughput alone) to avoid killing caustic paths with low MIS weights.
+    if bounce_depth >= 3u {
+        let q = russian_roulette_q(ray.throughput.xyz);
+        if q > 0.0 {
+            next_pcg3d();
+            if f32_zero_to_one(rand_pcg3d.x) < q {
+                return ray.throughput * RAY_MISS_COLOUR;
+            }
+            ray.throughput = vec4<f32>(russian_roulette_adjust(ray.throughput.xyz, q), ray.throughput.w);
+        }
+    }
+
     // Get intersected object ID
     let intersection = intersect(ray, 0u, false);
 
     if intersection.id == -1 || intersection.closestT >= MAXLEN {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
         return ray.throughput * RAY_MISS_COLOUR;
     }
 
     // TODO: just hard code object type in the intersection rather than looking it up
     let ob_params = object_params.ObjectParams[intersection.model_id];
 
-    if ob_params.material.emissiveness.x > 0.0 {
-        rays[offset] = Ray(vec3<f32>(-1f), -1f, vec3<f32>(-1f), 0u, vec4<f32>(-1f));
+    if any(ob_params.material.emissiveness.xyz > vec3<f32>(0.0)) {
         return ray.throughput * ob_params.material.emissiveness;
     }
     let hitParams = getHitParams(ray, intersection, ob_params.model_type);
@@ -171,42 +201,48 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
     let onb = onb(hitParams.normalv);
 
     if is_specular {
+        // Track the medium the ray will be in after this interaction
+        var next_ri = ray.refractive_index;
+        var transmitted = false;
+
+        // Path regularization (pbrt 13.1.4): after non-specular interactions,
+        // increase roughness to reduce variance from indirect caustics.
+        var roughness = path_regularization_roughness(ob_params.material.reflective, max_component);
+
         if ob_params.material.reflective > 0.0 && ob_params.material.transparency == 0.0 {
-            direction = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
+            direction = hitParams.reflectv + (roughness * onb * random_cosine_direction());
+            // Reflection stays in the same medium
         } else {
-            var eta_t = ob_params.material.refractive_index;
-
             let cos_i = min(dot(hitParams.eyev, hitParams.normalv), 1.0);
+            let eta_t = determine_eta_t(ray.refractive_index, ob_params.material.refractive_index, hitParams.front_face);
 
-            if !hitParams.front_face {
-                eta_t = eta_t / ray.refractive_index;
-            }
-
-            // let reflectance = schlick(cos_i, eta_t, ray.refractive_index);
-            let reflectance = schlick_lazanyi(cos_i, eta_t, 0.0);
-
+            let reflectance = fresnel_dielectric(cos_i, ray.refractive_index, eta_t);
             let n_ratio = ray.refractive_index / eta_t;
-            let sin_2t = pow(n_ratio, 2.0) * (1.0 - pow(cos_i, 2.0));
+            let refraction = snell_refract(hitParams.eyev, hitParams.normalv, cos_i, n_ratio);
 
-            if sin_2t > 1.0 || reflectance >= f32_zero_to_one(rand_pcg3d.y) {
-                // scattering_target = hitParams.reflectv;
-                // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * random_uniform_direction());
-                direction = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * onb * random_cosine_direction());
-                // scattering_target = hitParams.reflectv + ((1.0 - ob_params.material.reflective) * hemisphericalRand(1.0,hitParams.normalv));
+            next_pcg3d();
+            if refraction.w < 0.0 || reflectance >= f32_zero_to_one(rand_pcg3d.y) {
+                direction = hitParams.reflectv + (roughness * onb * random_cosine_direction());
+                // Reflection stays in the same medium
             } else {
-                let cos_t = sqrt(1.0 - sin_2t);
-
-                // scattering_target = (hitParams.normalv * ((n_ratio * cos_i) - cos_t) -
-                //                 (hitParams.eyev * n_ratio)) + ((1.0 - ob_params.material.transparency) * onb_local(-random_cosine_direction(), onb));
-                direction = hitParams.normalv * ((n_ratio * cos_i) - cos_t) - (hitParams.eyev * n_ratio);
+                direction = refraction.xyz;
                 p = hitParams.underPoint;
+                transmitted = true;
+                // Refraction enters the transmitted medium
+                next_ri = eta_t;
             }
         }
 
-        rays[offset] = Ray(p, ob_params.material.refractive_index, normalize(direction), ray.pos, ray.throughput * ob_params.material.colour);
+        if !leaves_surface(direction, hitParams.geometric_normalv, transmitted) {
+            return RAY_MISS_COLOUR;
+        }
+
+        let spec_weight = compute_specular_weight(ob_params.material.colour.xyz, ob_params.material.reflective);
+        store_ray(offset, Ray(p, next_ri, normalize(direction), ray.pos, ray.throughput * vec4<f32>(spec_weight, 1.0)));
     } else {
         if light_sample {
             let p_scatter = 0.5;
+            next_pcg3d();
             if f32_zero_to_one(rand_pcg3d.y) < p_scatter {
                 let light = random_light();
                 direction = normalize(random_to_light(light, p));
@@ -215,32 +251,48 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
                 let scattering_target = onb * random_cosine_direction();
                 direction = normalize(scattering_target);
             }
+            if !leaves_surface(direction, hitParams.geometric_normalv, false) {
+                return RAY_MISS_COLOUR;
+            }
 
-            var next_ray = Ray(p, ob_params.material.refractive_index, direction, ray.pos, vec4<f32>(-1f));
+            var next_ray = Ray(
+                p,
+                ob_params.material.refractive_index,
+                direction,
+                ray.pos | PATH_FLAG_DIFFUSE,
+                vec4<f32>(-1f),
+            );
 
-            let scattering_cosine = dot(direction, onb[2]);
-            let scattering_pdf = max(0f, scattering_cosine / PI);
+            let s_pdf = compute_scattering_pdf(direction, onb[2]);
             var v_light_pdf = 0f;
 
             for (var i_light: u32 = ubo.lights_offset; i_light < ubo.n_objects; i_light = i_light + 1u) {
-                let l_intersection = intersect(next_ray, i_light, true);
-                if l_intersection.model_id != i_light || l_intersection.id == -1 || l_intersection.closestT >= MAXLEN {
-                    continue;
-                }
-
-                v_light_pdf = v_light_pdf + light_pdf(next_ray, l_intersection);
+                v_light_pdf = v_light_pdf + light_pdf(object_params.ObjectParams[i_light], next_ray);
             }
 
             v_light_pdf = v_light_pdf / f32(ubo.n_objects - ubo.lights_offset);
-            let pdf = (p_scatter * scattering_pdf) + ((1.0 - p_scatter) * v_light_pdf);
+            let pdf = mis_pdf(s_pdf, v_light_pdf, p_scatter);
 
-            next_ray.throughput = ray.throughput * ob_params.material.colour * scattering_pdf / pdf;
+            if pdf > 1e-10 {
+                next_ray.throughput = ray.throughput * ob_params.material.colour * s_pdf / pdf;
+            } else {
+                return RAY_MISS_COLOUR;
+            }
 
-            rays[offset] = next_ray;
+            store_ray(offset, next_ray);
         } else {
             let scattering_target = onb * random_cosine_direction();
             direction = normalize(scattering_target);
-            rays[offset] = Ray(p, ob_params.material.refractive_index, direction, ray.pos, ray.throughput * ob_params.material.colour);
+            if !leaves_surface(direction, hitParams.geometric_normalv, false) {
+                return RAY_MISS_COLOUR;
+            }
+            store_ray(offset, Ray(
+                p,
+                ob_params.material.refractive_index,
+                direction,
+                ray.pos | PATH_FLAG_DIFFUSE,
+                ray.throughput * ob_params.material.colour,
+            ));
         }
     }
 
@@ -248,18 +300,13 @@ fn renderScene(ray: Ray, offset: u32, light_sample: bool) -> vec4<f32> {
 }
 
 
-@compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
-    let offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
-    let ray = rays[offset];
+fn process_bounce(offset: u32, pixel_pos: vec2<u32>) -> bool {
+    let ray = load_ray(offset);
 
-    if ray.throughput.w < -EPSILON {
-        return;
-    }
-
+    let img_idx = pixel_pos.y * ubo.resolution.x + pixel_pos.x;
     var color: vec4<f32> = RAY_MISS_COLOUR;
     if ubo.subpixel_idx > 0u {
-        color = textureLoad(imageData, vec2<i32>(global_invocation_id.xy));
+        color = imageData[img_idx];
     }
     let scale = 1.0 / f32(ubo.subpixel_idx + 1u);
 
@@ -270,10 +317,89 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
 
     init_pcg3d(vec3<u32>(bitcast<u32>(ray.rayD.x), bitcast<u32>(ray.rayD.y), bitcast<u32>(ray.rayD.z)));
 
-    let ray_color = renderScene(ray, offset, light_sample);
+    let bounce_depth = atomicLoad(&ray_counts[2]);
+    let ray_color = renderScene(ray, offset, light_sample, bounce_depth);
 
     if ray_color.w > -EPSILON {
-        color = mix(color, ray_color, scale);
-        textureStore(imageData, vec2<i32>(global_invocation_id.xy), color);
+        // Keep direct and specular-only paths in linear HDR. Diffuse paths use a
+        // chromaticity-preserving firefly limit so rare glass caustics cannot
+        // dominate a low-sample progressive preview.
+        let sample_radiance = regularize_indirect_radiance(
+            ray_color.xyz,
+            INDIRECT_RADIANCE_LIMIT,
+            (ray.pos & PATH_FLAG_DIFFUSE) != 0u,
+        );
+        let sample_color = vec4<f32>(sample_radiance, max(ray_color.w, 0.0));
+        color = mix(color, sample_color, scale);
+        imageData[img_idx] = color;
+    } else if ubo.subpixel_idx == 0u {
+        imageData[img_idx] = color;
     }
+
+    return ray_color.w <= -EPSILON;
+}
+
+// Compact survivors with one global atomic reservation per workgroup rather
+// than one contended global atomic per ray.
+fn compact_surviving_ray(alive: bool, offset: u32, local_invocation_index: u32) {
+    if local_invocation_index == 0u {
+        atomicStore(&workgroup_alive_count, 0u);
+    }
+    workgroupBarrier();
+
+    var local_output_index = 0u;
+    if alive {
+        local_output_index = atomicAdd(&workgroup_alive_count, 1u);
+    }
+    workgroupBarrier();
+
+    if local_invocation_index == 0u {
+        let count = atomicLoad(&workgroup_alive_count);
+        workgroup_output_base = 0u;
+        if count > 0u {
+            workgroup_output_base = atomicAdd(&ray_counts[1], count);
+        }
+    }
+    workgroupBarrier();
+
+    if alive {
+        active_rays_out[workgroup_output_base + local_output_index] = offset;
+    }
+}
+
+// Entry point for first bounce: 2D dispatch, all pixels, preserves spatial coherence
+@compute @workgroup_size(16, 16)
+fn main(
+    @builtin(global_invocation_id) global_invocation_id: vec3<u32>,
+    @builtin(local_invocation_index) local_invocation_index: u32,
+) {
+    let in_bounds = all(global_invocation_id.xy < ubo.resolution);
+    var offset = 0u;
+    var alive = false;
+    if in_bounds {
+        offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
+        alive = process_bounce(offset, global_invocation_id.xy);
+    }
+    flush_stats(in_bounds, local_invocation_index);
+    compact_surviving_ray(alive, offset, local_invocation_index);
+}
+
+// Entry point for subsequent bounces: 1D compacted dispatch, only alive rays
+@compute @workgroup_size(256)
+fn main_compact(
+    @builtin(global_invocation_id) global_invocation_id: vec3<u32>,
+    @builtin(local_invocation_index) local_invocation_index: u32,
+) {
+    let compact_idx = global_invocation_id.x;
+    let in_bounds = compact_idx < atomicLoad(&ray_counts[0]);
+    var offset = 0u;
+    var alive = false;
+    if in_bounds {
+        offset = active_rays_in[compact_idx];
+        let px = offset % ubo.resolution.x;
+        let py = offset / ubo.resolution.x;
+        alive = process_bounce(offset, vec2<u32>(px, py));
+    }
+    flush_stats(in_bounds, local_invocation_index);
+    compact_surviving_ray(alive, offset, local_invocation_index);
 }

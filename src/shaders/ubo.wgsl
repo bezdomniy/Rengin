@@ -1,3 +1,5 @@
+#define_import_path rengin::ubo
+
 struct UBO {
     inverse_camera_transform: mat4x4<f32>,
     half_width_height: vec2<f32>,
@@ -9,5 +11,6 @@ struct UBO {
     specular_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
-    _pad: u32,
+    // Index of the first triangle normal in the triangles buffer.
+    normals_offset: u32,
 };

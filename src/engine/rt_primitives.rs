@@ -7,15 +7,10 @@ use winit::dpi::PhysicalSize;
 
 const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 
-#[repr(C)]
-#[derive(Debug)]
-pub struct Ray {
-    origin: Vec3,
-    refractive_index: f32,
-    direction: Vec3,
-    pos: u32,
-    throughput: Vec4,
-}
+// Ray data is now stored as SOA (Structure of Arrays) in GPU buffers:
+// - ray_origins: array<vec4<f32>>     (xyz=origin, w=refractive_index)
+// - ray_directions: array<vec4<f32>>  (xyz=direction, w=bitcast(pos))
+// - ray_throughputs: array<vec4<f32>> (xyzw=throughput)
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -93,6 +88,8 @@ pub struct ObjectParam {
     pub len_inner_nodes: u32,
     pub offset_leaf_nodes: u32,
     pub model_type: u32,
+    pub aabb_min: Vec4,
+    pub aabb_max: Vec4,
 }
 
 impl ObjectParam {
@@ -113,7 +110,35 @@ impl ObjectParam {
             len_inner_nodes,
             offset_leaf_nodes,
             model_type,
+            aabb_min: Vec4::ZERO,
+            aabb_max: Vec4::ZERO,
         }
+    }
+
+    /// Compute world-space AABB by transforming all 8 corners of the local AABB
+    pub fn compute_world_aabb(&mut self, local_min: Vec3, local_max: Vec3) {
+        let corners = [
+            Vec3::new(local_min.x, local_min.y, local_min.z),
+            Vec3::new(local_max.x, local_min.y, local_min.z),
+            Vec3::new(local_min.x, local_max.y, local_min.z),
+            Vec3::new(local_max.x, local_max.y, local_min.z),
+            Vec3::new(local_min.x, local_min.y, local_max.z),
+            Vec3::new(local_max.x, local_min.y, local_max.z),
+            Vec3::new(local_min.x, local_max.y, local_max.z),
+            Vec3::new(local_max.x, local_max.y, local_max.z),
+        ];
+
+        let mut world_min = Vec3::splat(f32::INFINITY);
+        let mut world_max = Vec3::splat(f32::NEG_INFINITY);
+
+        for corner in &corners {
+            let world_point = (self.transform * corner.extend(1.0)).truncate();
+            world_min = world_min.min(world_point);
+            world_max = world_max.max(world_point);
+        }
+
+        self.aabb_min = world_min.extend(0.0);
+        self.aabb_max = world_max.extend(0.0);
     }
 }
 
@@ -211,7 +236,16 @@ impl Camera {
     }
 
     pub fn move_forward(&mut self, d: f32) {
-        self.position -= self.forward * d * self.move_speed;
+        self.position += self.forward * d * self.move_speed;
+    }
+
+    pub fn move_right(&mut self, d: f32) {
+        let right = self.forward.cross(-self.up).normalize();
+        self.position += right * d * self.move_speed;
+    }
+
+    pub fn move_up(&mut self, d: f32) {
+        self.position += self.up * d * self.move_speed;
     }
 
     fn get_yaw_pitch(position: Vec3, centre: Vec3) -> (f32, f32) {
@@ -238,14 +272,13 @@ pub struct Ubo {
     specular_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
-    _pad: u32,
+    normals_offset: u32,
 }
 
 #[derive(Debug)]
 pub struct ScreenData {
     // Compute shader uniform block object
     pub size: PhysicalSize<u32>,
-    pub resolution: PhysicalSize<u32>,
     pub inverse_camera_transform: Mat4,
     pixel_size: f32,
     half_width_height: Vec2,
@@ -253,6 +286,8 @@ pub struct ScreenData {
     specular_offset: u32,
     lights_offset: u32,
     n_objects: u32,
+    /// Index of the first triangle normal in the triangles buffer.
+    normals_offset: u32,
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
     pub ray_bounces: u32,
@@ -264,33 +299,32 @@ impl ScreenData {
         n_objects: u32,
         specular_offset: u32,
         lights_offset: u32,
+        normals_offset: u32,
         ray_bounces: u32,
         size: PhysicalSize<u32>,
-        resolution: PhysicalSize<u32>,
         fov: f32,
         sqrt_rays_per_pixel: u32,
     ) -> ScreenData {
         let half_view = (fov / 2f32).tan();
         let aspect = size.width as f32 / size.height as f32;
 
-        let mut half_width_height = Vec2::new(half_view, half_view / aspect);
-
-        if aspect < 1f32 {
-            half_width_height.x = half_view;
-            half_width_height.y = half_view / aspect;
-        }
+        let half_width_height = if aspect >= 1.0 {
+            Vec2::new(half_view, half_view / aspect)
+        } else {
+            Vec2::new(half_view * aspect, half_view)
+        };
         let pixel_size = (half_width_height.x * 2f32) / size.width as f32;
 
-        log::info!("Window size: {:?}", size);
+        log::info!("Render size: {}x{}", size.width, size.height);
 
         ScreenData {
             size,
-            resolution,
             inverse_camera_transform,
             pixel_size,
             half_width_height,
             fov,
             n_objects,
+            normals_offset,
             lights_offset,
             specular_offset,
             subpixel_idx: 0,
@@ -305,13 +339,11 @@ impl ScreenData {
 
         self.size = *size;
 
-        self.half_width_height.x = half_view;
-        self.half_width_height.y = half_view / aspect;
-
-        if aspect < 1f32 {
-            self.half_width_height.x = half_view;
-            self.half_width_height.y = half_view / aspect;
-        }
+        self.half_width_height = if aspect >= 1.0 {
+            Vec2::new(half_view, half_view / aspect)
+        } else {
+            Vec2::new(half_view * aspect, half_view)
+        };
 
         self.pixel_size = (self.half_width_height.x * 2f32) / size.width as f32;
     }
@@ -322,14 +354,38 @@ impl ScreenData {
             half_width_height: self.half_width_height.to_array(),
             pixel_size: self.pixel_size,
             sqrt_rays_per_pixel: self.sqrt_rays_per_pixel,
-            _pad: 0,
             width: self.size.width,
             height: self.size.height,
             n_objects: self.n_objects,
             subpixel_idx: self.subpixel_idx,
             ray_bounces: self.ray_bounces,
+            normals_offset: self.normals_offset,
             lights_offset: self.lights_offset,
             specular_offset: self.specular_offset,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn portrait_camera_preserves_vertical_field_of_view() {
+        let fov = std::f32::consts::FRAC_PI_2;
+        let screen = ScreenData::new(
+            Mat4::IDENTITY,
+            0,
+            0,
+            0,
+            0,
+            8,
+            PhysicalSize::new(600, 1200),
+            fov,
+            1,
+        );
+
+        assert!((screen.half_width_height.x - 0.5).abs() < 1e-6);
+        assert!((screen.half_width_height.y - 1.0).abs() < 1e-6);
     }
 }

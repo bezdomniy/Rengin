@@ -100,7 +100,7 @@
 - define: suzanne
   value:
     add: obj
-    file: assets/models/suzanne.obj
+    file: ../models/suzanne.obj
     material: blue-material
     # transform:
     #   - [rotate-y, 2.1 ]
@@ -110,13 +110,13 @@
 - define: bunny
   value:
     add: obj
-    file: assets/models/bunny.obj
+    file: ../models/bunny.obj
     # transform:
     #   - [scale, 0.5, 0.5, 0.5]
 - define: lucy
   value:
     add: obj
-    file: assets/models/lucy.obj
+    file: ../models/lucy.obj
     # transform:
     #   - [scale, 0.005, 0.005, 0.005]
 - add: suzanne

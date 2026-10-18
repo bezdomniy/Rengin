@@ -1,29 +1,27 @@
-struct NodeLeaf {
-    point1: vec3<f32>,
-    pad1: u32,
-    point2: vec3<f32>,
-    pad2: u32,
-    point3: vec3<f32>,
-    pad3: u32,
-};
+#define_import_path rengin::types
 
-struct Normal {
-    normal1: vec4<f32>,
-    normal2: vec4<f32>,
-    normal3: vec4<f32>,
+// Three values at a triangle's corners: its vertices or its vertex normals.
+struct TriangleCorners {
+    a: vec3<f32>,
+    pad_a: u32,
+    b: vec3<f32>,
+    pad_b: u32,
+    c: vec3<f32>,
+    pad_c: u32,
 };
 
 struct NodeInner {
     first: vec3<f32>,
-    skip_ptr_or_prim_idx1: u32,
+    skip_ptr_or_prim_idx: u32,
     second: vec3<f32>,
-    idx2: u32,
+    prim_end_idx: u32,
 };
 
 
 struct HitParams {
     p: vec3<f32>,
     normalv: vec3<f32>,
+    geometric_normalv: vec3<f32>,
     eyev: vec3<f32>,
     reflectv: vec3<f32>,
     overPoint: vec3<f32>,
@@ -49,13 +47,11 @@ struct InnerNodes {
 };
 
 
-struct LeafNodes {
-    LeafNodes: array<NodeLeaf>,
-};
-
-
-struct Normals {
-    Normals: array<Normal>,
+// Each triangle's vertices, then from ubo.normals_offset each triangle's
+// vertex normals in the same order. One buffer, as WebGPU only guarantees 8
+// storage buffers per shader stage.
+struct Triangles {
+    Triangles: array<TriangleCorners>,
 };
 
 // TODO: include surface area here, maybe in material
@@ -67,6 +63,8 @@ struct ObjectParam {
     len_inner_nodes:u32,
     offset_leaf_nodes:u32,
     model_type: u32,
+    aabb_min: vec4<f32>,
+    aabb_max: vec4<f32>,
 };
 
 

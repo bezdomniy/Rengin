@@ -1,19 +1,45 @@
-use std::{borrow::Cow, collections::HashMap, mem, sync::Arc, time::Instant};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    mem,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
+};
+
+use crate::platform::Instant;
 
 use crate::{
     RendererType,
-    engine::bvh::{Bvh, NodeInner, NodeLeaf, NodeNormal},
-    engine::rt_primitives::{ObjectParam, Ray, ScreenData, Ubo},
+    engine::bvh::Bvh,
+    engine::rt_primitives::{ObjectParam, ScreenData, Ubo},
 };
 
+use naga_oil::compose::{
+    ComposableModuleDescriptor, Composer, NagaModuleDescriptor, ShaderDefValue,
+};
 use wgpu::{
     Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Instance, Queue,
-    RenderPipeline, Surface, Texture, util::DeviceExt,
+    RenderPipeline, Surface, util::DeviceExt,
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
 use super::{RenginRenderer, RenginShaderModule};
 
+const PROFILE_READBACK_SLOTS: usize = 2;
+
+pub struct ProfileReadbackSlot {
+    pub timestamp_buffer: Buffer,
+    pub stats_buffer: Buffer,
+    timestamp_ready: Arc<AtomicU8>,
+    stats_ready: Arc<AtomicU8>,
+    pending: bool,
+    sample_index: u32,
+    total_pixels: u64,
+}
+
+#[allow(dead_code)]
 pub struct RenginWgpu {
     pub window: Arc<Window>,
     pub instance: Instance,
@@ -24,52 +50,70 @@ pub struct RenginWgpu {
     pub raygen_bind_group_layout: Option<BindGroupLayout>,
     pub raygen_bind_group: Option<BindGroup>,
     pub compute_pipeline: Option<ComputePipeline>,
+    pub compute_compact_pipeline: Option<ComputePipeline>,
+    pub prepare_dispatch_pipeline: Option<ComputePipeline>,
     pub compute_bind_group_layout: Option<BindGroupLayout>,
     pub compute_bind_group: Option<BindGroup>,
+    // Ping-pong bind groups for compaction (swap active_rays_in/out)
+    pub compute_bind_group_b: Option<BindGroup>,
+    pub prepare_bind_group_layout: Option<BindGroupLayout>,
+    pub prepare_bind_group: Option<BindGroup>,
     pub render_pipeline: Option<RenderPipeline>,
     pub render_bind_group_layout: Option<BindGroupLayout>,
     pub render_bind_group: Option<BindGroup>,
     pub buffers: Option<HashMap<&'static str, Buffer>>,
-    pub compute_target_texture: Option<Texture>,
+    pub compute_target_buffer: Option<Buffer>,
     pub surface: Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub shaders: Option<HashMap<&'static str, RenginShaderModule>>,
-    // pub physical_size: PhysicalSize<u32>,
-    // pub logical_size: LogicalSize<u32>,
-    // pub workgroup_size: [u32; 3],
     pub continous_motion: bool,
     pub rays_per_pixel: u32,
     pub ray_bounces: u32,
-    // pub scale_factor: f64,
-    // pub resolution: PhysicalSize<u32>,
+    pub profile: bool,
+    pub profile_stats: bool,
+    // GPU timestamp query support
+    pub timestamp_query_set: Option<wgpu::QuerySet>,
+    pub timestamp_resolve_buffer: Option<Buffer>,
+    pub profile_readbacks: Vec<ProfileReadbackSlot>,
+    pub timestamp_period: f32,
 }
 
 impl RenginWgpu {
     pub async fn new(
         window: Arc<Window>,
-        // workgroup_size: [u32; 3],
+        initial_size: PhysicalSize<u32>,
         continous_motion: bool,
         rays_per_pixel: u32,
         ray_bounces: u32,
+        profile: bool,
+        profile_stats: bool,
     ) -> Self {
-        let width = window.inner_size().width;
-        let height = window.inner_size().height;
+        // On web, window.inner_size() returns 0x0 before layout; use the passed-in size
+        let size = window.inner_size();
+        let width = if size.width > 0 { size.width } else { initial_size.width };
+        let height = if size.height > 0 { size.height } else { initial_size.height };
 
-        let backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let backends = wgpu::Backends::BROWSER_WEBGPU;
+            } else {
+                let backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
+            }
+        }
 
-        log::info!("backend: {:?}", backends);
+        log::debug!("backend: {:?}", backends);
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends,
             ..Default::default()
         });
-        log::info!("instance: {:?}", instance);
+        log::debug!("instance: {:?}", instance);
 
         for adapter in instance.enumerate_adapters(wgpu::Backends::all()).await {
             log::debug!("Found adapter {:?}", adapter)
         }
 
         let window_surface = instance.create_surface(window.clone()).unwrap();
-        log::info!("window_surface: {:?}", window_surface);
+        log::debug!("window_surface: {:?}", window_surface);
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -80,27 +124,39 @@ impl RenginWgpu {
             .await
             .expect("No suitable GPU adapters found on the system!");
 
-        log::info!("adapter: {:?}", adapter);
+        log::debug!("adapter: {:?}", adapter);
 
         {
             let adapter_info = adapter.get_info();
             log::info!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
-            log::info!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
+            log::debug!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
         }
 
         let optional_features =
-            { wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING };
-        // let required_features = { wgpu::Features::TEXTURE_BINDING_ARRAY };
-        let required_features = { wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES };
-        // let required_features = { wgpu::Features::empty() };
-
-        let required_limits = {
-            wgpu::Limits {
-                max_storage_buffer_binding_size: 1024 << 20,
-                ..wgpu::Limits::default()
+            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
+            | wgpu::Features::TIMESTAMP_QUERY
+            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let required_features = wgpu::Features::empty();
+                // WebGPU's guaranteed limits (so this runs on any device, and going
+                // over them fails everywhere, not only on minimal devices), except
+                // for buffer sizes, which large meshes need.
+                let required_limits = wgpu::Limits {
+                    max_storage_buffer_binding_size: adapter.limits().max_storage_buffer_binding_size,
+                    max_buffer_size: adapter.limits().max_buffer_size,
+                    ..wgpu::Limits::default()
+                };
+            } else {
+                let required_features = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+                let required_limits = wgpu::Limits {
+                    max_storage_buffer_binding_size: 1024 << 20,
+                    max_buffer_size: 1024 << 20,
+                    max_storage_buffers_per_shader_stage: 12,
+                    ..wgpu::Limits::default()
+                }.using_resolution(adapter.limits());
             }
         }
-        .using_resolution(adapter.limits());
 
         let adapter_features = adapter.features();
         assert!(
@@ -119,20 +175,88 @@ impl RenginWgpu {
             .await
             .unwrap();
 
+        // Browsers only log GPU validation errors as console warnings and keep
+        // going, which leaves a black canvas; say so on the page as well.
+        #[cfg(target_arch = "wasm32")]
+        device.on_uncaptured_error(Arc::new(|error| {
+            log::error!("GPU error: {error}");
+            crate::web::set_status(Some(
+                "The GPU reported an error, so the image may be wrong or missing. The browser console has the details.",
+            ));
+        }));
+
         let surface_caps = window_surface.get_capabilities(&adapter);
 
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|format| format.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
+        // Browser canvases only offer non-sRGB formats; render through an sRGB view
+        // so the output is gamma-encoded the same way as on native.
+        let view_format = surface_format.add_srgb_suffix();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_caps.formats[0],
+            format: surface_format,
             alpha_mode: surface_caps.alpha_modes[0],
             present_mode: wgpu::PresentMode::Fifo,
             width,
             height,
-            view_formats: vec![],
+            view_formats: if view_format != surface_format { vec![view_format] } else { vec![] },
             desired_maximum_frame_latency: 2,
         };
         // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
+
+        let has_timestamps = profile && device.features().contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
+        let timestamp_period = if has_timestamps {
+            queue.get_timestamp_period()
+        } else {
+            0.0
+        };
+
+        // Create timestamp query set: 2 per bounce + 2 for raygen + 2 for render
+        let (timestamp_query_set, timestamp_resolve_buffer, profile_readbacks) = if has_timestamps {
+            let query_count = 2 + ray_bounces * 2 + 2;
+            let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some("timestamp query set"),
+                ty: wgpu::QueryType::Timestamp,
+                count: query_count,
+            });
+            let resolve_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("timestamp resolve buffer"),
+                size: (query_count as u64) * 8, // u64 per timestamp
+                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            let readbacks = (0..PROFILE_READBACK_SLOTS)
+                .map(|slot| ProfileReadbackSlot {
+                    timestamp_buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some(&format!("timestamp read buffer {slot}")),
+                        size: (query_count as u64) * 8,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                    stats_buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some(&format!("stats read buffer {slot}")),
+                        size: 8 * mem::size_of::<u32>() as u64,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                    timestamp_ready: Arc::new(AtomicU8::new(0)),
+                    stats_ready: Arc::new(AtomicU8::new(0)),
+                    pending: false,
+                    sample_index: 0,
+                    total_pixels: 0,
+                })
+                .collect();
+            (Some(query_set), Some(resolve_buf), readbacks)
+        } else {
+            (None, None, Vec::new())
+        };
+
+        log::info!("GPU timestamp queries: {}, period: {}ns", has_timestamps, timestamp_period);
 
         RenginWgpu {
             window,
@@ -144,30 +268,173 @@ impl RenginWgpu {
             raygen_bind_group_layout: None,
             raygen_pipeline: None,
             compute_bind_group: None,
+            compute_bind_group_b: None,
             compute_bind_group_layout: None,
             compute_pipeline: None,
+            compute_compact_pipeline: None,
+            prepare_dispatch_pipeline: None,
+            prepare_bind_group_layout: None,
+            prepare_bind_group: None,
             render_bind_group: None,
             render_bind_group_layout: None,
             render_pipeline: None,
             buffers: None,
-            compute_target_texture: None,
+            compute_target_buffer: None,
             surface: window_surface,
             config,
             shaders: None,
-            // physical_size,
-            // logical_size,
-            // workgroup_size,
             continous_motion,
             rays_per_pixel,
             ray_bounces,
-            // scale_factor,
-            // resolution,
+            profile: has_timestamps,
+            profile_stats: profile_stats && has_timestamps,
+            timestamp_query_set,
+            timestamp_resolve_buffer,
+            profile_readbacks,
+            timestamp_period,
+        }
+    }
+
+    pub fn acquire_profile_readback_slot(&mut self) -> Option<usize> {
+        self.poll_profile_readbacks();
+        self.profile_readbacks.iter().position(|slot| !slot.pending)
+    }
+
+    pub fn has_available_profile_readback_slot(&self) -> bool {
+        self.profile_readbacks.iter().any(|slot| !slot.pending)
+    }
+
+    pub fn begin_profile_readback(
+        &mut self,
+        slot_index: usize,
+        sample_index: u32,
+        total_pixels: u64,
+    ) {
+        let slot = &mut self.profile_readbacks[slot_index];
+        slot.pending = true;
+        slot.sample_index = sample_index;
+        slot.total_pixels = total_pixels;
+        slot.timestamp_ready.store(0, Ordering::Release);
+        slot.stats_ready.store(0, Ordering::Release);
+
+        let timestamp_ready = slot.timestamp_ready.clone();
+        slot.timestamp_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                timestamp_ready.store(if result.is_ok() { 1 } else { 2 }, Ordering::Release);
+            });
+
+        let stats_ready = slot.stats_ready.clone();
+        slot.stats_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                stats_ready.store(if result.is_ok() { 1 } else { 2 }, Ordering::Release);
+            });
+    }
+
+    pub fn poll_profile_readbacks(&mut self) {
+        if self.profile_readbacks.is_empty() {
+            return;
+        }
+
+        let _ = self.device.poll(wgpu::PollType::Poll);
+        let ray_bounces = self.ray_bounces;
+        let rays_per_pixel = self.rays_per_pixel;
+        let profile_stats = self.profile_stats;
+        let timestamp_period = self.timestamp_period as f64;
+
+        for slot in self
+            .profile_readbacks
+            .iter_mut()
+            .filter(|slot| slot.pending)
+        {
+            let timestamp_status = slot.timestamp_ready.load(Ordering::Acquire);
+            let stats_status = slot.stats_ready.load(Ordering::Acquire);
+            if timestamp_status == 0 || stats_status == 0 {
+                continue;
+            }
+
+            if timestamp_status == 1 && stats_status == 1 {
+                let timestamp_data = slot.timestamp_buffer.slice(..).get_mapped_range();
+                let timestamps: &[u64] = bytemuck::cast_slice(&timestamp_data);
+                let raygen_ns =
+                    timestamps[1].wrapping_sub(timestamps[0]) as f64 * timestamp_period;
+                let mut bounce_strs = Vec::with_capacity(ray_bounces as usize);
+                let mut total_bounce_ns = 0.0;
+                for bounce in 0..ray_bounces {
+                    let index = (2 + bounce * 2) as usize;
+                    let bounce_ns = timestamps[index + 1].wrapping_sub(timestamps[index]) as f64
+                        * timestamp_period;
+                    total_bounce_ns += bounce_ns;
+                    bounce_strs.push(format!("b{bounce}={:.2}ms", bounce_ns / 1_000_000.0));
+                }
+                let render_base = (2 + ray_bounces * 2) as usize;
+                let measured_render_ns = timestamps[render_base + 1]
+                    .wrapping_sub(timestamps[render_base])
+                    as f64
+                    * timestamp_period;
+                let render_ns = if measured_render_ns > 1e12 {
+                    0.0
+                } else {
+                    measured_render_ns
+                };
+
+                log::info!(
+                    "GPU Sample {}/{} | raygen={:.2}ms | pathtracer={:.2}ms [{}] | render={:.2}ms | total={:.2}ms",
+                    slot.sample_index,
+                    rays_per_pixel,
+                    raygen_ns / 1_000_000.0,
+                    total_bounce_ns / 1_000_000.0,
+                    bounce_strs.join(", "),
+                    render_ns / 1_000_000.0,
+                    (raygen_ns + total_bounce_ns + render_ns) / 1_000_000.0,
+                );
+                drop(timestamp_data);
+
+                if profile_stats {
+                    let stats_data = slot.stats_buffer.slice(..).get_mapped_range();
+                    let stats: &[u32] = bytemuck::cast_slice(&stats_data);
+                    let alive = stats[0] as f64;
+                    log::info!(
+                        "  Shader stats | rays={} | world_aabb: tests={}, skips={} ({:.0}%) | bvh_nodes: tests={}, skips={} ({:.0}%) | triangles: tests={}, hits={} | objects_tested={}",
+                        stats[0],
+                        stats[1], stats[2],
+                        if stats[1] > 0 { stats[2] as f64 / stats[1] as f64 * 100.0 } else { 0.0 },
+                        stats[3], stats[4],
+                        if stats[3] > 0 { stats[4] as f64 / stats[3] as f64 * 100.0 } else { 0.0 },
+                        stats[5], stats[6], stats[7],
+                    );
+                    log::info!(
+                        "  Per-ray averages | active={:.1}% | world_aabb={:.1} | bvh_nodes={:.1} | triangles={:.1} | objects={:.1}",
+                        if slot.total_pixels > 0 {
+                            alive / (slot.total_pixels * ray_bounces as u64) as f64 * 100.0
+                        } else { 0.0 },
+                        if alive > 0.0 { stats[1] as f64 / alive } else { 0.0 },
+                        if alive > 0.0 { stats[3] as f64 / alive } else { 0.0 },
+                        if alive > 0.0 { stats[5] as f64 / alive } else { 0.0 },
+                        if alive > 0.0 { stats[7] as f64 / alive } else { 0.0 },
+                    );
+                    drop(stats_data);
+                }
+            } else {
+                log::warn!(
+                    "GPU profiling readback failed for sample {}",
+                    slot.sample_index
+                );
+            }
+
+            slot.timestamp_buffer.unmap();
+            slot.stats_buffer.unmap();
+            slot.pending = false;
         }
     }
 }
 
 impl<'a> RenginRenderer for RenginWgpu {
     fn update_window_size(&mut self, physical_size: &PhysicalSize<u32>) {
+        if physical_size.width == 0 || physical_size.height == 0 {
+            return;
+        }
         // self.physical_size = winit::dpi::PhysicalSize::new(width, height);
         // self.logical_size = self.physical_size.to_logical(self.scale_factor);
 
@@ -175,107 +442,153 @@ impl<'a> RenginRenderer for RenginWgpu {
         self.config.height = physical_size.height;
 
         self.surface.configure(&self.device, &self.config);
-
-        self.create_bind_groups(physical_size);
     }
 
     fn create_target_textures(&mut self, physical_size: &PhysicalSize<u32>) {
-        let texture_extent = wgpu::Extent3d {
-            width: physical_size.width,
-            height: physical_size.height,
-            depth_or_array_layers: 1,
-        };
-
-        self.compute_target_texture = Some(self.device.create_texture(&wgpu::TextureDescriptor {
-            size: texture_extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
-            usage: wgpu::TextureUsages::STORAGE_BINDING,
-            label: None,
+        // Use a storage buffer instead of a storage texture for image accumulation.
+        // Storage buffers support read_write on all platforms including WebGPU.
+        let pixel_count = u64::from(physical_size.width) * u64::from(physical_size.height);
+        let buffer_size = pixel_count * 16; // vec4<f32> = 16 bytes per pixel
+        self.compute_target_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("image accumulation buffer"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
         }));
     }
 
     fn create_shaders(&mut self, renderer_type: RendererType) {
-        let pt_main_str = include_str!("../shaders/pathtracer.wgsl");
-        let ubo_str = include_str!("../shaders/ubo.wgsl");
-        let types_str = include_str!("../shaders/types.wgsl");
-        let rand_shader_str = include_str!("../shaders/random.wgsl");
-        let constants_shader_str = include_str!("../shaders/constants.wgsl");
-        let hit_params_str = include_str!("../shaders/hit_params.wgsl");
-        let intersects_shader_str = include_str!("../shaders/intersects.wgsl");
+        let mut composer = Composer::default();
 
-        let raygen_shader_str = [
-            ubo_str,
-            types_str,
-            constants_shader_str,
-            rand_shader_str,
-            include_str!("../shaders/raygen.wgsl"),
-        ]
-        .join("\n");
-
-        let frag_shader_str = [ubo_str, include_str!("../shaders/render.frag.wgsl")].join("\n");
-
-        let pt_shader_str = [
-            ubo_str,
-            types_str,
-            constants_shader_str,
-            rand_shader_str,
-            hit_params_str,
-            intersects_shader_str,
-            pt_main_str,
-        ]
-        .join("\n");
-
-        let rt_shader_str = [
-            ubo_str,
-            types_str,
-            constants_shader_str,
-            hit_params_str,
-            intersects_shader_str,
-        ]
-        .join("\n");
-
-        let cs_module = match renderer_type {
-            RendererType::PathTracer => {
-                self.device
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: None,
-                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(pt_shader_str.as_str())),
-                    })
-            }
-            RendererType::RayTracer => {
-                self.device
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: None,
-                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(rt_shader_str.as_str())),
-                    })
+        // Add composable modules in dependency order (leaves first)
+        let mut load_composable = |source: &str, file_path: &str| {
+            match composer.add_composable_module(ComposableModuleDescriptor {
+                source,
+                file_path,
+                ..Default::default()
+            }) {
+                Ok(_) => {}
+                Err(e) => {
+                    let msg = e.emit_to_string(&composer);
+                    panic!("Failed to add shader module {file_path}:\n{msg}");
+                }
             }
         };
 
+        load_composable(include_str!("../shaders/types.wgsl"), "shaders/types.wgsl");
+        load_composable(include_str!("../shaders/ubo.wgsl"), "shaders/ubo.wgsl");
+        load_composable(include_str!("../shaders/constants.wgsl"), "shaders/constants.wgsl");
+        load_composable(include_str!("../shaders/random.wgsl"), "shaders/random.wgsl");
+        load_composable(include_str!("../shaders/fresnel.wgsl"), "shaders/fresnel.wgsl");
+        load_composable(
+            include_str!("../shaders/intersects_math.wgsl"),
+            "shaders/intersects_math.wgsl",
+        );
+        load_composable(
+            include_str!("../shaders/pathtracer_utils.wgsl"),
+            "shaders/pathtracer_utils.wgsl",
+        );
+        load_composable(
+            include_str!("../shaders/pathtracer_math.wgsl"),
+            "shaders/pathtracer_math.wgsl",
+        );
+        load_composable(
+            include_str!("../shaders/pathtracer_bindings.wgsl"),
+            "shaders/pathtracer_bindings.wgsl",
+        );
+        load_composable(include_str!("../shaders/stats.wgsl"), "shaders/stats.wgsl");
+        load_composable(
+            include_str!("../shaders/hit_params_math.wgsl"),
+            "shaders/hit_params_math.wgsl",
+        );
+        load_composable(include_str!("../shaders/hit_params.wgsl"), "shaders/hit_params.wgsl");
+        load_composable(include_str!("../shaders/intersects.wgsl"), "shaders/intersects.wgsl");
+
+        // Shader defs for compile-time profiling toggle
+        let mut shader_defs = HashMap::new();
+        if self.profile_stats {
+            shader_defs.insert("PROFILE_STATS".to_owned(), ShaderDefValue::Bool(true));
+        }
+
+        let cs_module = match renderer_type {
+            RendererType::PathTracer => {
+                let module = match composer.make_naga_module(NagaModuleDescriptor {
+                    source: include_str!("../shaders/pathtracer.wgsl"),
+                    file_path: "shaders/pathtracer.wgsl",
+                    shader_defs,
+                    ..Default::default()
+                }) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        let msg = e.emit_to_string(&composer);
+                        panic!("Shader composition error for pathtracer:\n{msg}");
+                    }
+                };
+                self.device
+                    .create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("pathtracer"),
+                        source: wgpu::ShaderSource::Naga(Cow::Owned(module)),
+                    })
+            }
+            RendererType::RayTracer => {
+                // TODO: create a raytracer entry-point shader with naga_oil imports
+                panic!("RayTracer not yet migrated to naga_oil");
+            }
+        };
+
+        let raygen_naga = match composer.make_naga_module(NagaModuleDescriptor {
+            source: include_str!("../shaders/raygen.wgsl"),
+            file_path: "shaders/raygen.wgsl",
+            ..Default::default()
+        }) {
+            Ok(m) => m,
+            Err(e) => {
+                let msg = e.emit_to_string(&composer);
+                panic!("Shader composition error for raygen:\n{msg}");
+            }
+        };
         let raygen_module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: None,
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(raygen_shader_str.as_str())),
+                label: Some("raygen"),
+                source: wgpu::ShaderSource::Naga(Cow::Owned(raygen_naga)),
             });
 
+        let frag_naga = match composer.make_naga_module(NagaModuleDescriptor {
+            source: include_str!("../shaders/render.frag.wgsl"),
+            file_path: "shaders/render.frag.wgsl",
+            ..Default::default()
+        }) {
+            Ok(m) => m,
+            Err(e) => {
+                let msg = e.emit_to_string(&composer);
+                panic!("Shader composition error for fragment:\n{msg}");
+            }
+        };
+        let fg_module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("fragment"),
+                source: wgpu::ShaderSource::Naga(Cow::Owned(frag_naga)),
+            });
+
+        // These shaders have no imports, pass through as plain WGSL
         let vt_module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: None,
+                label: Some("vertex"),
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                     "../shaders/render.vert.wgsl"
                 ))),
             });
 
-        let fg_module = self
+        let prepare_module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: None,
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(frag_shader_str.as_str())),
+                label: Some("prepare dispatch"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "../shaders/prepare_dispatch.wgsl"
+                ))),
             });
 
         let mut shaders = HashMap::new();
@@ -286,6 +599,10 @@ impl<'a> RenginRenderer for RenginWgpu {
         shaders.insert("comp", RenginShaderModule::WgpuShaderModule(cs_module));
         shaders.insert("vert", RenginShaderModule::WgpuShaderModule(vt_module));
         shaders.insert("frag", RenginShaderModule::WgpuShaderModule(fg_module));
+        shaders.insert(
+            "prepare",
+            RenginShaderModule::WgpuShaderModule(prepare_module),
+        );
 
         self.shaders = Some(shaders);
     }
@@ -315,19 +632,19 @@ impl<'a> RenginRenderer for RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
-        let buf_blas = self
+        // Each triangle's vertices, then each triangle's vertex normals in the
+        // same order, in one buffer: WebGPU only guarantees 8 storage buffers
+        // per shader stage. Both halves are 48 bytes per triangle.
+        debug_assert_eq!(bvh.leaf_nodes.len(), bvh.normal_nodes.len());
+        let buf_triangles = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("BLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&bvh.leaf_nodes),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-
-        let buf_normals = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("normals storage Buffer"),
-                contents: bytemuck::cast_slice(&bvh.normal_nodes),
+                label: Some("triangles storage Buffer"),
+                contents: &[
+                    bytemuck::cast_slice::<_, u8>(&bvh.leaf_nodes),
+                    bytemuck::cast_slice(&bvh.normal_nodes),
+                ]
+                .concat(),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -339,19 +656,65 @@ impl<'a> RenginRenderer for RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
-        let buf_rays = self
+        // SOA ray buffers: 3 separate vec4<f32> arrays for coalesced GPU access
+        // Interleaved ray buffer: 3 vec4<f32> per ray (origin, direction, throughput)
+        let ray_buf_size = screen_data.size.width as usize
+            * screen_data.size.height as usize
+            * mem::size_of::<glam::Vec4>()
+            * 3;
+        let buf_ray_data = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Ray Buffer"),
-                contents: &vec![
-                    0xff;
-                    (screen_data.resolution.width * screen_data.resolution.height)
-                        as usize
-                        * mem::size_of::<Ray>()
-                ],
+                label: Some("Ray Data Buffer"),
+                contents: &vec![0xff; ray_buf_size],
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
+        // Active ray compaction buffers (ping-pong A/B)
+        let total_pixels = screen_data.size.width as usize * screen_data.size.height as usize;
+        let active_buf_size = total_pixels * mem::size_of::<u32>();
+        let buf_active_rays_a = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Active Rays A"),
+                contents: &vec![0u8; active_buf_size],
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let buf_active_rays_b = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Active Rays B"),
+                contents: &vec![0u8; active_buf_size],
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        // ray_counts: [input_count, output_count, bounce_depth] as atomic u32
+        let buf_ray_counts = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Ray Counts"),
+                contents: bytemuck::cast_slice(&[0u32; 3]),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+        // Indirect dispatch args: [workgroups_x, 1, 1]
+        let buf_indirect_dispatch = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Indirect Dispatch Args"),
+                contents: bytemuck::cast_slice(&[0u32; 3]),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
+            });
+
+        // Stats buffer: workgroups aggregate into these 8 atomic u32 counters.
+        let stats_size = 8 * mem::size_of::<u32>();
+        let buf_stats = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Shader Stats Buffer"),
+                contents: &vec![0u8; stats_size],
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            });
         log::info!(
             "Finshed loading buffers in {} millis",
             now.elapsed().as_millis()
@@ -360,19 +723,22 @@ impl<'a> RenginRenderer for RenginWgpu {
         self.buffers = Some(HashMap::from([
             ("ubo", buf_ubo),
             ("tlas", buf_tlas),
-            ("blas", buf_blas),
-            ("normals", buf_normals),
+            ("triangles", buf_triangles),
             ("object_params", buf_op),
-            ("rays", buf_rays),
+            ("ray_data", buf_ray_data),
+            ("stats", buf_stats),
+            ("active_rays_a", buf_active_rays_a),
+            ("active_rays_b", buf_active_rays_b),
+            ("ray_counts", buf_ray_counts),
+            ("indirect_dispatch", buf_indirect_dispatch),
         ]));
     }
 
     fn create_pipelines(
         &mut self,
-        // TODO: bvh is only needed to get lengths, is there a better way to pass these?
-        bvh: &Bvh,
-        screen_data: &ScreenData,
-        object_params: &[ObjectParam],
+        _bvh: &Bvh,
+        _screen_data: &ScreenData,
+        _object_params: &[ObjectParam],
     ) {
         // create raygen pipeline
         self.raygen_bind_group_layout = Some(self.device.create_bind_group_layout(
@@ -388,17 +754,14 @@ impl<'a> RenginRenderer for RenginWgpu {
                         },
                         count: None,
                     },
+                    // Interleaved ray data buffer (binding 1)
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                ((screen_data.resolution.width * screen_data.resolution.height)
-                                    as usize
-                                    * mem::size_of::<Ray>()) as _,
-                            ),
+                            min_binding_size: None,
                         },
                         count: None,
                     },
@@ -416,100 +779,65 @@ impl<'a> RenginRenderer for RenginWgpu {
         ));
 
         // create compute pipeline
-        self.compute_bind_group_layout = Some(self.device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::ReadWrite,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
+        {
+            let storage_rw = |binding: u32| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            };
+            let storage_ro = |binding: u32| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            };
+
+            let mut entries = vec![
+                storage_rw(0),  // imageData
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(mem::size_of::<Ubo>() as _),
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (bvh.inner_nodes.len() * mem::size_of::<NodeInner>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (bvh.leaf_nodes.len() * mem::size_of::<NodeLeaf>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (bvh.normal_nodes.len() * mem::size_of::<NodeNormal>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            // min_binding_size: None,
-                            min_binding_size: wgpu::BufferSize::new(
-                                (object_params.len() * mem::size_of::<ObjectParam>()) as _,
-                            ),
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                ((screen_data.resolution.width * screen_data.resolution.height)
-                                    as usize
-                                    * mem::size_of::<Ray>()) as _,
-                            ),
-                            // min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-                label: None,
-            },
-        ));
+                    count: None,
+                },
+                storage_ro(2),  // inner_nodes
+                storage_ro(3),  // triangles (vertices, then normals)
+                storage_ro(5),  // object_params
+                storage_rw(6),  // ray_data (interleaved)
+            ];
+
+            // Binding numbers for compaction buffers depend on whether stats is included
+            if self.profile_stats {
+                entries.push(storage_rw(7));  // shader_stats
+                entries.push(storage_ro(8));  // active_rays_in
+                entries.push(storage_rw(9));  // active_rays_out
+                entries.push(storage_rw(10)); // ray_counts
+            } else {
+                entries.push(storage_ro(7));  // active_rays_in
+                entries.push(storage_rw(8));  // active_rays_out
+                entries.push(storage_rw(9));  // ray_counts
+            }
+
+            self.compute_bind_group_layout = Some(self.device.create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    entries: &entries,
+                    label: None,
+                },
+            ));
+        }
 
         let compute_pipeline_layout = Some(self.device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
@@ -527,10 +855,10 @@ impl<'a> RenginRenderer for RenginWgpu {
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::ReadWrite,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            view_dimension: wgpu::TextureViewDimension::D2,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
                         count: None,
                     },
@@ -577,7 +905,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                     },
                     entry_point: Some("main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: self.config.format,
+                        format: self.config.format.add_srgb_suffix(),
                         // TODO: change subpixel to blending, rather than doing it in shader
                         blend: Some(wgpu::BlendState::REPLACE),
                         // blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -607,14 +935,80 @@ impl<'a> RenginRenderer for RenginWgpu {
             },
         ));
 
+        let comp_module = match self.shaders.as_ref().unwrap().get("comp") {
+            Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+            _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
+        };
+
         self.compute_pipeline = Some(self.device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("Compute pipeline"),
+                label: Some("Compute pipeline (2D)"),
                 layout: compute_pipeline_layout.as_ref(),
-                module: match self.shaders.as_ref().unwrap().get("comp") {
-                    Some(RenginShaderModule::WgpuShaderModule(m)) => m,
-                    _ => panic!("Invalid WGPU compute shader passed to compute pipeline."),
-                },
+                module: comp_module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            },
+        ));
+
+        self.compute_compact_pipeline = Some(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("Compute pipeline (1D compact)"),
+                layout: compute_pipeline_layout.as_ref(),
+                module: comp_module,
+                entry_point: Some("main_compact"),
+                compilation_options: Default::default(),
+                cache: None,
+            },
+        ));
+
+        // Prepare dispatch pipeline
+        self.prepare_bind_group_layout = Some(self.device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                label: Some("prepare dispatch layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(8),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(12),
+                        },
+                        count: None,
+                    },
+                ],
+            },
+        ));
+
+        let prepare_pipeline_layout = self.device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("prepare dispatch"),
+                bind_group_layouts: &[self.prepare_bind_group_layout.as_ref().unwrap()],
+                immediate_size: 0,
+            },
+        );
+
+        let prepare_module = match self.shaders.as_ref().unwrap().get("prepare") {
+            Some(RenginShaderModule::WgpuShaderModule(m)) => m,
+            _ => panic!("Missing prepare dispatch shader"),
+        };
+
+        self.prepare_dispatch_pipeline = Some(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("Prepare dispatch pipeline"),
+                layout: Some(&prepare_pipeline_layout),
+                module: prepare_module,
                 entry_point: Some("main"),
                 compilation_options: Default::default(),
                 cache: None,
@@ -625,18 +1019,14 @@ impl<'a> RenginRenderer for RenginWgpu {
     fn create_bind_groups(&mut self, physical_size: &PhysicalSize<u32>) {
         self.create_target_textures(physical_size);
 
-        let compute_target_texture_view = self
-            .compute_target_texture
-            .as_ref()
-            .unwrap()
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let image_buffer = self.compute_target_buffer.as_ref().unwrap();
 
         self.render_bind_group = Some(
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&compute_target_texture_view),
+                        resource: image_buffer.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -675,7 +1065,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                             .buffers
                             .as_ref()
                             .unwrap()
-                            .get("rays")
+                            .get("ray_data")
                             .unwrap()
                             .as_entire_binding(),
                     },
@@ -683,75 +1073,76 @@ impl<'a> RenginRenderer for RenginWgpu {
             }),
         );
 
-        self.compute_bind_group = Some(
+        {
+            let bufs = self.buffers.as_ref().unwrap();
+            let mut entries_a = vec![
+                wgpu::BindGroupEntry { binding: 0, resource: image_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bufs.get("ubo").unwrap().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: bufs.get("tlas").unwrap().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: bufs.get("triangles").unwrap().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: bufs.get("object_params").unwrap().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 6, resource: bufs.get("ray_data").unwrap().as_entire_binding() },
+            ];
+            // Bind group A: in=A, out=B
+            if self.profile_stats {
+                entries_a.push(wgpu::BindGroupEntry { binding: 7, resource: bufs.get("stats").unwrap().as_entire_binding() });
+                entries_a.push(wgpu::BindGroupEntry { binding: 8, resource: bufs.get("active_rays_a").unwrap().as_entire_binding() });
+                entries_a.push(wgpu::BindGroupEntry { binding: 9, resource: bufs.get("active_rays_b").unwrap().as_entire_binding() });
+                entries_a.push(wgpu::BindGroupEntry { binding: 10, resource: bufs.get("ray_counts").unwrap().as_entire_binding() });
+            } else {
+                entries_a.push(wgpu::BindGroupEntry { binding: 7, resource: bufs.get("active_rays_a").unwrap().as_entire_binding() });
+                entries_a.push(wgpu::BindGroupEntry { binding: 8, resource: bufs.get("active_rays_b").unwrap().as_entire_binding() });
+                entries_a.push(wgpu::BindGroupEntry { binding: 9, resource: bufs.get("ray_counts").unwrap().as_entire_binding() });
+            }
+
+            self.compute_bind_group = Some(
+                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("compute bind group"),
+                    layout: self.compute_bind_group_layout.as_ref().unwrap(),
+                    entries: &entries_a,
+                }),
+            );
+        }
+
+        // Bind group B: in=B, out=A (swapped for ping-pong)
+        self.compute_bind_group_b = Some(
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("compute bind group"),
+                label: Some("compute bind group B"),
                 layout: self.compute_bind_group_layout.as_ref().unwrap(),
+                entries: &{
+                    let bufs = self.buffers.as_ref().unwrap();
+                    let mut entries = vec![
+                        wgpu::BindGroupEntry { binding: 0, resource: image_buffer.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: bufs.get("ubo").unwrap().as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 2, resource: bufs.get("tlas").unwrap().as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 3, resource: bufs.get("triangles").unwrap().as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 5, resource: bufs.get("object_params").unwrap().as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 6, resource: bufs.get("ray_data").unwrap().as_entire_binding() },
+                    ];
+                    // Swapped: in=B, out=A
+                    if self.profile_stats {
+                        entries.push(wgpu::BindGroupEntry { binding: 7, resource: bufs.get("stats").unwrap().as_entire_binding() });
+                        entries.push(wgpu::BindGroupEntry { binding: 8, resource: bufs.get("active_rays_b").unwrap().as_entire_binding() });
+                        entries.push(wgpu::BindGroupEntry { binding: 9, resource: bufs.get("active_rays_a").unwrap().as_entire_binding() });
+                        entries.push(wgpu::BindGroupEntry { binding: 10, resource: bufs.get("ray_counts").unwrap().as_entire_binding() });
+                    } else {
+                        entries.push(wgpu::BindGroupEntry { binding: 7, resource: bufs.get("active_rays_b").unwrap().as_entire_binding() });
+                        entries.push(wgpu::BindGroupEntry { binding: 8, resource: bufs.get("active_rays_a").unwrap().as_entire_binding() });
+                        entries.push(wgpu::BindGroupEntry { binding: 9, resource: bufs.get("ray_counts").unwrap().as_entire_binding() });
+                    }
+                    entries
+                },
+            }),
+        );
+
+        // Prepare dispatch bind group
+        self.prepare_bind_group = Some(
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("prepare dispatch bind group"),
+                layout: self.prepare_bind_group_layout.as_ref().unwrap(),
                 entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&compute_target_texture_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("ubo")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("tlas")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("blas")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("normals")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("object_params")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: self
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("rays")
-                            .unwrap()
-                            .as_entire_binding(),
-                    },
+                    wgpu::BindGroupEntry { binding: 0, resource: self.buffers.as_ref().unwrap().get("ray_counts").unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: self.buffers.as_ref().unwrap().get("indirect_dispatch").unwrap().as_entire_binding() },
                 ],
             }),
         );

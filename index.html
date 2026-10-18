@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rengin Path Tracer</title>
+
+    <!-- Built by trunk: the library with the `web` feature (see Trunk.toml). -->
+    <link data-trunk rel="rust" data-cargo-no-default-features data-cargo-features="web" data-wasm-opt="2" />
+    <base data-trunk-public-url />
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            color: #ddd;
+            font-family: system-ui, sans-serif;
+        }
+        /* The canvas fills the viewport; the renderer letterboxes the image to the
+           scene camera's aspect ratio. */
+        #rengin-canvas, canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+        }
+        canvas {
+            outline: none;
+            touch-action: none;
+        }
+        /* Loading progress and errors, over the canvas (src/web.rs). */
+        #status {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-sizing: border-box;
+            width: min(32em, 100vw);
+            margin: 0;
+            padding: 0 16px;
+            text-align: center;
+            pointer-events: none;
+        }
+        #status[hidden] {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- The wasm entry point appends its canvas here (src/web.rs). -->
+    <div id="rengin-canvas"></div>
+    <p id="status">Loading…</p>
+    <script>
+        // The wasm entry point doesn't start without WebGPU.
+        if (!navigator.gpu) {
+            document.getElementById("status").textContent =
+                "This path tracer needs WebGPU, which this browser doesn't support or has turned off. " +
+                "Try a recent version of Chrome, Edge or Safari.";
+        }
+    </script>
+</body>
+</html>

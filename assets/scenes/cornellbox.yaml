@@ -39,13 +39,12 @@
 - define: white-light
   extend: white-material
   value:
-    emissiveness: [5,5,5]
+    emissiveness: [5, 5, 5]
 
 # - define: sun-light
 #   extend: base-material
 #   value:
 #     emissiveness: [1000,1000,1000]
-
 
 # - add: sphere
 #   material: sun-light
@@ -56,7 +55,7 @@
 - define: lucy
   value:
     add: obj
-    file: assets/models/lucy.obj
+    file: ../models/lucy.obj
     transform:
       - [scale, 0.36, 0.36, 0.36]
 
@@ -111,7 +110,7 @@
 - add: cube
   # material: white-material
   material:
-    emissiveness: [1000,1000,1000]
+    emissiveness: [1000, 1000, 1000]
     color: [1, 1, 1]
     # reflective: 1
     # transparency: 1
@@ -150,10 +149,9 @@
     - [scale, 278, 1, 278]
     - [rotate-z, 1.5708]
     - [translate, 0, 278, 278]
-
-- add: light
-  at: [278, 500, 278]
-  intensity: [1, 1, 1]
+# - add: light
+#   at: [278, 500, 278]
+#   intensity: [1, 1, 1]
 # - add: cube
 #   material: white-light
 #   transform:

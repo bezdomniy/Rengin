@@ -1,11 +1,19 @@
+#import rengin::ubo::UBO
+#import rengin::constants::RANDOM_SUBPIXEL
+#import rengin::random::{init_pcg3d, random_in_square}
+
 @group(0) @binding(0)
 var<uniform> ubo: UBO;
+// Interleaved ray buffer: [origin, direction, throughput] per ray (3 vec4s each)
 @group(0) @binding(1)
-var<storage, read_write> rays: array<Ray>;
+var<storage, read_write> ray_data: array<vec4<f32>>;
 
 @compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) 
+fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
 {
+    if any(global_invocation_id.xy >= ubo.resolution) {
+        return;
+    }
     var sub_pixel_offset = vec2<f32>(0f);
 
     if RANDOM_SUBPIXEL {
@@ -30,5 +38,8 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>)
     let direction = normalize((pixel - origin)).xyz;
 
     let rays_offset = (global_invocation_id.y * ubo.resolution.x) + global_invocation_id.x;
-    rays[rays_offset] = Ray(origin.xyz, 1f, direction, 0, vec4<f32>(1f));
+    let base = rays_offset * 3u;
+    ray_data[base] = vec4<f32>(origin.xyz, 1f);
+    ray_data[base + 1u] = vec4<f32>(direction, 0f);
+    ray_data[base + 2u] = vec4<f32>(1f);
 }
