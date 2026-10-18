@@ -43,7 +43,9 @@ The web build uses WebGPU and is built with [trunk](https://trunkrs.dev):
 ```
 trunk serve --release
 ```
-Options are URL parameters named after the CLI flags, e.g. `?scene=glass_test&rays-per-pixel=256&bounces=8&render-scale=0.5`. The short names `s`, `r` and `b` also work, as do `rpp` and `render_scale`. Invalid and unknown parameters are reported in the browser console. Only the scenes embedded in `src/engine/embedded_assets.rs` are available (`cornellbox`, `cornellbox2`, `fresnel`, `glass_test`), and OBJ models cannot be loaded yet.
+Options are URL parameters named after the CLI flags, e.g. `?scene=glass_test&rays-per-pixel=256&bounces=8&render-scale=0.5`. The short names `s`, `r` and `b` also work, as do `rpp` and `render_scale`. Invalid and unknown parameters are reported in the browser console. `scene` is the name of a scene in `assets/scenes` without `.yaml`; the web build embeds the scenes listed in `src/engine/embedded_assets.rs`.
+
+Scenes are compiled into the web build, but OBJ models are not: the build adds each model the scenes use as `models/<file name>.gz` (`scripts/gzip-models.sh`), and the web build downloads the ones the chosen scene needs. Models are looked up by file name, so a scene's models must be in `assets/models`.
 
 Pushing to `master` deploys the web build to GitHub Pages at `/Rengin/` (`.github/workflows/pages.yml`).
 

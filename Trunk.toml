@@ -1,3 +1,9 @@
 # Web build: `trunk serve` for development, `trunk build --release` for deployment.
 [build]
 target = "index.html"
+
+# Add the gzipped OBJ models the scenes use to the build.
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = ["scripts/gzip-models.sh"]

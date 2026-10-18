@@ -6,7 +6,7 @@ mod renderer;
 mod web;
 
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalSize};
+use winit::dpi::PhysicalSize;
 use winit::event::{
     DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, WindowEvent,
 };
@@ -282,6 +282,93 @@ impl State {
 }
 
 impl RenderApp {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn resume_native(&mut self, event_loop: &ActiveEventLoop) {
+        let monitor = event_loop.available_monitors().next().unwrap();
+        let monitor_scale_factor = monitor.scale_factor();
+        let args = Args::parse();
+        let config = platform::AppConfig::from(&args);
+
+        let now = Instant::now();
+        log::info!("Loading scene: {}", config.scene);
+        let scene = match Scene::from_file(&config.scene, &RendererType::PathTracer) {
+            Ok(scene) => scene,
+            Err(error) => {
+                log::error!("Failed to load scene {}: {error}", config.scene);
+                event_loop.exit();
+                return;
+            }
+        };
+        log::info!(
+            "Finished loading scene in {} millis.",
+            now.elapsed().as_millis()
+        );
+
+        let logical_size = winit::dpi::LogicalSize::new(
+            scene.camera.width,
+            scene.camera.height,
+        );
+        let window_attributes = WindowAttributes::default()
+            .with_title("Rengin Path Tracer")
+            .with_resizable(true)
+            .with_inner_size(logical_size.to_physical::<u32>(monitor_scale_factor));
+        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+
+        let state = pollster::block_on(Self::create_state(window.clone(), scene, &config));
+        *self.state.borrow_mut() = Some(state);
+        window.request_redraw();
+    }
+
+    /// On the web the scene's models are downloaded, so the scene and renderer
+    /// are set up asynchronously; events are ignored until the state exists.
+    #[cfg(target_arch = "wasm32")]
+    fn resume_web(&mut self, event_loop: &ActiveEventLoop) {
+        let config = platform::AppConfig::from_url_params();
+        let window_attributes = WindowAttributes::default().with_title("Rengin Path Tracer");
+        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+        web::attach_canvas(&window);
+
+        let state_slot = self.state.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let scene = match web::load_scene(&config.scene).await {
+                Ok(scene) => scene,
+                Err(error) => {
+                    log::error!("Failed to load scene {}: {error}", config.scene);
+                    web::set_status(Some(&format!("Couldn't load scene {}: {error}", config.scene)));
+                    return;
+                }
+            };
+            let state = Self::create_state(window.clone(), scene, &config).await;
+            web::set_status(None);
+            *state_slot.borrow_mut() = Some(state);
+            window.request_redraw();
+        });
+    }
+
+    /// The scene is rendered at its camera's size times `render_scale`,
+    /// independent of the window size.
+    fn create_state(
+        window: Arc<Window>,
+        scene: Scene,
+        config: &platform::AppConfig,
+    ) -> impl Future<Output = State> + use<> {
+        let render_size = PhysicalSize::new(
+            ((scene.camera.width as f32 * config.render_scale).round() as u32).max(1),
+            ((scene.camera.height as f32 * config.render_scale).round() as u32).max(1),
+        );
+        State::new(
+            window,
+            render_size,
+            scene,
+            config.continuous_motion,
+            config.rays_per_pixel,
+            config.bounces,
+            RendererType::PathTracer,
+            config.profile,
+            config.profile_stats,
+        )
+    }
+
     fn set_aspect_preserving_viewport(
         rpass: &mut wgpu::RenderPass<'_>,
         surface_size: PhysicalSize<u32>,
@@ -470,104 +557,10 @@ impl RenderApp {
 
 impl ApplicationHandler for RenderApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "wasm32")] {
-                let config = platform::AppConfig::from_url_params();
-                let monitor_scale_factor = web_sys::window().unwrap().device_pixel_ratio();
-            } else {
-                let monitor = event_loop.available_monitors().next().unwrap();
-                let monitor_scale_factor = monitor.scale_factor();
-                let args = Args::parse();
-                let config = platform::AppConfig::from(&args);
-            }
-        }
-
-        let renderer_type = RendererType::PathTracer;
-
-        let now = Instant::now();
-        log::info!("Loading scene: {}", config.scene);
-
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "wasm32")] {
-                let scene = engine::embedded_assets::load_scene(&config.scene, &renderer_type);
-            } else {
-                let scene = Scene::from_file(&config.scene, &renderer_type);
-            }
-        }
-        let scene = match scene {
-            Ok(scene) => scene,
-            Err(error) => {
-                log::error!("Failed to load scene {}: {error}", config.scene);
-                event_loop.exit();
-                return;
-            }
-        };
-        log::info!(
-            "Finished loading scene in {} millis.",
-            now.elapsed().as_millis()
-        );
-
-        let logical_size: LogicalSize<u32> = winit::dpi::LogicalSize::new(
-            scene.camera.width,
-            scene.camera.height,
-        );
-        let physical_size: PhysicalSize<u32> = logical_size.to_physical(monitor_scale_factor);
-        let render_size = PhysicalSize::new(
-            ((logical_size.width as f32 * config.render_scale).round() as u32).max(1),
-            ((logical_size.height as f32 * config.render_scale).round() as u32).max(1),
-        );
-
-        let window_attributes = WindowAttributes::default()
-            .with_title("Rengin Path Tracer")
-            .with_resizable(true)
-            .with_inner_size(physical_size);
-
-        // Create window object
-        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-
-        // On web, attach the canvas to the DOM. The page's CSS sizes it to fit the
-        // viewport; winit reports that size as Resized and the render is letterboxed.
         #[cfg(target_arch = "wasm32")]
-        {
-            use winit::platform::web::WindowExtWebSys;
-            let canvas = window.canvas().expect("Failed to get canvas from winit window");
-            let web_window = web_sys::window().unwrap();
-            let document = web_window.document().unwrap();
-            let container = document
-                .get_element_by_id("rengin-canvas")
-                .expect("No #rengin-canvas element found in DOM");
-            container
-                .append_child(&web_sys::Element::from(canvas))
-                .expect("Failed to append canvas to DOM");
-        }
-
-        let init_future = State::new(
-            window.clone(),
-            render_size,
-            scene,
-            config.continuous_motion,
-            config.rays_per_pixel,
-            config.bounces,
-            renderer_type,
-            config.profile,
-            config.profile_stats,
-        );
-
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "wasm32")] {
-                // On web, we cannot block. Use spawn_local with shared state.
-                let state_slot = self.state.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    let state = init_future.await;
-                    *state_slot.borrow_mut() = Some(state);
-                    window.request_redraw();
-                });
-            } else {
-                let state = pollster::block_on(init_future);
-                *self.state.borrow_mut() = Some(state);
-                window.request_redraw();
-            }
-        }
+        self.resume_web(event_loop);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.resume_native(event_loop);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {

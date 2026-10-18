@@ -40,20 +40,40 @@ impl std::error::Error for ModelError {
     }
 }
 
+fn load_options() -> tobj::LoadOptions {
+    tobj::LoadOptions {
+        triangulate: true,
+        single_index: true,
+        ..Default::default()
+    }
+}
+
 /// Loads every triangle of an OBJ file. Polygons are triangulated, vertex
 /// normals that are missing or invalid fall back to the face normal, and
 /// zero-area triangles are skipped.
 pub fn load_obj_triangles(path: &Path) -> Result<Vec<TrianglePrimitive>, ModelError> {
     log::info!("Loading {}", path.display());
-    let (models, materials) = tobj::load_obj(
-        path,
-        &tobj::LoadOptions {
-            triangulate: true,
-            single_index: true,
-            ..Default::default()
-        },
-    )
-    .map_err(|source| ModelError::Load {
+    triangles_from_obj(tobj::load_obj(path, &load_options()), path)
+}
+
+/// Like [`load_obj_triangles`], for OBJ data already in memory. `path` is
+/// only used in messages. Material libraries are not loaded.
+pub fn parse_obj_triangles(
+    mut bytes: &[u8],
+    path: &Path,
+) -> Result<Vec<TrianglePrimitive>, ModelError> {
+    log::info!("Parsing {}", path.display());
+    let result = tobj::load_obj_buf(&mut bytes, &load_options(), |_| {
+        Err(tobj::LoadError::OpenFileFailed)
+    });
+    triangles_from_obj(result, path)
+}
+
+fn triangles_from_obj(
+    result: tobj::LoadResult,
+    path: &Path,
+) -> Result<Vec<TrianglePrimitive>, ModelError> {
+    let (models, materials) = result.map_err(|source| ModelError::Load {
         path: path.to_path_buf(),
         source,
     })?;

@@ -58,8 +58,11 @@ js-sys = { version = "0.3.91", optional = true }
 version = "0.3.91"
 optional = true
 features = [
-    "Window", "Document", "HtmlCanvasElement", "Element",
+    "Window", "Document", "HtmlCanvasElement", "Element", "Node",
     "Location", "UrlSearchParams",
+    # Downloading gzipped models
+    "Response", "ReadableStream", "WritableStream", "ReadableWritablePair",
+    "DecompressionStream", "CompressionFormat",
 ]
 
 [profile.release]

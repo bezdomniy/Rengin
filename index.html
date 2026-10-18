@@ -29,27 +29,34 @@
             outline: none;
             touch-action: none;
         }
-        #no-webgpu {
-            display: none;
+        /* Loading progress and errors, over the canvas (src/web.rs). */
+        #status {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             box-sizing: border-box;
-            max-width: 32em;
-            margin: 40vh auto 0;
+            width: min(32em, 100vw);
+            margin: 0;
             padding: 0 16px;
             text-align: center;
+            pointer-events: none;
+        }
+        #status[hidden] {
+            display: none;
         }
     </style>
 </head>
 <body>
-    <!-- The wasm entry point appends its canvas here (src/lib.rs). -->
+    <!-- The wasm entry point appends its canvas here (src/web.rs). -->
     <div id="rengin-canvas"></div>
-    <p id="no-webgpu">
-        This path tracer needs WebGPU, which this browser doesn't support or has turned off.
-        Try a recent version of Chrome, Edge or Safari.
-    </p>
+    <p id="status">Loading…</p>
     <script>
+        // The wasm entry point doesn't start without WebGPU.
         if (!navigator.gpu) {
-            document.getElementById("rengin-canvas").style.display = "none";
-            document.getElementById("no-webgpu").style.display = "block";
+            document.getElementById("status").textContent =
+                "This path tracer needs WebGPU, which this browser doesn't support or has turned off. " +
+                "Try a recent version of Chrome, Edge or Safari.";
         }
     </script>
 </body>

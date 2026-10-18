@@ -2,9 +2,8 @@ use itertools::partition;
 static MAX_SHAPES_IN_NODE: usize = 4;
 
 use glam::{Mat3, Vec3, Vec4};
-use std::path::Path;
 
-use super::obj_loader::{ModelError, load_obj_triangles};
+use super::obj_loader::ModelError;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -77,14 +76,18 @@ impl Bvh {
         }
     }
 
-    /// Loads each OBJ file in `paths` and builds one BVH per model, in order.
-    pub fn new(paths: &[String]) -> Result<Self, ModelError> {
+    /// Loads each model in `paths` with `load` and builds one BVH per model,
+    /// in order.
+    pub fn new(
+        paths: &[String],
+        mut load: impl FnMut(&str) -> Result<Vec<TrianglePrimitive>, ModelError>,
+    ) -> Result<Self, ModelError> {
         let mut object_inner_nodes: Vec<Vec<NodeInner>> = vec![];
         let mut object_leaf_nodes: Vec<Vec<NodeLeaf>> = vec![];
         let mut object_normal_nodes: Vec<Vec<NodeNormal>> = vec![];
 
         for path in paths {
-            let mut triangles = load_obj_triangles(Path::new(path))?;
+            let mut triangles = load(path)?;
             let bounding_boxes = Bvh::build(&mut triangles);
 
             object_inner_nodes.push(bounding_boxes);

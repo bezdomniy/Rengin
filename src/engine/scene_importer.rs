@@ -6,8 +6,8 @@
 //! the named definitions into the object parameters uploaded to the GPU.
 
 use super::{
-    bvh::Bvh,
-    obj_loader::ModelError,
+    bvh::{Bvh, TrianglePrimitive},
+    obj_loader::{ModelError, load_obj_triangles},
     rt_primitives::{Material, ObjectParam},
 };
 use crate::RendererType;
@@ -80,6 +80,17 @@ pub struct Scene {
     pub object_params: Vec<ObjectParam>,
     pub specular_offset: usize,
     pub lights_offset: usize,
+}
+
+/// A parsed scene whose models are not loaded yet. [`PendingScene::model_files`]
+/// lists the models it needs, so they can be fetched before it is built.
+pub struct PendingScene {
+    camera: CameraValue,
+    lambertian: Vec<PendingObject>,
+    specular: Vec<PendingObject>,
+    lights: Vec<PendingObject>,
+    models: Vec<String>,
+    warnings: BTreeSet<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -764,8 +775,36 @@ impl<'a> SceneBuilder<'a> {
         ))
     }
 
-    fn finish(self, camera: CameraValue) -> Result<Scene, SceneError> {
-        let bvh = Bvh::new(&self.models).map_err(SceneError::Model)?;
+    fn into_pending(self, camera: CameraValue) -> PendingScene {
+        PendingScene {
+            camera,
+            lambertian: self.lambertian,
+            specular: self.specular,
+            lights: self.lights,
+            models: self.models,
+            warnings: self.warnings,
+        }
+    }
+}
+
+impl PendingScene {
+    /// The model files the scene uses, resolved against the scene's directory
+    /// when it has one and otherwise as written in the scene.
+    pub fn model_files(&self) -> &[String] {
+        &self.models
+    }
+
+    /// Builds the scene, reading its models from disk.
+    pub fn build_from_files(self) -> Result<Scene, SceneError> {
+        self.build(|path| load_obj_triangles(Path::new(path)))
+    }
+
+    /// Builds the scene, loading each of [`Self::model_files`] with `load`.
+    pub fn build(
+        self,
+        load: impl FnMut(&str) -> Result<Vec<TrianglePrimitive>, ModelError>,
+    ) -> Result<Scene, SceneError> {
+        let bvh = Bvh::new(&self.models, load).map_err(SceneError::Model)?;
         let specular_offset = self.lambertian.len();
         let lights_offset = specular_offset + self.specular.len();
         if lights_offset + self.lights.len() == 0 {
@@ -815,7 +854,7 @@ impl<'a> SceneBuilder<'a> {
 
         Ok(Scene {
             bvh,
-            camera,
+            camera: self.camera,
             object_params,
             specular_offset,
             lights_offset,
@@ -845,20 +884,21 @@ impl Scene {
             path: path.to_path_buf(),
             source,
         })?;
-        Scene::load(&yaml, path.parent(), renderer_type)
+        Scene::parse(&yaml, path.parent(), renderer_type)?.build_from_files()
     }
 
-    /// Loads a scene from a YAML string (used for embedded assets on web).
-    /// Model paths are used as written.
+    /// Loads a scene from a YAML string. Model paths are used as written.
     pub fn from_yaml_str(yaml: &str, renderer_type: &RendererType) -> Result<Self, SceneError> {
-        Scene::load(yaml, None, renderer_type)
+        Scene::parse(yaml, None, renderer_type)?.build_from_files()
     }
 
-    fn load(
+    /// Parses a scene without loading its models. Model paths are resolved
+    /// against `base_dir` when given, and are otherwise used as written.
+    pub fn parse(
         yaml: &str,
         base_dir: Option<&Path>,
         renderer_type: &RendererType,
-    ) -> Result<Self, SceneError> {
+    ) -> Result<PendingScene, SceneError> {
         let document: Value = serde_yaml_ng::from_str(yaml).map_err(SceneError::Yaml)?;
         let ParsedScene { commands, defines } = parse_scene(document)?;
 
@@ -899,7 +939,7 @@ impl Scene {
                 "scene has no camera (`add: camera`)".to_string(),
             ));
         };
-        builder.finish(camera)
+        Ok(builder.into_pending(camera))
     }
 }
 
@@ -943,10 +983,32 @@ mod tests {
         }
     }
 
+    /// The web build fetches models by file name from assets/models
+    /// (scripts/gzip-models.sh), so every embedded scene's models must be there
+    /// and file names must not collide. shipped_scenes_load builds the scenes.
     #[test]
-    fn embedded_scenes_load() {
-        for name in ["cornellbox", "cornellbox2", "fresnel", "glass_test"] {
-            super::super::embedded_assets::load_scene(name, &RendererType::PathTracer).unwrap();
+    fn embedded_scenes_parse_and_their_models_are_published() {
+        use super::super::embedded_assets::{SCENE_DIR, SCENES, model_url};
+
+        let mut urls = HashMap::new();
+        for (name, yaml) in SCENES {
+            let scene = Scene::parse(yaml, Some(Path::new(SCENE_DIR)), &RendererType::PathTracer)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            for file in scene.model_files() {
+                let path = Path::new(file);
+                let published = Path::new("assets/models").join(path.file_name().unwrap());
+                assert!(
+                    published.exists(),
+                    "{name}: {file} is not in assets/models"
+                );
+                let canonical = std::fs::canonicalize(&published).unwrap();
+                let previous = urls.insert(model_url(file), canonical.clone());
+                assert!(
+                    previous.is_none_or(|previous| previous == canonical),
+                    "{name}: two models are published as {}",
+                    model_url(file)
+                );
+            }
         }
     }
 
