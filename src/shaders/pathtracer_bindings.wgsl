@@ -1,6 +1,6 @@
 #define_import_path rengin::pt_bindings
 
-#import rengin::types::{InnerNodes, LeafNodes, Normals, ObjectParams, Ray}
+#import rengin::types::{InnerNodes, Triangles, ObjectParams, Ray}
 #import rengin::ubo::UBO
 
 @group(0) @binding(0)
@@ -10,9 +10,7 @@ var<uniform> ubo: UBO;
 @group(0) @binding(2)
 var<storage, read> inner_nodes: InnerNodes;
 @group(0) @binding(3)
-var<storage, read> leaf_nodes: LeafNodes;
-@group(0) @binding(4)
-var<storage, read> normal_nodes: Normals;
+var<storage, read> triangles: Triangles;
 @group(0) @binding(5)
 var<storage, read> object_params: ObjectParams;
 // Interleaved ray buffer: [origin, direction, throughput] per ray (3 vec4s each)

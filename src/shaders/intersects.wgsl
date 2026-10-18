@@ -1,8 +1,8 @@
 #define_import_path rengin::intersects
 
-#import rengin::types::{NodeInner, NodeLeaf, Ray, Intersection, ObjectParam}
+#import rengin::types::{NodeInner, Ray, Intersection, ObjectParam}
 #import rengin::constants::MAXLEN
-#import rengin::pt_bindings::{inner_nodes, leaf_nodes, object_params, ubo}
+#import rengin::pt_bindings::{inner_nodes, triangles, object_params, ubo}
 #import rengin::stats::{
     p_bvh_node_tests, p_bvh_node_skips,
     p_triangle_tests, p_triangle_hits,
@@ -12,8 +12,8 @@
 #import rengin::intersects_math::{intersectAABB_inv, intersectSphere, intersectPlane, intersectCube, intersectWorldAABB, intersectTriangleVertices}
 
 fn intersectTriangle(ray: Ray, triangleIdx: u32, inIntersection: Intersection, object_id: u32) -> Intersection {
-    let tri = leaf_nodes.LeafNodes[triangleIdx];
-    let hit = intersectTriangleVertices(ray.rayO, ray.rayD, tri.vertex_a, tri.vertex_b, tri.vertex_c, inIntersection.closestT);
+    let tri = triangles.Triangles[triangleIdx];
+    let hit = intersectTriangleVertices(ray.rayO, ray.rayD, tri.a, tri.b, tri.c, inIntersection.closestT);
     if hit.hit {
         return Intersection(hit.uv, i32(triangleIdx), hit.t, object_id);
     }

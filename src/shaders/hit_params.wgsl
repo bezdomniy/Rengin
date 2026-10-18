@@ -1,7 +1,7 @@
 #define_import_path rengin::hit_params
 
-#import rengin::types::{ObjectParam, Intersection, Normal, HitParams, Ray}
-#import rengin::pt_bindings::{object_params, leaf_nodes, normal_nodes}
+#import rengin::types::{ObjectParam, Intersection, HitParams, Ray}
+#import rengin::pt_bindings::{object_params, triangles, ubo}
 #import rengin::hit_params_math::{normalToWorld_mat, normalAt_params, orientNormals, selfIntersectionOffset}
 
 fn normalToWorld(normal: vec3<f32>, ob_param: ObjectParam) -> vec3<f32>
@@ -24,10 +24,10 @@ fn getHitParams(ray: Ray, intersection: Intersection, typeEnum: u32) -> HitParam
         shading_normal = normalAt_params(hitParams.p, typeEnum, ob_param.transform, ob_param.inverse_transform);
         geometric_normal = shading_normal;
     } else {
-        let tri = leaf_nodes.LeafNodes[intersection.id];
-        geometric_normal = normalToWorld(cross(tri.vertex_b - tri.vertex_a, tri.vertex_c - tri.vertex_a), ob_param);
-        let normal: Normal = normal_nodes.Normals[intersection.id];
-        shading_normal = normalToWorld((normal.normal_b.xyz * intersection.uv.x + normal.normal_c.xyz * intersection.uv.y + normal.normal_a.xyz * (1.0 - intersection.uv.x - intersection.uv.y)), ob_param);
+        let tri = triangles.Triangles[intersection.id];
+        geometric_normal = normalToWorld(cross(tri.b - tri.a, tri.c - tri.a), ob_param);
+        let normal = triangles.Triangles[ubo.normals_offset + u32(intersection.id)];
+        shading_normal = normalToWorld((normal.b * intersection.uv.x + normal.c * intersection.uv.y + normal.a * (1.0 - intersection.uv.x - intersection.uv.y)), ob_param);
     }
 
     let oriented = orientNormals(normal_ray_d, geometric_normal, shading_normal);

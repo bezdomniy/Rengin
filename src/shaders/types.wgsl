@@ -1,18 +1,13 @@
 #define_import_path rengin::types
 
-struct NodeLeaf {
-    vertex_a: vec3<f32>,
+// Three values at a triangle's corners: its vertices or its vertex normals.
+struct TriangleCorners {
+    a: vec3<f32>,
     pad_a: u32,
-    vertex_b: vec3<f32>,
+    b: vec3<f32>,
     pad_b: u32,
-    vertex_c: vec3<f32>,
+    c: vec3<f32>,
     pad_c: u32,
-};
-
-struct Normal {
-    normal_a: vec4<f32>,
-    normal_b: vec4<f32>,
-    normal_c: vec4<f32>,
 };
 
 struct NodeInner {
@@ -52,13 +47,11 @@ struct InnerNodes {
 };
 
 
-struct LeafNodes {
-    LeafNodes: array<NodeLeaf>,
-};
-
-
-struct Normals {
-    Normals: array<Normal>,
+// Each triangle's vertices, then from ubo.normals_offset each triangle's
+// vertex normals in the same order. One buffer, as WebGPU only guarantees 8
+// storage buffers per shader stage.
+struct Triangles {
+    Triangles: array<TriangleCorners>,
 };
 
 // TODO: include surface area here, maybe in material

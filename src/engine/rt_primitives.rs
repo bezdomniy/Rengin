@@ -272,7 +272,7 @@ pub struct Ubo {
     specular_offset: u32,
     subpixel_idx: u32,
     ray_bounces: u32,
-    _pad: u32,
+    normals_offset: u32,
 }
 
 #[derive(Debug)]
@@ -286,6 +286,8 @@ pub struct ScreenData {
     specular_offset: u32,
     lights_offset: u32,
     n_objects: u32,
+    /// Index of the first triangle normal in the triangles buffer.
+    normals_offset: u32,
     pub subpixel_idx: u32,
     sqrt_rays_per_pixel: u32,
     pub ray_bounces: u32,
@@ -297,6 +299,7 @@ impl ScreenData {
         n_objects: u32,
         specular_offset: u32,
         lights_offset: u32,
+        normals_offset: u32,
         ray_bounces: u32,
         size: PhysicalSize<u32>,
         fov: f32,
@@ -321,6 +324,7 @@ impl ScreenData {
             half_width_height,
             fov,
             n_objects,
+            normals_offset,
             lights_offset,
             specular_offset,
             subpixel_idx: 0,
@@ -350,12 +354,12 @@ impl ScreenData {
             half_width_height: self.half_width_height.to_array(),
             pixel_size: self.pixel_size,
             sqrt_rays_per_pixel: self.sqrt_rays_per_pixel,
-            _pad: 0,
             width: self.size.width,
             height: self.size.height,
             n_objects: self.n_objects,
             subpixel_idx: self.subpixel_idx,
             ray_bounces: self.ray_bounces,
+            normals_offset: self.normals_offset,
             lights_offset: self.lights_offset,
             specular_offset: self.specular_offset,
         }
@@ -371,6 +375,7 @@ mod tests {
         let fov = std::f32::consts::FRAC_PI_2;
         let screen = ScreenData::new(
             Mat4::IDENTITY,
+            0,
             0,
             0,
             0,

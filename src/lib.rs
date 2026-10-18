@@ -129,6 +129,7 @@ impl State {
             scene.object_params.len() as u32,
             scene.specular_offset as u32,
             scene.lights_offset as u32,
+            scene.bvh.leaf_nodes.len() as u32,
             ray_bounces,
             render_size,
             scene.camera.field_of_view,

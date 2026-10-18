@@ -139,8 +139,14 @@ impl RenginWgpu {
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
                 let required_features = wgpu::Features::empty();
-                // Use adapter's actual limits — we need up to 12 storage buffers
-                let required_limits = adapter.limits();
+                // WebGPU's guaranteed limits (so this runs on any device, and going
+                // over them fails everywhere, not only on minimal devices), except
+                // for buffer sizes, which large meshes need.
+                let required_limits = wgpu::Limits {
+                    max_storage_buffer_binding_size: adapter.limits().max_storage_buffer_binding_size,
+                    max_buffer_size: adapter.limits().max_buffer_size,
+                    ..wgpu::Limits::default()
+                };
             } else {
                 let required_features = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
                 let required_limits = wgpu::Limits {
@@ -168,6 +174,16 @@ impl RenginWgpu {
             })
             .await
             .unwrap();
+
+        // Browsers only log GPU validation errors as console warnings and keep
+        // going, which leaves a black canvas; say so on the page as well.
+        #[cfg(target_arch = "wasm32")]
+        device.on_uncaptured_error(Arc::new(|error| {
+            log::error!("GPU error: {error}");
+            crate::web::set_status(Some(
+                "The GPU reported an error, so the image may be wrong or missing. The browser console has the details.",
+            ));
+        }));
 
         let surface_caps = window_surface.get_capabilities(&adapter);
 
@@ -616,19 +632,19 @@ impl<'a> RenginRenderer for RenginWgpu {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
-        let buf_blas = self
+        // Each triangle's vertices, then each triangle's vertex normals in the
+        // same order, in one buffer: WebGPU only guarantees 8 storage buffers
+        // per shader stage. Both halves are 48 bytes per triangle.
+        debug_assert_eq!(bvh.leaf_nodes.len(), bvh.normal_nodes.len());
+        let buf_triangles = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("BLAS storage Buffer"),
-                contents: bytemuck::cast_slice(&bvh.leaf_nodes),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-
-        let buf_normals = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("normals storage Buffer"),
-                contents: bytemuck::cast_slice(&bvh.normal_nodes),
+                label: Some("triangles storage Buffer"),
+                contents: &[
+                    bytemuck::cast_slice::<_, u8>(&bvh.leaf_nodes),
+                    bytemuck::cast_slice(&bvh.normal_nodes),
+                ]
+                .concat(),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -707,8 +723,7 @@ impl<'a> RenginRenderer for RenginWgpu {
         self.buffers = Some(HashMap::from([
             ("ubo", buf_ubo),
             ("tlas", buf_tlas),
-            ("blas", buf_blas),
-            ("normals", buf_normals),
+            ("triangles", buf_triangles),
             ("object_params", buf_op),
             ("ray_data", buf_ray_data),
             ("stats", buf_stats),
@@ -799,8 +814,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                     count: None,
                 },
                 storage_ro(2),  // inner_nodes
-                storage_ro(3),  // leaf_nodes
-                storage_ro(4),  // normal_nodes
+                storage_ro(3),  // triangles (vertices, then normals)
                 storage_ro(5),  // object_params
                 storage_rw(6),  // ray_data (interleaved)
             ];
@@ -1065,8 +1079,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                 wgpu::BindGroupEntry { binding: 0, resource: image_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: bufs.get("ubo").unwrap().as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: bufs.get("tlas").unwrap().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bufs.get("blas").unwrap().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: bufs.get("normals").unwrap().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: bufs.get("triangles").unwrap().as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 5, resource: bufs.get("object_params").unwrap().as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 6, resource: bufs.get("ray_data").unwrap().as_entire_binding() },
             ];
@@ -1102,8 +1115,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                         wgpu::BindGroupEntry { binding: 0, resource: image_buffer.as_entire_binding() },
                         wgpu::BindGroupEntry { binding: 1, resource: bufs.get("ubo").unwrap().as_entire_binding() },
                         wgpu::BindGroupEntry { binding: 2, resource: bufs.get("tlas").unwrap().as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 3, resource: bufs.get("blas").unwrap().as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 4, resource: bufs.get("normals").unwrap().as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 3, resource: bufs.get("triangles").unwrap().as_entire_binding() },
                         wgpu::BindGroupEntry { binding: 5, resource: bufs.get("object_params").unwrap().as_entire_binding() },
                         wgpu::BindGroupEntry { binding: 6, resource: bufs.get("ray_data").unwrap().as_entire_binding() },
                     ];
