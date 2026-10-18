@@ -102,9 +102,9 @@ impl RenginWgpu {
         }
 
         log::debug!("backend: {:?}", backends);
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends,
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(window.clone()))
         });
         log::debug!("instance: {:?}", instance);
 
@@ -120,6 +120,7 @@ impl RenginWgpu {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&window_surface),
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             })
             .await
             .expect("No suitable GPU adapters found on the system!");
@@ -134,8 +135,7 @@ impl RenginWgpu {
 
         let optional_features =
             wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
-            | wgpu::Features::TIMESTAMP_QUERY
-            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+            | wgpu::Features::TIMESTAMP_QUERY;
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
                 let required_features = wgpu::Features::empty();
@@ -201,6 +201,7 @@ impl RenginWgpu {
             format: surface_format,
             alpha_mode: surface_caps.alpha_modes[0],
             present_mode: wgpu::PresentMode::Fifo,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width,
             height,
             view_formats: if view_format != surface_format { vec![view_format] } else { vec![] },
@@ -209,7 +210,9 @@ impl RenginWgpu {
         // println!("{} {}", width, height);
         window_surface.configure(&device, &config);
 
-        let has_timestamps = profile && device.features().contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
+        // Profiling only writes timestamps at pass boundaries, which needs no
+        // more than TIMESTAMP_QUERY.
+        let has_timestamps = profile && device.features().contains(wgpu::Features::TIMESTAMP_QUERY);
         let timestamp_period = if has_timestamps {
             queue.get_timestamp_period()
         } else {
@@ -355,7 +358,11 @@ impl RenginWgpu {
             }
 
             if timestamp_status == 1 && stats_status == 1 {
-                let timestamp_data = slot.timestamp_buffer.slice(..).get_mapped_range();
+                let timestamp_data = slot
+                    .timestamp_buffer
+                    .slice(..)
+                    .get_mapped_range()
+                    .expect("timestamp readback buffer is mapped");
                 let timestamps: &[u64] = bytemuck::cast_slice(&timestamp_data);
                 let raygen_ns =
                     timestamps[1].wrapping_sub(timestamps[0]) as f64 * timestamp_period;
@@ -392,7 +399,11 @@ impl RenginWgpu {
                 drop(timestamp_data);
 
                 if profile_stats {
-                    let stats_data = slot.stats_buffer.slice(..).get_mapped_range();
+                    let stats_data = slot
+                        .stats_buffer
+                        .slice(..)
+                        .get_mapped_range()
+                        .expect("stats readback buffer is mapped");
                     let stats: &[u32] = bytemuck::cast_slice(&stats_data);
                     let alive = stats[0] as f64;
                     log::info!(
@@ -773,7 +784,7 @@ impl<'a> RenginRenderer for RenginWgpu {
         let raygen_pipeline_layout = Some(self.device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("raygen"),
-                bind_group_layouts: &[self.raygen_bind_group_layout.as_ref().unwrap()],
+                bind_group_layouts: &[Some(self.raygen_bind_group_layout.as_ref().unwrap())],
                 immediate_size: 0,
             },
         ));
@@ -842,7 +853,7 @@ impl<'a> RenginRenderer for RenginWgpu {
         let compute_pipeline_layout = Some(self.device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("compute"),
-                bind_group_layouts: &[self.compute_bind_group_layout.as_ref().unwrap()],
+                bind_group_layouts: &[Some(self.compute_bind_group_layout.as_ref().unwrap())],
                 immediate_size: 0,
             },
         ));
@@ -879,7 +890,7 @@ impl<'a> RenginRenderer for RenginWgpu {
         let render_pipeline_layout = Some(self.device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("render"),
-                bind_group_layouts: &[self.render_bind_group_layout.as_ref().unwrap()],
+                bind_group_layouts: &[Some(self.render_bind_group_layout.as_ref().unwrap())],
                 immediate_size: 0,
             },
         ));
@@ -994,7 +1005,7 @@ impl<'a> RenginRenderer for RenginWgpu {
         let prepare_pipeline_layout = self.device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("prepare dispatch"),
-                bind_group_layouts: &[self.prepare_bind_group_layout.as_ref().unwrap()],
+                bind_group_layouts: &[Some(self.prepare_bind_group_layout.as_ref().unwrap())],
                 immediate_size: 0,
             },
         );

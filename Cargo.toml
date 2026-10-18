@@ -21,8 +21,8 @@ web = ["glam/libm", "getrandom/wasm_js", "dep:wasm-bindgen", "dep:wasm-bindgen-f
 
 [dependencies]
 # Graphics
-wgpu = { version = "28.0", features = ["vulkan-portability", "naga-ir"] }
-naga_oil = "0.21"
+wgpu = { version = "30.0", features = ["vulkan-portability", "naga-ir"] }
+naga_oil = "0.23"
 winit = "0.30"
 
 # Math & data

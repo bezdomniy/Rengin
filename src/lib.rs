@@ -464,26 +464,27 @@ impl RenderApp {
         rpass.draw(0..3, 0..1);
     }
 
-    fn acquire_frame(state: &State) -> (wgpu::SurfaceTexture, wgpu::TextureView) {
-        let frame = match state.renderer.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(_) => {
-                state
-                    .renderer
-                    .surface
-                    .configure(&state.renderer.device, &state.renderer.config);
-                state
-                    .renderer
-                    .surface
-                    .get_current_texture()
-                    .expect("Failed to acquire next surface texture!")
+    /// The next surface texture and an sRGB view of it, or None if there's no
+    /// texture to draw to this frame (e.g. the window is hidden).
+    fn acquire_frame(state: &State) -> Option<(wgpu::SurfaceTexture, wgpu::TextureView)> {
+        use wgpu::CurrentSurfaceTexture as Current;
+        let surface = &state.renderer.surface;
+        let frame = match surface.get_current_texture() {
+            Current::Success(frame) | Current::Suboptimal(frame) => frame,
+            Current::Outdated | Current::Lost => {
+                surface.configure(&state.renderer.device, &state.renderer.config);
+                match surface.get_current_texture() {
+                    Current::Success(frame) | Current::Suboptimal(frame) => frame,
+                    _ => return None,
+                }
             }
+            Current::Timeout | Current::Occluded | Current::Validation => return None,
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
             format: Some(state.renderer.config.format.add_srgb_suffix()),
             ..Default::default()
         });
-        (frame, view)
+        Some((frame, view))
     }
 
     fn color_attachments(view: &wgpu::TextureView) -> [Option<wgpu::RenderPassColorAttachment<'_>>; 1] {
@@ -499,15 +500,17 @@ impl RenderApp {
     }
 
     /// Presents the accumulated image again without tracing new samples.
-    fn present_only(state: &State) {
-        let (frame, view) = Self::acquire_frame(state);
+    /// Returns false if there was no surface texture to present to.
+    fn present_only(state: &State) -> bool {
+        let Some((frame, view)) = Self::acquire_frame(state) else { return false };
         let mut command_encoder = state
             .renderer
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         Self::encode_present_pass(state, &mut command_encoder, &Self::color_attachments(&view));
         state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
-        frame.present();
+        state.renderer.queue.present(frame);
+        true
     }
 
     fn render_default_mode(
@@ -698,9 +701,10 @@ impl ApplicationHandler for RenderApp {
         state.resize_surface(window_size);
 
         if state.needs_present && state.screen_data.subpixel_idx >= state.renderer.rays_per_pixel {
-            Self::present_only(state);
+            state.needs_present = !Self::present_only(state);
+        } else {
+            state.needs_present = false;
         }
-        state.needs_present = false;
 
         #[cfg(target_arch = "wasm32")]
         if !state.gpu_ready() {
@@ -718,9 +722,16 @@ impl ApplicationHandler for RenderApp {
         {
             state.last_update_inst = Instant::now();
             if state.screen_data.subpixel_idx < state.renderer.rays_per_pixel {
+                let Some((frame, view)) = Self::acquire_frame(state) else {
+                    // Try again a frame later rather than spinning.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    _event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + target_frametime));
+                    #[cfg(target_arch = "wasm32")]
+                    state.renderer.window.request_redraw();
+                    return;
+                };
                 state.update();
 
-                let (frame, view) = Self::acquire_frame(state);
                 let color_attachments = Self::color_attachments(&view);
                 #[allow(unused_mut)]
                 let mut command_encoder = state
@@ -897,16 +908,16 @@ impl ApplicationHandler for RenderApp {
                         );
                     }
 
-                    frame.present();
+                    state.renderer.queue.present(frame);
                 } else {
                     Self::render_default_mode(state, command_encoder, &color_attachments, time_since_last_frame);
-                    frame.present();
+                    state.renderer.queue.present(frame);
                 }
 
                 #[cfg(target_arch = "wasm32")]
                 {
                     Self::render_default_mode(state, command_encoder, &color_attachments, time_since_last_frame);
-                    frame.present();
+                    state.renderer.queue.present(frame);
                 }
             }
         } else {
