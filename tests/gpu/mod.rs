@@ -27,15 +27,16 @@ pub struct GpuTestContext {
 
 impl GpuTestContext {
     pub fn try_new() -> Option<Self> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         })).ok()?;
 
         let (device, queue) = pollster::block_on(adapter.request_device(
@@ -234,7 +235,7 @@ pub fn dispatch_and_readback(
         .device
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("test_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[Some(&bind_group_layout)],
             immediate_size: 0,
         });
 
@@ -312,7 +313,7 @@ pub fn dispatch_and_readback(
                 timeout: None,
             });
             rx.recv().unwrap().unwrap();
-            let data = slice.get_mapped_range();
+            let data = slice.get_mapped_range().expect("readback buffer is mapped");
             results.push(data.to_vec());
             drop(data);
             buf.unmap();

@@ -72,6 +72,19 @@ pub(crate) fn set_status(message: Option<&str>) {
     };
 }
 
+/// Replaces the page URL's query with `params`, without reloading the page.
+pub(crate) fn set_url_params(params: &[(&str, String)]) {
+    let Some(window) = web_sys::window() else { return };
+    let Ok(search) = web_sys::UrlSearchParams::new() else { return };
+    for (name, value) in params {
+        search.append(name, value);
+    }
+    let url = format!("?{}", String::from(search.to_string()));
+    if let Ok(history) = window.history() {
+        let _ = history.replace_state_with_url(&JsValue::NULL, "", Some(&url));
+    }
+}
+
 /// Loads an embedded scene, downloading the models it uses.
 pub(crate) async fn load_scene(name: &str) -> Result<Scene, String> {
     let now = Instant::now();

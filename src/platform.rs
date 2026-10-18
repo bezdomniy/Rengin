@@ -42,13 +42,13 @@ impl From<&super::Args> for AppConfig {
 /// URL parameter names for each option: the CLI long and short flag names,
 /// plus older web-only aliases. Profiling options are native-only.
 #[cfg(target_arch = "wasm32")]
-const SCENE_PARAMS: &[&str] = &["scene", "s"];
+pub const SCENE_PARAMS: &[&str] = &["scene", "s"];
 #[cfg(target_arch = "wasm32")]
-const RAYS_PER_PIXEL_PARAMS: &[&str] = &["rays-per-pixel", "r", "rpp"];
+pub const RAYS_PER_PIXEL_PARAMS: &[&str] = &["rays-per-pixel", "r", "rpp"];
 #[cfg(target_arch = "wasm32")]
-const BOUNCES_PARAMS: &[&str] = &["bounces", "b"];
+pub const BOUNCES_PARAMS: &[&str] = &["bounces", "b"];
 #[cfg(target_arch = "wasm32")]
-const RENDER_SCALE_PARAMS: &[&str] = &["render-scale", "render_scale"];
+pub const RENDER_SCALE_PARAMS: &[&str] = &["render-scale", "render_scale"];
 
 #[cfg(target_arch = "wasm32")]
 impl AppConfig {

@@ -1,6 +1,7 @@
 pub mod engine;
 pub mod platform;
 mod renderer;
+mod ui;
 
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -63,6 +64,68 @@ struct State {
     /// Samples submitted to the GPU that it hasn't finished yet.
     #[cfg(target_arch = "wasm32")]
     samples_in_flight: Arc<std::sync::atomic::AtomicU32>,
+    /// Kept to rebuild the GPU buffers when the render scale changes.
+    scene: Scene,
+    scene_name: String,
+    /// The scenes the settings panel offers.
+    scenes: Vec<String>,
+    /// Where the native build loads `scenes` from.
+    #[cfg(not(target_arch = "wasm32"))]
+    scene_dir: std::path::PathBuf,
+    /// A scene being downloaded and built in the background (web).
+    loading_scene: Option<String>,
+    render_scale: f32,
+    /// How long the image took, once all its samples are done.
+    render_time: Option<Duration>,
+    ui: ui::Ui,
+}
+
+/// The scenes the settings panel offers, and the directory they are in.
+#[cfg(not(target_arch = "wasm32"))]
+fn scenes_next_to(scene_file: &str) -> (std::path::PathBuf, Vec<String>) {
+    let dir = std::path::Path::new(scene_file)
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
+    let mut scenes: Vec<String> = std::fs::read_dir(if dir.as_os_str().is_empty() { ".".as_ref() } else { dir.as_path() })
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            (path.extension()? == "yaml").then(|| path.file_stem().map(|stem| stem.to_string_lossy().into_owned()))?
+        })
+        .collect();
+    scenes.sort();
+    (dir, scenes)
+}
+
+/// The scene is rendered at its camera's size times `render_scale`,
+/// independent of the window size.
+fn render_size(scene: &Scene, render_scale: f32) -> PhysicalSize<u32> {
+    PhysicalSize::new(
+        ((scene.camera.width as f32 * render_scale).round() as u32).max(1),
+        ((scene.camera.height as f32 * render_scale).round() as u32).max(1),
+    )
+}
+
+fn scene_screen_data(
+    scene: &Scene,
+    camera: &Camera,
+    render_size: PhysicalSize<u32>,
+    ray_bounces: u32,
+    rays_per_pixel: u32,
+) -> ScreenData {
+    ScreenData::new(
+        camera.get_inverse_transform(),
+        scene.object_params.len() as u32,
+        scene.specular_offset as u32,
+        scene.lights_offset as u32,
+        scene.bvh.leaf_nodes.len() as u32,
+        ray_bounces,
+        render_size,
+        scene.camera.field_of_view,
+        (rays_per_pixel as f32).sqrt() as u32,
+    )
 }
 
 #[derive(Default)]
@@ -102,17 +165,16 @@ impl Default for RenderApp {
 }
 
 impl State {
+    /// Sets up the renderer for `scene`. `scenes` are offered in the settings
+    /// panel; `scene_name` is the one being shown.
     pub async fn new(
         window: Arc<Window>,
-        render_size: PhysicalSize<u32>,
         scene: Scene,
-        continous_motion: bool,
-        rays_per_pixel: u32,
-        ray_bounces: u32,
-        renderer_type: RendererType,
-        profile: bool,
-        profile_stats: bool,
+        scene_name: String,
+        scenes: Vec<String>,
+        config: &platform::AppConfig,
     ) -> Self {
+        let render_size = render_size(&scene, config.render_scale);
         let physical_size = window.inner_size();
         // On web, inner_size may be 0 before layout; use render size as fallback.
         let surface_size = if physical_size.width > 0 {
@@ -122,13 +184,13 @@ impl State {
         };
 
         let mut renderer = RenginWgpu::new(
-            window,
+            window.clone(),
             surface_size,
-            continous_motion,
-            rays_per_pixel,
-            ray_bounces,
-            profile,
-            profile_stats,
+            config.continuous_motion,
+            config.rays_per_pixel,
+            config.bounces,
+            config.profile,
+            config.profile_stats,
         )
         .await;
 
@@ -140,23 +202,19 @@ impl State {
             ),
         };
 
-        let screen_data = ScreenData::new(
-            game_state.camera.get_inverse_transform(),
-            scene.object_params.len() as u32,
-            scene.specular_offset as u32,
-            scene.lights_offset as u32,
-            scene.bvh.leaf_nodes.len() as u32,
-            ray_bounces,
+        let screen_data = scene_screen_data(
+            &scene,
+            &game_state.camera,
             render_size,
-            scene.camera.field_of_view,
-            (renderer.rays_per_pixel as f32).sqrt() as u32,
+            config.bounces,
+            renderer.rays_per_pixel,
         );
 
         log::debug!("screen_data: {:?}", screen_data);
 
         let now = Instant::now();
         log::info!("Building shaders...");
-        renderer.create_shaders(renderer_type);
+        renderer.create_shaders(RendererType::PathTracer);
         log::info!(
             "Finshed building shaders in {} millis",
             now.elapsed().as_millis()
@@ -176,6 +234,8 @@ impl State {
         // TODO: remove buffers as arg and move into RenginWgpu state
         renderer.create_bind_groups(&render_size);
 
+        let ui = ui::Ui::new(&window, &renderer.device, renderer.config.format.remove_srgb_suffix());
+
         Self {
             renderer,
             screen_data,
@@ -189,7 +249,98 @@ impl State {
             last_movement: Instant::now(),
             #[cfg(target_arch = "wasm32")]
             samples_in_flight: Default::default(),
+            scene,
+            scene_name,
+            scenes,
+            #[cfg(not(target_arch = "wasm32"))]
+            scene_dir: Default::default(),
+            loading_scene: None,
+            render_scale: config.render_scale,
+            render_time: None,
+            ui,
         }
+    }
+
+    /// Restarts the image, e.g. after a setting changed.
+    fn restart(&mut self) {
+        self.screen_data.subpixel_idx = 0;
+        self.needs_present = true;
+    }
+
+    fn set_rays_per_pixel(&mut self, rays_per_pixel: u32) {
+        self.renderer.rays_per_pixel = rays_per_pixel;
+        // The samples are stratified on a grid of this size.
+        self.screen_data.sqrt_rays_per_pixel = (rays_per_pixel as f32).sqrt() as u32;
+        self.restart();
+    }
+
+    fn set_bounces(&mut self, bounces: u32) {
+        self.renderer.ray_bounces = bounces;
+        self.screen_data.ray_bounces = bounces;
+        self.restart();
+    }
+
+    fn set_render_scale(&mut self, render_scale: f32) {
+        self.render_scale = render_scale;
+        self.rebuild_scene_buffers();
+    }
+
+    /// Shows `scene` from its own camera.
+    fn set_scene(&mut self, name: String, scene: Scene) {
+        self.game_state.camera = Camera::new(scene.camera.from, scene.camera.to, scene.camera.up);
+        self.scene = scene;
+        self.scene_name = name;
+        self.rebuild_scene_buffers();
+    }
+
+    /// Recreates the buffers that depend on the scene and the render size.
+    /// The pipelines don't, so they are kept.
+    fn rebuild_scene_buffers(&mut self) {
+        let render_size = render_size(&self.scene, self.render_scale);
+        self.screen_data = scene_screen_data(
+            &self.scene,
+            &self.game_state.camera,
+            render_size,
+            self.renderer.ray_bounces,
+            self.renderer.rays_per_pixel,
+        );
+        self.renderer.create_buffers(&self.scene.bvh, &self.screen_data, &self.scene.object_params);
+        self.renderer.create_bind_groups(&render_size);
+        self.restart();
+    }
+
+    /// Lays out the settings panel and returns the settings changed in it.
+    fn run_ui(&mut self) -> Vec<ui::Change> {
+        let samples_done = self.screen_data.subpixel_idx;
+        let panel = ui::Panel {
+            scenes: &self.scenes,
+            scene: &self.scene_name,
+            loading_scene: self.loading_scene.as_deref(),
+            rays_per_pixel: self.renderer.rays_per_pixel,
+            bounces: self.renderer.ray_bounces,
+            bounces_editable: !self.renderer.profile,
+            render_scale: self.render_scale,
+            render_size: self.screen_data.size,
+            samples_done,
+            render_time: match self.render_time {
+                Some(time) => time,
+                None if samples_done == 0 => Duration::ZERO,
+                None => self.render_started.elapsed(),
+            },
+        };
+        self.ui.run(&self.renderer.window, &panel)
+    }
+
+    /// Puts the current settings in the page's URL, so reloading or sharing
+    /// it shows the same image.
+    #[cfg(target_arch = "wasm32")]
+    fn update_url(&self) {
+        web::set_url_params(&[
+            (platform::SCENE_PARAMS[0], self.scene_name.clone()),
+            (platform::RAYS_PER_PIXEL_PARAMS[0], self.renderer.rays_per_pixel.to_string()),
+            (platform::BOUNCES_PARAMS[0], self.renderer.ray_bounces.to_string()),
+            (platform::RENDER_SCALE_PARAMS[0], self.render_scale.to_string()),
+        ]);
     }
 
     fn resize_surface(&mut self, size: PhysicalSize<u32>) {
@@ -317,9 +468,11 @@ impl State {
 
         if self.screen_data.subpixel_idx == 0 {
             self.render_started = Instant::now();
+            self.render_time = None;
         }
         self.screen_data.subpixel_idx += 1;
         if self.screen_data.subpixel_idx == self.renderer.rays_per_pixel {
+            self.render_time = Some(self.render_started.elapsed());
             log::info!(
                 "Rendered {} samples in {} millis.",
                 self.renderer.rays_per_pixel,
@@ -362,7 +515,12 @@ impl RenderApp {
             .with_inner_size(logical_size.to_physical::<u32>(monitor_scale_factor));
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
-        let state = pollster::block_on(Self::create_state(window.clone(), scene, &config));
+        let (scene_dir, scenes) = scenes_next_to(&config.scene);
+        let scene_name = std::path::Path::new(&config.scene)
+            .file_stem()
+            .map_or_else(|| config.scene.clone(), |stem| stem.to_string_lossy().into_owned());
+        let mut state = pollster::block_on(State::new(window.clone(), scene, scene_name, scenes, &config));
+        state.scene_dir = scene_dir;
         *self.state.borrow_mut() = Some(state);
         window.request_redraw();
     }
@@ -386,35 +544,12 @@ impl RenderApp {
                     return;
                 }
             };
-            let state = Self::create_state(window.clone(), scene, &config).await;
+            let scenes = engine::embedded_assets::SCENES.iter().map(|(name, _)| name.to_string()).collect();
+            let state = State::new(window.clone(), scene, config.scene.clone(), scenes, &config).await;
             web::set_status(None);
             *state_slot.borrow_mut() = Some(state);
             window.request_redraw();
         });
-    }
-
-    /// The scene is rendered at its camera's size times `render_scale`,
-    /// independent of the window size.
-    fn create_state(
-        window: Arc<Window>,
-        scene: Scene,
-        config: &platform::AppConfig,
-    ) -> impl Future<Output = State> + use<> {
-        let render_size = PhysicalSize::new(
-            ((scene.camera.width as f32 * config.render_scale).round() as u32).max(1),
-            ((scene.camera.height as f32 * config.render_scale).round() as u32).max(1),
-        );
-        State::new(
-            window,
-            render_size,
-            scene,
-            config.continuous_motion,
-            config.rays_per_pixel,
-            config.bounces,
-            RendererType::PathTracer,
-            config.profile,
-            config.profile_stats,
-        )
     }
 
     fn set_aspect_preserving_viewport(
@@ -464,26 +599,32 @@ impl RenderApp {
         rpass.draw(0..3, 0..1);
     }
 
-    fn acquire_frame(state: &State) -> (wgpu::SurfaceTexture, wgpu::TextureView) {
-        let frame = match state.renderer.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(_) => {
-                state
-                    .renderer
-                    .surface
-                    .configure(&state.renderer.device, &state.renderer.config);
-                state
-                    .renderer
-                    .surface
-                    .get_current_texture()
-                    .expect("Failed to acquire next surface texture!")
+    /// The next surface texture with an sRGB view of it for the image and a
+    /// non-sRGB one for the settings panel, or None if there's no texture to
+    /// draw to this frame (e.g. the window is hidden).
+    fn acquire_frame(state: &State) -> Option<(wgpu::SurfaceTexture, wgpu::TextureView, wgpu::TextureView)> {
+        use wgpu::CurrentSurfaceTexture as Current;
+        let surface = &state.renderer.surface;
+        let frame = match surface.get_current_texture() {
+            Current::Success(frame) | Current::Suboptimal(frame) => frame,
+            Current::Outdated | Current::Lost => {
+                surface.configure(&state.renderer.device, &state.renderer.config);
+                match surface.get_current_texture() {
+                    Current::Success(frame) | Current::Suboptimal(frame) => frame,
+                    _ => return None,
+                }
             }
+            Current::Timeout | Current::Occluded | Current::Validation => return None,
         };
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(state.renderer.config.format.add_srgb_suffix()),
-            ..Default::default()
-        });
-        (frame, view)
+        let view = |format| {
+            frame.texture.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(format),
+                ..Default::default()
+            })
+        };
+        let format = state.renderer.config.format;
+        let (image_view, ui_view) = (view(format.add_srgb_suffix()), view(format.remove_srgb_suffix()));
+        Some((frame, image_view, ui_view))
     }
 
     fn color_attachments(view: &wgpu::TextureView) -> [Option<wgpu::RenderPassColorAttachment<'_>>; 1] {
@@ -498,25 +639,12 @@ impl RenderApp {
         })]
     }
 
-    /// Presents the accumulated image again without tracing new samples.
-    fn present_only(state: &State) {
-        let (frame, view) = Self::acquire_frame(state);
-        let mut command_encoder = state
-            .renderer
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        Self::encode_present_pass(state, &mut command_encoder, &Self::color_attachments(&view));
-        state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
-        frame.present();
-    }
-
-    fn render_default_mode(
-        state: &mut State,
-        command_encoder: wgpu::CommandEncoder,
+    /// Encodes one sample of the image, and drawing the image to the surface.
+    fn encode_sample(
+        state: &State,
+        command_encoder: &mut wgpu::CommandEncoder,
         color_attachments: &[Option<wgpu::RenderPassColorAttachment<'_>>],
-        time_since_last_frame: Duration,
     ) {
-        let mut command_encoder = command_encoder;
         // === DEFAULT MODE: wavefront path tracing with dead ray elimination ===
 
         // Initialize ray_counts: [0, 0, 0] (will be populated by first bounce)
@@ -590,26 +718,224 @@ impl RenderApp {
         }
 
         // 4. Render pass
-        Self::encode_present_pass(state, &mut command_encoder, color_attachments);
+        Self::encode_present_pass(state, command_encoder, color_attachments);
+    }
+}
 
-        state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
+impl RenderApp {
+    /// Applies a setting changed in the settings panel.
+    fn apply_change(slot: &Rc<RefCell<Option<State>>>, state: &mut State, change: ui::Change) {
+        match change {
+            ui::Change::RaysPerPixel(rays_per_pixel) => state.set_rays_per_pixel(rays_per_pixel),
+            ui::Change::Bounces(bounces) => state.set_bounces(bounces),
+            ui::Change::RenderScale(render_scale) => state.set_render_scale(render_scale),
+            ui::Change::Scene(name) => Self::load_scene(slot, state, name),
+        }
         #[cfg(target_arch = "wasm32")]
-        {
-            use std::sync::atomic::Ordering;
-            let in_flight = state.samples_in_flight.clone();
-            in_flight.fetch_add(1, Ordering::AcqRel);
+        state.update_url();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_scene(_slot: &Rc<RefCell<Option<State>>>, state: &mut State, name: String) {
+        let path = state.scene_dir.join(format!("{name}.yaml"));
+        let path = path.to_string_lossy();
+        log::info!("Loading scene: {path}");
+        match Scene::from_file(&path, &RendererType::PathTracer) {
+            Ok(scene) => state.set_scene(name, scene),
+            Err(error) => log::error!("Failed to load scene {path}: {error}"),
+        }
+    }
+
+    /// Downloads and builds the scene in the background; the current scene
+    /// keeps rendering until it is ready.
+    #[cfg(target_arch = "wasm32")]
+    fn load_scene(slot: &Rc<RefCell<Option<State>>>, state: &mut State, name: String) {
+        state.loading_scene = Some(name.clone());
+        let slot = slot.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let scene = web::load_scene(&name).await;
+            let mut guard = slot.borrow_mut();
+            let Some(state) = guard.as_mut() else { return };
+            state.loading_scene = None;
+            match scene {
+                Ok(scene) => {
+                    web::set_status(None);
+                    state.set_scene(name, scene);
+                    state.update_url();
+                }
+                Err(error) => {
+                    log::error!("Failed to load scene {name}: {error}");
+                    web::set_status(Some(&format!("Couldn't load scene {name}: {error}")));
+                    // Show the panel's scene again.
+                    state.needs_present = true;
+                }
+            }
+        });
+    }
+    /// Encodes one sample with GPU timestamps around each pass, copying them
+    /// and the shader counters to a readback slot. Returns the slot, if one was
+    /// free.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn encode_profiled_sample(
+        state: &mut State,
+        command_encoder: &mut wgpu::CommandEncoder,
+        color_attachments: &[Option<wgpu::RenderPassColorAttachment<'_>>],
+    ) -> Option<usize> {
+        // === PROFILED MODE: separate passes with GPU timestamps ===
+        state.renderer.queue.write_buffer(
             state
                 .renderer
-                .queue
-                .on_submitted_work_done(move || _ = in_flight.fetch_sub(1, Ordering::AcqRel));
+                .buffers
+                .as_ref()
+                .unwrap()
+                .get("ray_counts")
+                .unwrap(),
+            0,
+            bytemuck::cast_slice(&[0u32, 0u32, 0u32]),
+        );
+        let mut query_idx: u32 = 0;
+        let readback_slot = state.renderer.acquire_profile_readback_slot();
+        let qs = state.renderer.timestamp_query_set.as_ref().unwrap();
+
+        // 1. Raygen pass
+        {
+            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("raygen"),
+                timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
+                    query_set: qs,
+                    beginning_of_pass_write_index: Some(query_idx),
+                    end_of_pass_write_index: Some(query_idx + 1),
+                }),
+            });
+            cpass.set_pipeline(state.renderer.raygen_pipeline.as_ref().unwrap());
+            cpass.set_bind_group(0, state.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
+            cpass.dispatch_workgroups(
+                state.screen_data.size.width.div_ceil(WORKGROUP_SIZE[0]),
+                state.screen_data.size.height.div_ceil(WORKGROUP_SIZE[1]),
+                WORKGROUP_SIZE[2],
+            );
+        }
+        query_idx += 2;
+
+        // 2. Bounce 0 covers the full image. Later bounces use the
+        // same compacted indirect dispatch path as normal rendering,
+        // including bounce-depth updates for Russian roulette.
+        for bounce in 0..state.renderer.ray_bounces {
+            if bounce > 0 {
+                let mut cpass = command_encoder.begin_compute_pass(
+                    &wgpu::ComputePassDescriptor {
+                        label: Some("prepare profiled dispatch"),
+                        timestamp_writes: None,
+                    },
+                );
+                cpass.set_pipeline(
+                    state.renderer.prepare_dispatch_pipeline.as_ref().unwrap(),
+                );
+                cpass.set_bind_group(
+                    0,
+                    state.renderer.prepare_bind_group.as_ref().unwrap(),
+                    &[],
+                );
+                cpass.dispatch_workgroups(1, 1, 1);
+            }
+
+            let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("pathtracer bounce"),
+                timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
+                    query_set: qs,
+                    beginning_of_pass_write_index: Some(query_idx),
+                    end_of_pass_write_index: Some(query_idx + 1),
+                }),
+            });
+            if bounce == 0 {
+                cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
+                cpass.set_bind_group(0, state.renderer.compute_bind_group.as_ref().unwrap(), &[]);
+                cpass.dispatch_workgroups(
+                    state.screen_data.size.width.div_ceil(WORKGROUP_SIZE[0]),
+                    state.screen_data.size.height.div_ceil(WORKGROUP_SIZE[1]),
+                    WORKGROUP_SIZE[2],
+                );
+            } else {
+                let bg = if bounce % 2 == 1 {
+                    state.renderer.compute_bind_group_b.as_ref().unwrap()
+                } else {
+                    state.renderer.compute_bind_group.as_ref().unwrap()
+                };
+                cpass.set_pipeline(
+                    state.renderer.compute_compact_pipeline.as_ref().unwrap(),
+                );
+                cpass.set_bind_group(0, bg, &[]);
+                cpass.dispatch_workgroups_indirect(
+                    state
+                        .renderer
+                        .buffers
+                        .as_ref()
+                        .unwrap()
+                        .get("indirect_dispatch")
+                        .unwrap(),
+                    0,
+                );
+            }
+            query_idx += 2;
         }
 
-        log::debug!(
-            "Sample {}/{}, framerate: {} fps",
-            state.screen_data.subpixel_idx,
-            state.renderer.rays_per_pixel,
-            1000u128 / time_since_last_frame.as_millis().max(1),
-        );
+        // 3. Render pass
+        {
+            let mut rpass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                multiview_mask: None,
+                color_attachments: &color_attachments,
+                depth_stencil_attachment: None,
+                occlusion_query_set: Default::default(),
+                timestamp_writes: Some(wgpu::RenderPassTimestampWrites {
+                    query_set: qs,
+                    beginning_of_pass_write_index: Some(query_idx),
+                    end_of_pass_write_index: Some(query_idx + 1),
+                }),
+            });
+            rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
+            rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
+            Self::set_aspect_preserving_viewport(
+                &mut rpass,
+                PhysicalSize::new(
+                    state.renderer.config.width,
+                    state.renderer.config.height,
+                ),
+                state.screen_data.size,
+            );
+            rpass.draw(0..3, 0..1);
+        }
+        query_idx += 2;
+
+        // Copy profiling data into an available readback slot. The
+        // buffers are mapped asynchronously after submission and
+        // consumed on a later event-loop iteration.
+        let stats_buf = state.renderer.buffers.as_ref().unwrap().get("stats").unwrap();
+        if let Some(slot_index) = readback_slot {
+            let slot = &state.renderer.profile_readbacks[slot_index];
+            command_encoder.copy_buffer_to_buffer(
+                stats_buf,
+                0,
+                &slot.stats_buffer,
+                0,
+                8 * 4,
+            );
+            command_encoder.resolve_query_set(
+                qs,
+                0..query_idx,
+                state.renderer.timestamp_resolve_buffer.as_ref().unwrap(),
+                0,
+            );
+            command_encoder.copy_buffer_to_buffer(
+                state.renderer.timestamp_resolve_buffer.as_ref().unwrap(),
+                0,
+                &slot.timestamp_buffer,
+                0,
+                (query_idx as u64) * 8,
+            );
+        }
+        command_encoder.clear_buffer(stats_buf, 0, None);
+        readback_slot
     }
 }
 
@@ -627,6 +953,7 @@ impl ApplicationHandler for RenderApp {
         let _ = event_loop;
         let mut guard = self.state.borrow_mut();
         let Some(state) = guard.as_mut() else { return };
+        let used_by_panel = state.ui.on_window_event(&state.renderer.window, &event);
 
         match event {
             WindowEvent::Resized(size) => state.resize_surface(size),
@@ -642,7 +969,7 @@ impl ApplicationHandler for RenderApp {
                     },
                 ..
             }
-            | WindowEvent::CloseRequested => event_loop.exit(),
+            | WindowEvent::CloseRequested if !used_by_panel => event_loop.exit(),
 
             WindowEvent::KeyboardInput {
                 event:
@@ -652,11 +979,12 @@ impl ApplicationHandler for RenderApp {
                         ..
                     },
                 ..
-            } if s == "R" => {
+            } if s == "R" && !used_by_panel => {
                 #[cfg(not(target_arch = "wasm32"))]
                 println!("{:#?}", state.renderer.instance.generate_report());
             }
             WindowEvent::RedrawRequested => {}
+            _ if used_by_panel => {}
             _ => {
                 state.update_window_event(event);
             }
@@ -689,6 +1017,7 @@ impl ApplicationHandler for RenderApp {
             state.renderer.window.request_redraw();
             return;
         }
+        #[cfg(not(target_arch = "wasm32"))]
         let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
         let time_since_last_frame = state.last_update_inst.elapsed();
 
@@ -696,11 +1025,6 @@ impl ApplicationHandler for RenderApp {
         // (initialisation is async), so also pick up the window size here.
         let window_size = state.renderer.window.inner_size();
         state.resize_surface(window_size);
-
-        if state.needs_present && state.screen_data.subpixel_idx >= state.renderer.rays_per_pixel {
-            Self::present_only(state);
-        }
-        state.needs_present = false;
 
         #[cfg(target_arch = "wasm32")]
         if !state.gpu_ready() {
@@ -711,214 +1035,101 @@ impl ApplicationHandler for RenderApp {
         // Apply WASD movement every frame
         state.apply_movement();
 
-        if (!state.left_mouse_down || state.renderer.continous_motion)
-            && ((state.screen_data.subpixel_idx < state.renderer.rays_per_pixel)
-                || (state.screen_data.subpixel_idx == 0
-                    && time_since_last_frame >= target_frametime))
-        {
-            state.last_update_inst = Instant::now();
-            if state.screen_data.subpixel_idx < state.renderer.rays_per_pixel {
-                state.update();
-
-                let (frame, view) = Self::acquire_frame(state);
-                let color_attachments = Self::color_attachments(&view);
-                #[allow(unused_mut)]
-                let mut command_encoder = state
-                    .renderer
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-                // Profiling mode: native-only (timestamp queries + asynchronous readback)
-                #[cfg(not(target_arch = "wasm32"))]
-                if state.renderer.profile {
-                    // === PROFILED MODE: separate passes with GPU timestamps ===
-                    state.renderer.queue.write_buffer(
-                        state
-                            .renderer
-                            .buffers
-                            .as_ref()
-                            .unwrap()
-                            .get("ray_counts")
-                            .unwrap(),
-                        0,
-                        bytemuck::cast_slice(&[0u32, 0u32, 0u32]),
-                    );
-                    let mut query_idx: u32 = 0;
-                    let readback_slot = state.renderer.acquire_profile_readback_slot();
-                    let qs = state.renderer.timestamp_query_set.as_ref().unwrap();
-
-                    // 1. Raygen pass
-                    {
-                        let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("raygen"),
-                            timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
-                                query_set: qs,
-                                beginning_of_pass_write_index: Some(query_idx),
-                                end_of_pass_write_index: Some(query_idx + 1),
-                            }),
-                        });
-                        cpass.set_pipeline(state.renderer.raygen_pipeline.as_ref().unwrap());
-                        cpass.set_bind_group(0, state.renderer.raygen_bind_group.as_ref().unwrap(), &[]);
-                        cpass.dispatch_workgroups(
-                            state.screen_data.size.width.div_ceil(WORKGROUP_SIZE[0]),
-                            state.screen_data.size.height.div_ceil(WORKGROUP_SIZE[1]),
-                            WORKGROUP_SIZE[2],
-                        );
-                    }
-                    query_idx += 2;
-
-                    // 2. Bounce 0 covers the full image. Later bounces use the
-                    // same compacted indirect dispatch path as normal rendering,
-                    // including bounce-depth updates for Russian roulette.
-                    for bounce in 0..state.renderer.ray_bounces {
-                        if bounce > 0 {
-                            let mut cpass = command_encoder.begin_compute_pass(
-                                &wgpu::ComputePassDescriptor {
-                                    label: Some("prepare profiled dispatch"),
-                                    timestamp_writes: None,
-                                },
-                            );
-                            cpass.set_pipeline(
-                                state.renderer.prepare_dispatch_pipeline.as_ref().unwrap(),
-                            );
-                            cpass.set_bind_group(
-                                0,
-                                state.renderer.prepare_bind_group.as_ref().unwrap(),
-                                &[],
-                            );
-                            cpass.dispatch_workgroups(1, 1, 1);
-                        }
-
-                        let mut cpass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("pathtracer bounce"),
-                            timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
-                                query_set: qs,
-                                beginning_of_pass_write_index: Some(query_idx),
-                                end_of_pass_write_index: Some(query_idx + 1),
-                            }),
-                        });
-                        if bounce == 0 {
-                            cpass.set_pipeline(state.renderer.compute_pipeline.as_ref().unwrap());
-                            cpass.set_bind_group(0, state.renderer.compute_bind_group.as_ref().unwrap(), &[]);
-                            cpass.dispatch_workgroups(
-                                state.screen_data.size.width.div_ceil(WORKGROUP_SIZE[0]),
-                                state.screen_data.size.height.div_ceil(WORKGROUP_SIZE[1]),
-                                WORKGROUP_SIZE[2],
-                            );
-                        } else {
-                            let bg = if bounce % 2 == 1 {
-                                state.renderer.compute_bind_group_b.as_ref().unwrap()
-                            } else {
-                                state.renderer.compute_bind_group.as_ref().unwrap()
-                            };
-                            cpass.set_pipeline(
-                                state.renderer.compute_compact_pipeline.as_ref().unwrap(),
-                            );
-                            cpass.set_bind_group(0, bg, &[]);
-                            cpass.dispatch_workgroups_indirect(
-                                state
-                                    .renderer
-                                    .buffers
-                                    .as_ref()
-                                    .unwrap()
-                                    .get("indirect_dispatch")
-                                    .unwrap(),
-                                0,
-                            );
-                        }
-                        query_idx += 2;
-                    }
-
-                    // 3. Render pass
-                    {
-                        let mut rpass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: None,
-                            multiview_mask: None,
-                            color_attachments: &color_attachments,
-                            depth_stencil_attachment: None,
-                            occlusion_query_set: Default::default(),
-                            timestamp_writes: Some(wgpu::RenderPassTimestampWrites {
-                                query_set: qs,
-                                beginning_of_pass_write_index: Some(query_idx),
-                                end_of_pass_write_index: Some(query_idx + 1),
-                            }),
-                        });
-                        rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
-                        rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
-                        Self::set_aspect_preserving_viewport(
-                            &mut rpass,
-                            PhysicalSize::new(
-                                state.renderer.config.width,
-                                state.renderer.config.height,
-                            ),
-                            state.screen_data.size,
-                        );
-                        rpass.draw(0..3, 0..1);
-                    }
-                    query_idx += 2;
-
-                    // Copy profiling data into an available readback slot. The
-                    // buffers are mapped asynchronously after submission and
-                    // consumed on a later event-loop iteration.
-                    let stats_buf = state.renderer.buffers.as_ref().unwrap().get("stats").unwrap();
-                    if let Some(slot_index) = readback_slot {
-                        let slot = &state.renderer.profile_readbacks[slot_index];
-                        command_encoder.copy_buffer_to_buffer(
-                            stats_buf,
-                            0,
-                            &slot.stats_buffer,
-                            0,
-                            8 * 4,
-                        );
-                        command_encoder.resolve_query_set(
-                            qs,
-                            0..query_idx,
-                            state.renderer.timestamp_resolve_buffer.as_ref().unwrap(),
-                            0,
-                        );
-                        command_encoder.copy_buffer_to_buffer(
-                            state.renderer.timestamp_resolve_buffer.as_ref().unwrap(),
-                            0,
-                            &slot.timestamp_buffer,
-                            0,
-                            (query_idx as u64) * 8,
-                        );
-                    }
-                    command_encoder.clear_buffer(stats_buf, 0, None);
-
-                    state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
-                    if let Some(slot_index) = readback_slot {
-                        let total_pixels = u64::from(state.screen_data.size.width)
-                            * u64::from(state.screen_data.size.height);
-                        state.renderer.begin_profile_readback(
-                            slot_index,
-                            state.screen_data.subpixel_idx,
-                            total_pixels,
-                        );
-                    }
-
-                    frame.present();
-                } else {
-                    Self::render_default_mode(state, command_encoder, &color_attachments, time_since_last_frame);
-                    frame.present();
-                }
-
-                #[cfg(target_arch = "wasm32")]
-                {
-                    Self::render_default_mode(state, command_encoder, &color_attachments, time_since_last_frame);
-                    frame.present();
-                }
-            }
-        } else {
+        let sampling = |state: &State| {
+            (!state.left_mouse_down || state.renderer.continous_motion)
+                && state.screen_data.subpixel_idx < state.renderer.rays_per_pixel
+        };
+        if !sampling(state) && !state.needs_present && !state.ui.needs_repaint() {
             #[cfg(not(target_arch = "wasm32"))]
-            {
-                let _event_loop = _event_loop;
-                _event_loop.set_control_flow(ControlFlow::WaitUntil(
-                    Instant::now() + target_frametime - time_since_last_frame,
-                ));
-            }
+            _event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + target_frametime.saturating_sub(time_since_last_frame),
+            ));
+            state.renderer.window.request_redraw();
+            return;
         }
 
+        let Some((frame, view, ui_view)) = Self::acquire_frame(state) else {
+            // Try again a frame later rather than spinning.
+            #[cfg(not(target_arch = "wasm32"))]
+            _event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + target_frametime));
+            #[cfg(target_arch = "wasm32")]
+            state.renderer.window.request_redraw();
+            return;
+        };
+
+        // Settings changed in the panel apply to this frame.
+        for change in state.run_ui() {
+            Self::apply_change(&self.state, state, change);
+        }
+
+        let color_attachments = Self::color_attachments(&view);
+        let mut command_encoder = state
+            .renderer
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let sampling = sampling(state);
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut readback_slot = None;
+        if sampling {
+            state.last_update_inst = Instant::now();
+            state.update();
+            // Profiling mode: native-only (timestamp queries + asynchronous readback)
+            #[cfg(not(target_arch = "wasm32"))]
+            if state.renderer.profile {
+                readback_slot = Self::encode_profiled_sample(state, &mut command_encoder, &color_attachments);
+            } else {
+                Self::encode_sample(state, &mut command_encoder, &color_attachments);
+            }
+            #[cfg(target_arch = "wasm32")]
+            Self::encode_sample(state, &mut command_encoder, &color_attachments);
+        } else {
+            Self::encode_present_pass(state, &mut command_encoder, &color_attachments);
+        }
+        state.needs_present = false;
+
+        let surface_size = PhysicalSize::new(state.renderer.config.width, state.renderer.config.height);
+        let ui_commands = state.ui.paint(
+            &state.renderer.device,
+            &state.renderer.queue,
+            &mut command_encoder,
+            &ui_view,
+            surface_size,
+        );
+        state
+            .renderer
+            .queue
+            .submit(ui_commands.into_iter().chain(std::iter::once(command_encoder.finish())));
+
+        if sampling {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(slot_index) = readback_slot {
+                let total_pixels = u64::from(state.screen_data.size.width)
+                    * u64::from(state.screen_data.size.height);
+                state.renderer.begin_profile_readback(
+                    slot_index,
+                    state.screen_data.subpixel_idx,
+                    total_pixels,
+                );
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                use std::sync::atomic::Ordering;
+                let in_flight = state.samples_in_flight.clone();
+                in_flight.fetch_add(1, Ordering::AcqRel);
+                state
+                    .renderer
+                    .queue
+                    .on_submitted_work_done(move || _ = in_flight.fetch_sub(1, Ordering::AcqRel));
+            }
+            log::debug!(
+                "Sample {}/{}, framerate: {} fps",
+                state.screen_data.subpixel_idx,
+                state.renderer.rays_per_pixel,
+                1000u128 / time_since_last_frame.as_millis().max(1),
+            );
+        }
+
+        state.renderer.queue.present(frame);
         state.renderer.window.request_redraw();
     }
 }
