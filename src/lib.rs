@@ -32,6 +32,10 @@ static WORKGROUP_SIZE: [u32; 3] = [16, 16, 1];
 
 static FRAMERATE: f64 = 60.0;
 
+/// Camera movement is per second, but a frame never moves it further than this
+/// many seconds' worth: when frames are slow, movement slows instead of jumping.
+static MAX_MOVEMENT_STEP: f32 = 0.05;
+
 pub enum RendererType {
     PathTracer,
     RayTracer,
@@ -54,6 +58,11 @@ struct State {
     /// The surface was resized, so the image must be presented again even if
     /// all samples are done (resizing a canvas clears it on the web).
     needs_present: bool,
+    /// When the camera last moved from held keys.
+    last_movement: Instant,
+    /// Samples submitted to the GPU that it hasn't finished yet.
+    #[cfg(target_arch = "wasm32")]
+    samples_in_flight: Arc<std::sync::atomic::AtomicU32>,
 }
 
 #[derive(Default)]
@@ -68,6 +77,13 @@ struct KeysHeld {
     arrow_right: bool,
     arrow_up: bool,
     arrow_down: bool,
+}
+
+impl KeysHeld {
+    fn any(&self) -> bool {
+        self.w || self.a || self.s || self.d || self.space || self.shift
+            || self.arrow_left || self.arrow_right || self.arrow_up || self.arrow_down
+    }
 }
 
 use std::cell::RefCell;
@@ -170,6 +186,9 @@ impl State {
             last_update_inst: Instant::now(),
             render_started: Instant::now(),
             needs_present: false,
+            last_movement: Instant::now(),
+            #[cfg(target_arch = "wasm32")]
+            samples_in_flight: Default::default(),
         }
     }
 
@@ -252,26 +271,41 @@ impl State {
     }
 
     fn apply_movement(&mut self) -> bool {
+        // The step sizes below are per frame at FRAMERATE.
+        let step = self.last_movement.elapsed().as_secs_f32().min(MAX_MOVEMENT_STEP) * FRAMERATE as f32;
+        self.last_movement = Instant::now();
         let k = &self.keys_held;
-        if !k.w && !k.a && !k.s && !k.d && !k.space && !k.shift && !k.arrow_left && !k.arrow_right && !k.arrow_up && !k.arrow_down {
+        if !k.any() {
             return false;
         }
 
-        if k.w { self.game_state.camera.move_forward(1.0); }
-        if k.s { self.game_state.camera.move_forward(-1.0); }
-        if k.d { self.game_state.camera.move_right(1.0); }
-        if k.a { self.game_state.camera.move_right(-1.0); }
-        if k.space { self.game_state.camera.move_up(1.0); }
-        if k.shift { self.game_state.camera.move_up(-1.0); }
-        if k.arrow_left { self.game_state.camera.rotate(3.0, 0.0); }
-        if k.arrow_right { self.game_state.camera.rotate(-3.0, 0.0); }
-        if k.arrow_up { self.game_state.camera.rotate(0.0, 3.0); }
-        if k.arrow_down { self.game_state.camera.rotate(0.0, -3.0); }
+        if k.w { self.game_state.camera.move_forward(step); }
+        if k.s { self.game_state.camera.move_forward(-step); }
+        if k.d { self.game_state.camera.move_right(step); }
+        if k.a { self.game_state.camera.move_right(-step); }
+        if k.space { self.game_state.camera.move_up(step); }
+        if k.shift { self.game_state.camera.move_up(-step); }
+        if k.arrow_left { self.game_state.camera.rotate(3.0 * step, 0.0); }
+        if k.arrow_right { self.game_state.camera.rotate(-3.0 * step, 0.0); }
+        if k.arrow_up { self.game_state.camera.rotate(0.0, 3.0 * step); }
+        if k.arrow_down { self.game_state.camera.rotate(0.0, -3.0 * step); }
 
         self.screen_data.inverse_camera_transform =
             self.game_state.camera.get_inverse_transform();
         self.screen_data.subpixel_idx = 0;
         true
+    }
+
+    /// Whether the GPU has caught up enough to take another sample. Nothing
+    /// paces submissions on the web, so without this the GPU falls behind by
+    /// many samples: the image lags input and then catches up in jumps. While
+    /// the camera moves, wait for all samples so the next one shows the latest
+    /// view; while it is still, keep one queued so the GPU stays busy.
+    #[cfg(target_arch = "wasm32")]
+    fn gpu_ready(&self) -> bool {
+        let in_flight = self.samples_in_flight.load(std::sync::atomic::Ordering::Acquire);
+        let camera_moving = self.keys_held.any() || self.screen_data.subpixel_idx == 0;
+        in_flight == 0 || (in_flight == 1 && !camera_moving)
     }
 
     pub fn update(&mut self) {
@@ -559,6 +593,16 @@ impl RenderApp {
         Self::encode_present_pass(state, &mut command_encoder, color_attachments);
 
         state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
+        #[cfg(target_arch = "wasm32")]
+        {
+            use std::sync::atomic::Ordering;
+            let in_flight = state.samples_in_flight.clone();
+            in_flight.fetch_add(1, Ordering::AcqRel);
+            state
+                .renderer
+                .queue
+                .on_submitted_work_done(move || _ = in_flight.fetch_sub(1, Ordering::AcqRel));
+        }
 
         log::debug!(
             "Sample {}/{}, framerate: {} fps",
@@ -653,13 +697,19 @@ impl ApplicationHandler for RenderApp {
         let window_size = state.renderer.window.inner_size();
         state.resize_surface(window_size);
 
-        // Apply WASD movement every frame
-        state.apply_movement();
-
         if state.needs_present && state.screen_data.subpixel_idx >= state.renderer.rays_per_pixel {
             Self::present_only(state);
         }
         state.needs_present = false;
+
+        #[cfg(target_arch = "wasm32")]
+        if !state.gpu_ready() {
+            state.renderer.window.request_redraw();
+            return;
+        }
+
+        // Apply WASD movement every frame
+        state.apply_movement();
 
         if (!state.left_mouse_down || state.renderer.continous_motion)
             && ((state.screen_data.subpixel_idx < state.renderer.rays_per_pixel)
