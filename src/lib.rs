@@ -49,6 +49,8 @@ struct State {
     mouselook: bool,
     keys_held: KeysHeld,
     last_update_inst: Instant,
+    /// When the current image's first sample was rendered.
+    render_started: Instant,
     /// The surface was resized, so the image must be presented again even if
     /// all samples are done (resizing a canvas clears it on the web).
     needs_present: bool,
@@ -165,6 +167,7 @@ impl State {
             mouselook: false,
             keys_held: KeysHeld::default(),
             last_update_inst: Instant::now(),
+            render_started: Instant::now(),
             needs_present: false,
         }
     }
@@ -277,7 +280,17 @@ impl State {
             bytemuck::bytes_of(&self.screen_data.generate_ubo()),
         );
 
+        if self.screen_data.subpixel_idx == 0 {
+            self.render_started = Instant::now();
+        }
         self.screen_data.subpixel_idx += 1;
+        if self.screen_data.subpixel_idx == self.renderer.rays_per_pixel {
+            log::info!(
+                "Rendered {} samples in {} millis.",
+                self.renderer.rays_per_pixel,
+                self.render_started.elapsed().as_millis()
+            );
+        }
     }
 }
 
@@ -546,7 +559,7 @@ impl RenderApp {
 
         state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
 
-        log::info!(
+        log::debug!(
             "Sample {}/{}, framerate: {} fps",
             state.screen_data.subpixel_idx,
             state.renderer.rays_per_pixel,
@@ -564,11 +577,17 @@ impl ApplicationHandler for RenderApp {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // Only used to quit, which the web build doesn't do.
+        #[cfg(target_arch = "wasm32")]
+        let _ = event_loop;
         let mut guard = self.state.borrow_mut();
         let Some(state) = guard.as_mut() else { return };
 
         match event {
             WindowEvent::Resized(size) => state.resize_surface(size),
+            // On the web there is nothing to quit to, and Escape is how the
+            // browser leaves fullscreen.
+            #[cfg(not(target_arch = "wasm32"))]
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {

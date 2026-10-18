@@ -101,19 +101,19 @@ impl RenginWgpu {
             }
         }
 
-        log::info!("backend: {:?}", backends);
+        log::debug!("backend: {:?}", backends);
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends,
             ..Default::default()
         });
-        log::info!("instance: {:?}", instance);
+        log::debug!("instance: {:?}", instance);
 
         for adapter in instance.enumerate_adapters(wgpu::Backends::all()).await {
             log::debug!("Found adapter {:?}", adapter)
         }
 
         let window_surface = instance.create_surface(window.clone()).unwrap();
-        log::info!("window_surface: {:?}", window_surface);
+        log::debug!("window_surface: {:?}", window_surface);
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -124,12 +124,12 @@ impl RenginWgpu {
             .await
             .expect("No suitable GPU adapters found on the system!");
 
-        log::info!("adapter: {:?}", adapter);
+        log::debug!("adapter: {:?}", adapter);
 
         {
             let adapter_info = adapter.get_info();
             log::info!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
-            log::info!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
+            log::debug!("{:?}\n{:?}", adapter.features(), wgpu::Features::default());
         }
 
         let optional_features =

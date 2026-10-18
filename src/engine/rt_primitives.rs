@@ -312,7 +312,7 @@ impl ScreenData {
         };
         let pixel_size = (half_width_height.x * 2f32) / size.width as f32;
 
-        log::info!("Window size: {:?}", size);
+        log::info!("Render size: {}x{}", size.width, size.height);
 
         ScreenData {
             size,
