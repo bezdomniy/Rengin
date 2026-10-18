@@ -43,7 +43,8 @@ fn webgpu_available() -> bool {
     js_sys::Reflect::get(&navigator, &"gpu".into()).is_ok_and(|gpu| gpu.is_truthy())
 }
 
-/// Attaches the window's canvas to the page. The page's CSS sizes it to fit the
+/// Attaches the window's canvas to the page and focuses it, so the keyboard
+/// moves the camera without clicking first. The page's CSS sizes it to fit the
 /// viewport; winit reports that size as Resized and the render is letterboxed.
 pub(crate) fn attach_canvas(window: &Window) {
     let canvas = window.canvas().expect("Failed to get canvas from winit window");
@@ -53,6 +54,7 @@ pub(crate) fn attach_canvas(window: &Window) {
         .expect("No #rengin-canvas element found in DOM")
         .append_child(&canvas)
         .expect("Failed to append canvas to DOM");
+    window.focus_window();
 }
 
 /// Shows `message` in the page's status line, or hides it.
