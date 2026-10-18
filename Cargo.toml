@@ -7,6 +7,13 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# The web build is the library's wasm_bindgen(start) entry point, so the binary
+# only exists on native. This also lets trunk pick the cdylib unambiguously.
+[[bin]]
+name = "rengin"
+path = "src/main.rs"
+required-features = ["native"]
+
 [features]
 default = ["native"]
 native = ["glam/std", "dep:pollster", "dep:clap", "dep:env_logger"]
