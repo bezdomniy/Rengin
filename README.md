@@ -26,7 +26,7 @@ Type `cargo run --release -- -h` for a full list of options.
 
 Key flags:
 - `-s <path>` — Scene YAML file
-- `-r <N>` — Rays (samples) per pixel (default: 8)
+- `-r <N>` — Rays (samples) per pixel (default: 1024)
 - `-b <N>` — Bounces per ray (default: 8)
 - `--render-scale <N>` — Scale the scene camera's render resolution without changing window size (default: 1)
 - `-p`, `--profile` — Enable low-overhead per-bounce GPU timestamps

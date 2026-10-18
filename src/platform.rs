@@ -70,7 +70,7 @@ impl AppConfig {
             render_scale: url_param(&params, RENDER_SCALE_PARAMS, 1.0, |scale: &f32| {
                 scale.is_finite() && *scale > 0.0
             }),
-            rays_per_pixel: url_param(&params, RAYS_PER_PIXEL_PARAMS, 8, |rays| *rays > 0),
+            rays_per_pixel: url_param(&params, RAYS_PER_PIXEL_PARAMS, 1024, |rays| *rays > 0),
             bounces: url_param(&params, BOUNCES_PARAMS, 8, |bounces| *bounces > 0),
             profile: false,
             profile_stats: false,

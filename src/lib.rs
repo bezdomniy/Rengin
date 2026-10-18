@@ -1151,7 +1151,7 @@ pub struct Args {
     #[clap(short, long)]
     whitted: bool,
     /// Number of rays per pixel
-    #[clap(short, long, default_value_t = 8)]
+    #[clap(short, long, default_value_t = 1024)]
     rays_per_pixel: u32,
     /// Internal render-resolution multiplier (independent of window DPI)
     #[clap(long, default_value_t = 1.0)]
