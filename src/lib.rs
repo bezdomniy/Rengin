@@ -605,7 +605,10 @@ impl ApplicationHandler for RenderApp {
                 };
                 let view = frame
                     .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
+                    .create_view(&wgpu::TextureViewDescriptor {
+                        format: Some(state.renderer.config.format.add_srgb_suffix()),
+                        ..Default::default()
+                    });
 
                 // create render pass descriptor and its color attachments
                 let color_attachments = [Some(wgpu::RenderPassColorAttachment {

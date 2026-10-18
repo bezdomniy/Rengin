@@ -177,6 +177,9 @@ impl RenginWgpu {
             .copied()
             .find(|format| format.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
+        // Browser canvases only offer non-sRGB formats; render through an sRGB view
+        // so the output is gamma-encoded the same way as on native.
+        let view_format = surface_format.add_srgb_suffix();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -184,7 +187,7 @@ impl RenginWgpu {
             present_mode: wgpu::PresentMode::Fifo,
             width,
             height,
-            view_formats: vec![],
+            view_formats: if view_format != surface_format { vec![view_format] } else { vec![] },
             desired_maximum_frame_latency: 2,
         };
         // println!("{} {}", width, height);
@@ -888,7 +891,7 @@ impl<'a> RenginRenderer for RenginWgpu {
                     },
                     entry_point: Some("main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: self.config.format,
+                        format: self.config.format.add_srgb_suffix(),
                         // TODO: change subpixel to blending, rather than doing it in shader
                         blend: Some(wgpu::BlendState::REPLACE),
                         // blend: Some(wgpu::BlendState::ALPHA_BLENDING),
