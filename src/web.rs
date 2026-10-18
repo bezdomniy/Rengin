@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 use winit::event_loop::{ControlFlow, EventLoop};
+use winit::platform::web::EventLoopExtWebSys;
 
 use crate::RenderApp;
 
@@ -14,6 +15,7 @@ pub fn web_main() {
     // about_to_wait paces the loop to one iteration per animation frame.
     event_loop.set_control_flow(ControlFlow::Wait);
 
-    let mut app = RenderApp::default();
-    event_loop.run_app(&mut app).unwrap();
+    // spawn_app hands the app to the browser's event loop and returns, instead of
+    // run_app's throwing a JS exception to unwind (logged as an uncaught error).
+    event_loop.spawn_app(RenderApp::default());
 }
