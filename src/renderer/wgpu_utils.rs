@@ -194,8 +194,12 @@ impl RenginWgpu {
             .find(|format| format.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
         // Browser canvases only offer non-sRGB formats; render through an sRGB view
-        // so the output is gamma-encoded the same way as on native.
-        let view_format = surface_format.add_srgb_suffix();
+        // so the output is gamma-encoded the same way as on native. The settings
+        // panel blends in gamma space, so it draws through a non-sRGB view.
+        let view_formats: Vec<_> = [surface_format.add_srgb_suffix(), surface_format.remove_srgb_suffix()]
+            .into_iter()
+            .filter(|format| *format != surface_format)
+            .collect();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -204,7 +208,7 @@ impl RenginWgpu {
             color_space: wgpu::SurfaceColorSpace::Auto,
             width,
             height,
-            view_formats: if view_format != surface_format { vec![view_format] } else { vec![] },
+            view_formats,
             desired_maximum_frame_latency: 2,
         };
         // println!("{} {}", width, height);

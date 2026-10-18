@@ -18,6 +18,9 @@ The scene yaml files are built according to the format created by Jamis Buck for
 
 Unknown keys, shape, material and transform names are reported as errors when a scene loads. Meshes are added with `add: obj` and a `file:` path relative to the scene file. Patterns, `args` and `shadow` are accepted but not rendered yet.
 
+### Settings panel:
+The panel at the top left picks the scene and sets the rays per pixel, bounces and render scale while the app runs. Natively it lists the scenes in the same directory as the `-s` scene. Bounces can't be changed while profiling.
+
 ### Options:
 Type `cargo run --release -- -h` for a full list of options.
 
@@ -43,7 +46,7 @@ The web build uses WebGPU and is built with [trunk](https://trunkrs.dev):
 ```
 trunk serve --release
 ```
-Options are URL parameters named after the CLI flags, e.g. `?scene=glass_test&rays-per-pixel=256&bounces=8&render-scale=0.5`. The short names `s`, `r` and `b` also work, as do `rpp` and `render_scale`. Invalid and unknown parameters are reported in the browser console. `scene` is the name of a scene in `assets/scenes` without `.yaml`; the web build embeds the scenes listed in `src/engine/embedded_assets.rs`.
+Options are URL parameters named after the CLI flags, e.g. `?scene=glass_test&rays-per-pixel=256&bounces=8&render-scale=0.5`. The short names `s`, `r` and `b` also work, as do `rpp` and `render_scale`. Invalid and unknown parameters are reported in the browser console. Changes made in the settings panel are written back to the URL, so it can be shared or reloaded. `scene` is the name of a scene in `assets/scenes` without `.yaml`; the web build embeds the scenes listed in `src/engine/embedded_assets.rs`.
 
 Scenes are compiled into the web build, but OBJ models are not: the build adds each model the scenes use as `models/<file name>.gz` (`scripts/gzip-models.sh`), and the web build downloads the ones the chosen scene needs. Models are looked up by file name, so a scene's models must be in `assets/models`.
 

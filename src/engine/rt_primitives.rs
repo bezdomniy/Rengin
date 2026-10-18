@@ -264,7 +264,7 @@ pub struct Ubo {
     inverse_camera_transform: [f32; 16],
     half_width_height: [f32; 2],
     pixel_size: f32,
-    sqrt_rays_per_pixel: u32,
+    pub sqrt_rays_per_pixel: u32,
     width: u32,
     height: u32,
     n_objects: u32,
@@ -289,7 +289,7 @@ pub struct ScreenData {
     /// Index of the first triangle normal in the triangles buffer.
     normals_offset: u32,
     pub subpixel_idx: u32,
-    sqrt_rays_per_pixel: u32,
+    pub sqrt_rays_per_pixel: u32,
     pub ray_bounces: u32,
 }
 
