@@ -49,6 +49,9 @@ struct State {
     mouselook: bool,
     keys_held: KeysHeld,
     last_update_inst: Instant,
+    /// The surface was resized, so the image must be presented again even if
+    /// all samples are done (resizing a canvas clears it on the web).
+    needs_present: bool,
 }
 
 #[derive(Default)]
@@ -162,6 +165,15 @@ impl State {
             mouselook: false,
             keys_held: KeysHeld::default(),
             last_update_inst: Instant::now(),
+            needs_present: false,
+        }
+    }
+
+    fn resize_surface(&mut self, size: PhysicalSize<u32>) {
+        let config = &self.renderer.config;
+        if size.width > 0 && size.height > 0 && (size.width, size.height) != (config.width, config.height) {
+            self.renderer.update_window_size(&size);
+            self.needs_present = true;
         }
     }
 
@@ -293,6 +305,76 @@ impl RenderApp {
         rpass.set_viewport(x, y, width, height, 0.0, 1.0);
     }
 
+    /// Draws the accumulated image to the surface, letterboxed to its aspect ratio.
+    fn encode_present_pass(
+        state: &State,
+        command_encoder: &mut wgpu::CommandEncoder,
+        color_attachments: &[Option<wgpu::RenderPassColorAttachment<'_>>],
+    ) {
+        let mut rpass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            multiview_mask: None,
+            color_attachments,
+            depth_stencil_attachment: None,
+            occlusion_query_set: Default::default(),
+            timestamp_writes: None,
+        });
+        rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
+        rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
+        Self::set_aspect_preserving_viewport(
+            &mut rpass,
+            PhysicalSize::new(state.renderer.config.width, state.renderer.config.height),
+            state.screen_data.size,
+        );
+        rpass.draw(0..3, 0..1);
+    }
+
+    fn acquire_frame(state: &State) -> (wgpu::SurfaceTexture, wgpu::TextureView) {
+        let frame = match state.renderer.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(_) => {
+                state
+                    .renderer
+                    .surface
+                    .configure(&state.renderer.device, &state.renderer.config);
+                state
+                    .renderer
+                    .surface
+                    .get_current_texture()
+                    .expect("Failed to acquire next surface texture!")
+            }
+        };
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(state.renderer.config.format.add_srgb_suffix()),
+            ..Default::default()
+        });
+        (frame, view)
+    }
+
+    fn color_attachments(view: &wgpu::TextureView) -> [Option<wgpu::RenderPassColorAttachment<'_>>; 1] {
+        [Some(wgpu::RenderPassColorAttachment {
+            view,
+            resolve_target: None,
+            depth_slice: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                store: wgpu::StoreOp::Store,
+            },
+        })]
+    }
+
+    /// Presents the accumulated image again without tracing new samples.
+    fn present_only(state: &State) {
+        let (frame, view) = Self::acquire_frame(state);
+        let mut command_encoder = state
+            .renderer
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        Self::encode_present_pass(state, &mut command_encoder, &Self::color_attachments(&view));
+        state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
+        frame.present();
+    }
+
     fn render_default_mode(
         state: &mut State,
         command_encoder: wgpu::CommandEncoder,
@@ -373,24 +455,7 @@ impl RenderApp {
         }
 
         // 4. Render pass
-        {
-            let mut rpass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                multiview_mask: None,
-                color_attachments,
-                depth_stencil_attachment: None,
-                occlusion_query_set: Default::default(),
-                timestamp_writes: None,
-            });
-            rpass.set_pipeline(state.renderer.render_pipeline.as_ref().unwrap());
-            rpass.set_bind_group(0, state.renderer.render_bind_group.as_ref().unwrap(), &[]);
-            Self::set_aspect_preserving_viewport(
-                &mut rpass,
-                PhysicalSize::new(state.renderer.config.width, state.renderer.config.height),
-                state.screen_data.size,
-            );
-            rpass.draw(0..3, 0..1);
-        }
+        Self::encode_present_pass(state, &mut command_encoder, color_attachments);
 
         state.renderer.queue.submit(std::iter::once(command_encoder.finish()));
 
@@ -460,13 +525,12 @@ impl ApplicationHandler for RenderApp {
         // Create window object
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
-        // On web, attach the canvas to the DOM and set its size explicitly
+        // On web, attach the canvas to the DOM. The page's CSS sizes it to fit the
+        // viewport; winit reports that size as Resized and the render is letterboxed.
         #[cfg(target_arch = "wasm32")]
         {
             use winit::platform::web::WindowExtWebSys;
             let canvas = window.canvas().expect("Failed to get canvas from winit window");
-            canvas.set_width(physical_size.width);
-            canvas.set_height(physical_size.height);
             let web_window = web_sys::window().unwrap();
             let document = web_window.document().unwrap();
             let container = document
@@ -475,8 +539,6 @@ impl ApplicationHandler for RenderApp {
             container
                 .append_child(&web_sys::Element::from(canvas))
                 .expect("Failed to append canvas to DOM");
-            // winit may not pick up the canvas size immediately, so request it
-            let _ = window.request_inner_size(physical_size);
         }
 
         let init_future = State::new(
@@ -513,11 +575,7 @@ impl ApplicationHandler for RenderApp {
         let Some(state) = guard.as_mut() else { return };
 
         match event {
-            WindowEvent::Resized(size) => {
-                if size.width > 0 && size.height > 0 {
-                    state.renderer.update_window_size(&size);
-                }
-            }
+            WindowEvent::Resized(size) => state.resize_surface(size),
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -577,8 +635,18 @@ impl ApplicationHandler for RenderApp {
         let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE);
         let time_since_last_frame = state.last_update_inst.elapsed();
 
+        // On the web the first Resized can arrive before the renderer exists
+        // (initialisation is async), so also pick up the window size here.
+        let window_size = state.renderer.window.inner_size();
+        state.resize_surface(window_size);
+
         // Apply WASD movement every frame
         state.apply_movement();
+
+        if state.needs_present && state.screen_data.subpixel_idx >= state.renderer.rays_per_pixel {
+            Self::present_only(state);
+        }
+        state.needs_present = false;
 
         if (!state.left_mouse_down || state.renderer.continous_motion)
             && ((state.screen_data.subpixel_idx < state.renderer.rays_per_pixel)
@@ -589,37 +657,8 @@ impl ApplicationHandler for RenderApp {
             if state.screen_data.subpixel_idx < state.renderer.rays_per_pixel {
                 state.update();
 
-                let frame = match state.renderer.surface.get_current_texture() {
-                    Ok(frame) => frame,
-                    Err(_) => {
-                        state
-                            .renderer
-                            .surface
-                            .configure(&state.renderer.device, &state.renderer.config);
-                        state
-                            .renderer
-                            .surface
-                            .get_current_texture()
-                            .expect("Failed to acquire next surface texture!")
-                    }
-                };
-                let view = frame
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor {
-                        format: Some(state.renderer.config.format.add_srgb_suffix()),
-                        ..Default::default()
-                    });
-
-                // create render pass descriptor and its color attachments
-                let color_attachments = [Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })];
+                let (frame, view) = Self::acquire_frame(state);
+                let color_attachments = Self::color_attachments(&view);
                 #[allow(unused_mut)]
                 let mut command_encoder = state
                     .renderer

@@ -12,21 +12,29 @@
     <style>
         body {
             margin: 0;
+            overflow: hidden;
             background: #000;
             color: #ddd;
             font-family: system-ui, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+        }
+        /* The canvas fills the viewport; the renderer letterboxes the image to the
+           scene camera's aspect ratio. */
+        #rengin-canvas, canvas {
+            display: block;
+            width: 100vw;
             height: 100vh;
+            height: 100dvh;
         }
         canvas {
-            display: block;
+            outline: none;
+            touch-action: none;
         }
         #no-webgpu {
             display: none;
+            box-sizing: border-box;
             max-width: 32em;
-            padding: 1em;
+            margin: 40vh auto 0;
+            padding: 0 16px;
             text-align: center;
         }
     </style>
