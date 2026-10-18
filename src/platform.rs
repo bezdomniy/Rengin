@@ -39,6 +39,17 @@ impl From<&super::Args> for AppConfig {
     }
 }
 
+/// URL parameter names for each option: the CLI long and short flag names,
+/// plus older web-only aliases. Profiling options are native-only.
+#[cfg(target_arch = "wasm32")]
+const SCENE_PARAMS: &[&str] = &["scene", "s"];
+#[cfg(target_arch = "wasm32")]
+const RAYS_PER_PIXEL_PARAMS: &[&str] = &["rays-per-pixel", "r", "rpp"];
+#[cfg(target_arch = "wasm32")]
+const BOUNCES_PARAMS: &[&str] = &["bounces", "b"];
+#[cfg(target_arch = "wasm32")]
+const RENDER_SCALE_PARAMS: &[&str] = &["render-scale", "render_scale"];
+
 #[cfg(target_arch = "wasm32")]
 impl AppConfig {
     pub fn from_url_params() -> Self {
@@ -46,24 +57,48 @@ impl AppConfig {
         let search = window.location().search().unwrap_or_default();
         let params = web_sys::UrlSearchParams::new_with_str(&search).unwrap();
 
+        let known = [SCENE_PARAMS, RAYS_PER_PIXEL_PARAMS, BOUNCES_PARAMS, RENDER_SCALE_PARAMS];
+        for name in params.keys() {
+            let name = name.ok().and_then(|name| name.as_string()).unwrap_or_default();
+            if !known.iter().any(|names| names.contains(&name.as_str())) {
+                log::warn!("Ignoring unknown URL parameter `{name}`");
+            }
+        }
+
         AppConfig {
-            scene: params.get("scene").unwrap_or_else(|| "cornellbox".into()),
-            render_scale: params
-                .get("render_scale")
-                .and_then(|s| s.parse().ok())
-                .filter(|scale: &f32| scale.is_finite() && *scale > 0.0)
-                .unwrap_or(1.0),
-            rays_per_pixel: params
-                .get("rpp")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(8),
-            bounces: params
-                .get("bounces")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(8),
+            scene: url_param(&params, SCENE_PARAMS, "cornellbox".to_string(), |_| true),
+            render_scale: url_param(&params, RENDER_SCALE_PARAMS, 1.0, |scale: &f32| {
+                scale.is_finite() && *scale > 0.0
+            }),
+            rays_per_pixel: url_param(&params, RAYS_PER_PIXEL_PARAMS, 8, |rays| *rays > 0),
+            bounces: url_param(&params, BOUNCES_PARAMS, 8, |bounces| *bounces > 0),
             profile: false,
             profile_stats: false,
             continuous_motion: true,
+        }
+    }
+}
+
+/// Reads the first of `names` present in the URL, falling back to `default`
+/// (with a warning) when its value doesn't parse or isn't `valid`.
+#[cfg(target_arch = "wasm32")]
+fn url_param<T: std::str::FromStr>(
+    params: &web_sys::UrlSearchParams,
+    names: &[&str],
+    default: T,
+    valid: impl Fn(&T) -> bool,
+) -> T {
+    let Some((name, value)) = names
+        .iter()
+        .find_map(|name| params.get(name).map(|value| (name, value)))
+    else {
+        return default;
+    };
+    match value.parse() {
+        Ok(parsed) if valid(&parsed) => parsed,
+        _ => {
+            log::warn!("Ignoring invalid URL parameter `{name}={value}`, using the default");
+            default
         }
     }
 }

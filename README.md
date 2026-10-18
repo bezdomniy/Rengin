@@ -43,7 +43,7 @@ The web build uses WebGPU and is built with [trunk](https://trunkrs.dev):
 ```
 trunk serve --release
 ```
-Options are URL parameters, e.g. `?scene=glass_test&rpp=256&bounces=8&render_scale=1`. Only the scenes embedded in `src/engine/embedded_assets.rs` are available (`cornellbox`, `cornellbox2`, `fresnel`, `glass_test`), and OBJ models cannot be loaded yet.
+Options are URL parameters named after the CLI flags, e.g. `?scene=glass_test&rays-per-pixel=256&bounces=8&render-scale=0.5`. The short names `s`, `r` and `b` also work, as do `rpp` and `render_scale`. Invalid and unknown parameters are reported in the browser console. Only the scenes embedded in `src/engine/embedded_assets.rs` are available (`cornellbox`, `cornellbox2`, `fresnel`, `glass_test`), and OBJ models cannot be loaded yet.
 
 Pushing to `master` deploys the web build to GitHub Pages at `/Rengin/` (`.github/workflows/pages.yml`).
 
