@@ -38,6 +38,15 @@ Timestamp readback is asynchronous, and the normal rendering path does not wait 
 
 The camera width and height in the scene YAML define the internal render resolution. Window resizing only changes presentation, preserving the camera aspect ratio. On the web, `render_scale` can also be supplied as a URL parameter.
 
+### Running in the browser:
+The web build uses WebGPU and is built with [trunk](https://trunkrs.dev):
+```
+trunk serve --release
+```
+Options are URL parameters, e.g. `?scene=glass_test&rpp=256&bounces=8&render_scale=1`. Only the scenes embedded in `src/engine/embedded_assets.rs` are available (`cornellbox`, `cornellbox2`, `fresnel`, `glass_test`), and OBJ models cannot be loaded yet.
+
+Pushing to `master` deploys the web build to GitHub Pages at `/Rengin/` (`.github/workflows/pages.yml`).
+
 ### Bugs:
 This is early days for my renderer and there are many bugs. Please let me know if you find some.
 

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rengin Path Tracer</title>
+
+    <!-- Built by trunk: the library with the `web` feature (see Trunk.toml). -->
+    <link data-trunk rel="rust" data-cargo-no-default-features data-cargo-features="web" data-wasm-opt="2" />
+    <base data-trunk-public-url />
+
+    <style>
+        body {
+            margin: 0;
+            background: #000;
+            color: #ddd;
+            font-family: system-ui, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+        }
+        #no-webgpu {
+            display: none;
+            max-width: 32em;
+            padding: 1em;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <!-- The wasm entry point appends its canvas here (src/lib.rs). -->
+    <div id="rengin-canvas"></div>
+    <p id="no-webgpu">
+        This path tracer needs WebGPU, which this browser doesn't support or has turned off.
+        Try a recent version of Chrome, Edge or Safari.
+    </p>
+    <script>
+        if (!navigator.gpu) {
+            document.getElementById("rengin-canvas").style.display = "none";
+            document.getElementById("no-webgpu").style.display = "block";
+        }
+    </script>
+</body>
+</html>

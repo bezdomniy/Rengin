@@ -1,0 +1,3 @@
+# Web build: `trunk serve` for development, `trunk build --release` for deployment.
+[build]
+target = "index.html"
